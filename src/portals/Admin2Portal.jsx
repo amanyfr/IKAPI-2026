@@ -67,16 +67,16 @@ export default function Admin2Portal() {
 
           {/* Sub Nav */}
           <div className="flex gap-1 border-t border-slate-100 pt-1 pb-2 overflow-x-auto">
-            {navBtn('approval', <Award    className="w-4 h-4" />, 'Monitoring & Approval Tanda Tangan')}
+            {navBtn('approval', <Award    className="w-4 h-4" />, 'Monitoring, Approval & TTD Surat Pengantar')}
             {navBtn('members',  <Users    className="w-4 h-4" />, 'Direktori Data Anggota')}
-            {navBtn('settings', <Settings className="w-4 h-4" />, 'Pengaturan Sistem, Biaya & Rekening')}
+            {navBtn('settings', <Settings className="w-4 h-4" />, 'Pengaturan Biaya, Rekening, Template Surat & TTD')}
           </div>
         </div>
       </header>
 
       {/* Main */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {activeTab === 'approval'  && <Admin2Approval />}
+        {activeTab === 'approval'  && <Admin2Approval onOpenSettings={() => setActiveTab('settings')} />}
         {activeTab === 'members'   && <MembersManagement />}
         {activeTab === 'settings'  && <SystemSettings />}
       </main>

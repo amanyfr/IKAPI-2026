@@ -53,7 +53,7 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  // Register
+  // Register (mendaftarkan akun baru tanpa langsung login otomatis, diarahkan ke halaman login)
   const register = async (formData) => {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
@@ -64,9 +64,6 @@ export function AuthProvider({ children }) {
     if (!res.ok) {
       throw new Error(data.error || 'Pendaftaran gagal.');
     }
-    localStorage.setItem('ikapi_token', data.token);
-    setToken(data.token);
-    setUser(data.user);
     return data;
   };
 

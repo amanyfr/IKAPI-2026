@@ -158,6 +158,26 @@ export default function Admin1Screening({ onNavigateToMembers }) {
     fetchSubmissions();
   };
 
+  // Handle Send Packet to IKAPI Pusat (PRD Section 3 & 4: Status Disetujui -> Aksi oleh Admin 1: kirim)
+  const handleSendToCentral = async (submissionId) => {
+    try {
+      const res = await fetch(`/api/submissions/${submissionId}/admin2-action`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('ikapi_token')}`
+        },
+        body: JSON.stringify({ action: 'send_to_central' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      alert(data.message);
+      fetchSubmissions();
+    } catch (err) {
+      alert('Gagal menandai dikirim ke Pusat: ' + err.message);
+    }
+  };
+
   // Handle Input No. KTA from Pusat
   const handleSaveKta = async () => {
     if (!ktaInput.trim()) {
@@ -190,6 +210,26 @@ export default function Admin1Screening({ onNavigateToMembers }) {
     }
   };
 
+  const handleExportExcel = async () => {
+    try {
+      const res = await fetch('/api/members/export', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` }
+      });
+      if (!res.ok) throw new Error('Gagal mengunduh file Excel');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Data_Anggota_IKAPI_Jawa_Barat.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Ekspor Excel gagal: ' + err.message);
+    }
+  };
+
   return (
     <div className="space-y-6">
 
@@ -197,7 +237,7 @@ export default function Admin1Screening({ onNavigateToMembers }) {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
           <div className="p-3 bg-[#0da2e7] rounded-xl text-white">
-            <ShieldCheck className="w-6 h-6 text-amber-400" />
+            <ShieldCheck className="w-6 h-6 text-white" />
           </div>
           <div>
             <h2 className="text-xl font-bold text-slate-900">
@@ -219,13 +259,13 @@ export default function Admin1Screening({ onNavigateToMembers }) {
             </button>
           )}
 
-          <a
-            href="/api/members/export"
-            download="Data_Anggota_IKAPI.xlsx"
+          <button
+            type="button"
+            onClick={handleExportExcel}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition flex items-center gap-1.5"
           >
             <Download className="w-4 h-4" /> Ekspor Excel
-          </a>
+          </button>
         </div>
       </div>
 
@@ -361,8 +401,8 @@ export default function Admin1Screening({ onNavigateToMembers }) {
 
                       <td className="py-3.5 px-4">
                         <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${sub.member_category === 'Luar Biasa'
-                            ? 'bg-purple-100 text-purple-800'
-                            : 'bg-blue-100 text-blue-800'
+                          ? 'bg-purple-100 text-purple-800'
+                          : 'bg-blue-100 text-blue-800'
                           }`}>
                           {sub.member_category || 'Biasa'}
                         </span>
@@ -377,18 +417,18 @@ export default function Admin1Screening({ onNavigateToMembers }) {
 
                       <td className="py-3.5 px-4">
                         <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${sub.status === 'Aktif'
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                            : sub.status === 'Disetujui'
-                              ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                              : sub.status === 'Menunggu Approval'
-                                ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                                : sub.status === 'Dikirim ke Pusat'
-                                  ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                                  : sub.status === 'Perlu Revisi'
-                                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                    : sub.status === 'Ditolak'
-                                      ? 'bg-red-100 text-red-800 border border-red-200'
-                                      : 'bg-slate-100 text-slate-700 border border-slate-200'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          : sub.status === 'Disetujui'
+                            ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                            : sub.status === 'Menunggu Approval'
+                              ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                              : sub.status === 'Dikirim ke Pusat'
+                                ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                : sub.status === 'Perlu Revisi'
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  : sub.status === 'Ditolak'
+                                    ? 'bg-red-100 text-red-800 border border-red-200'
+                                    : 'bg-slate-100 text-slate-700 border border-slate-200'
                           }`}>
                           {sub.status}
                         </span>
@@ -420,10 +460,23 @@ export default function Admin1Screening({ onNavigateToMembers }) {
                           {isApproved && (
                             <button
                               onClick={() => openPacketModal(sub.id)}
-                              className="px-2 py-1.5 bg-slate-100 hover:bg-blue-100 text-[#0884c4] rounded-lg text-xs font-semibold transition"
-                              title="Lihat Paket Dokumen Pusat"
+                              className="px-2.5 py-1.5 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] rounded-lg text-xs font-bold transition flex items-center gap-1"
+                              title="Lihat Paket 3 Dokumen ke Pusat"
                             >
                               <FileText className="w-3.5 h-3.5" />
+                              <span>Paket PDF</span>
+                            </button>
+                          )}
+
+                          {/* Send to Central Button if Disetujui (PRD Hal. 4: Disetujui -> Aksi oleh Admin 1: kirim) */}
+                          {sub.status === 'Disetujui' && (
+                            <button
+                              onClick={() => handleSendToCentral(sub.id)}
+                              className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold shadow transition flex items-center gap-1"
+                              title="Tandai Paket Telah Dikirim ke IKAPI Pusat"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                              <span>Kirim ke Pusat</span>
                             </button>
                           )}
 

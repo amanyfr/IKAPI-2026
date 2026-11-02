@@ -1,16 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { 
-  Building2, 
-  FileText, 
-  Save, 
-  Send, 
-  Sparkles, 
-  CheckCircle, 
-  AlertCircle, 
-  Info, 
-  Upload, 
-  ArrowLeft 
+import {
+  Save, Send, CheckCircle, Upload, ArrowLeft, ArrowRight
 } from 'lucide-react';
 
 const CITIES_JABAR = [
@@ -24,31 +15,54 @@ const CITIES_JABAR = [
 ];
 
 const SPECIALIZATIONS = [
-  'Buku Teks Pendidikan / Pelajaran Sekolah',
+  'Buku Teks Pendidikan / Sekolah',
   'Buku Akademik & Perguruan Tinggi',
   'Sastra, Puisi & Fiksi',
   'Agama & Spiritualitas',
   'Buku Anak & Bergambar',
   'Pengembangan Diri & Populer',
   'Kamus & Ensiklopedia',
-  'Ilmu Pengetahuan & Teknologi (Sains)',
+  'Ilmu Pengetahuan & Teknologi',
   'Sosial, Humaniora & Sejarah'
 ];
+
+function getRequiredDocsList(submissionType, category) {
+  if (submissionType === 'Heregistrasi') {
+    return [
+      { type: 'formulir_heregistrasi', title: 'Formulir Heregistrasi IKAPI 2026' },
+      { type: 'kta_lama', title: 'KTA Lama' },
+    ];
+  }
+  if (category === 'Biasa') {
+    return [
+      { type: 'akta_pendirian', title: 'Akta Notaris / Pendirian Perusahaan' },
+      { type: 'nib', title: 'Nomor Induk Berusaha (NIB)' },
+      { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran IKAPI 2026' },
+      { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan / Editor)' },
+    ];
+  }
+  return [
+    { type: 'sk_pembentukan', title: 'SK Pembentukan Penerbitan Buku' },
+    { type: 'domisili_press', title: 'Surat Keterangan Domisili Press' },
+    { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran IKAPI 2026' },
+    { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan / Editor)' },
+  ];
+}
 
 export default function RegistrationForm({ existingSubmission, onComplete, onCancel, initialSubmissionType, initialCategory }) {
   const { user } = useAuth();
   const [submitting, setSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState(1); // 1: Kategori & Jenis, 2: Badan Usaha, 3: Pimpinan & Redaksi, 4: Berkas & Submit
+  const [activeTab, setActiveTab] = useState(1);
+  const [selectedFiles, setSelectedFiles] = useState({});
 
-  // Form State
   const [formData, setFormData] = useState({
-    submissionType: initialSubmissionType || 'Baru', // 'Baru' | 'Heregistrasi'
-    category: initialCategory || 'Biasa', // 'Biasa' | 'Luar Biasa'
+    submissionType: initialSubmissionType || 'Baru',
+    category: initialCategory || 'Biasa',
     oldKtaNumber: '',
-    
-    // Badan Usaha
+
+    // 1. Identitas Anggota
     publisherName: '',
-    legalEntity: 'PT',
+    legalEntity: 'Perseroan Terbatas (PT)',
     nib: '',
     npwp: '',
     establishmentDate: '',
@@ -59,26 +73,52 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
     fax: '',
     email: user?.email || '',
     website: '',
-
-    // Pimpinan
     leaderName: user?.name || '',
     leaderTitle: 'Direktur Utama',
     leaderNik: '',
     leaderPhone: user?.phone || '',
     leaderEmail: user?.email || '',
-
-    // Penanggung Jawab Redaksi
     personInCharge: '',
     bnspCertificateNo: '',
     personInChargePhone: '',
 
-    // Spesialisasi
-    specialization: ['Buku Teks Pendidikan / Pelajaran Sekolah'],
-    annualBookCount: '15',
-    isbnCount: '30'
+    // 2. Profil (Khusus Anggota Baru)
+    tujuanMenjadiAnggota: '',
+    tahunMulaiUsaha: '',
+
+    // 3. Terbitan
+    specialization: ['Buku Teks Pendidikan / Sekolah'],
+    jumlahJudulTerbit: '',
+    rataRataOplah: '',
+    annualBookCount: '',
+
+    // 4. Pemasaran
+    sistemPemasaran: 'Toko Buku, Penjualan Online, & Instansi',
+    rataRataDiskon: '30',
+    sistemPenjualan: 'Tunai, Kredit, dan Konsinyasi',
+
+    // 5. Naskah
+    sistemPengadaanNaskah: 'Royalti Penulis & Beli Putus',
+    persentaseRoyalti: '10%',
+
+    // 6. Organisasi
+    jumlahKaryawanRedaksi: '',
+    jumlahKaryawanProduksi: '',
+    jumlahKaryawanPemasaran: '',
+    jumlahKaryawanAdmin: '',
+    kepemilikanKantor: 'Milik Sendiri',
+    lokasiKantor: 'Gedung Perkantoran / Ruko',
+    kantorCabang: '-',
+    liniPenerbitan: '',
+
+    // 7. Produksi
+    softwareProduksi: 'Adobe InDesign, Illustrator, Photoshop',
+    contohIsbn: '',
+    jenisKertas: 'Bookpaper, HVS, Art Carton',
+    sistemCetak: 'Cetak di Luar (Percetakan Mitra)',
+    pekerjaanOutsource: 'Percetakan & Penjilidan'
   });
 
-  // Populate if editing existing submission
   useEffect(() => {
     if (existingSubmission) {
       const parsed = typeof existingSubmission.form_data === 'string'
@@ -90,12 +130,12 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
         ...parsed,
         submissionType: existingSubmission.submission_type || prev.submissionType,
         category: existingSubmission.member_category || existingSubmission.category || prev.category,
-        oldKtaNumber: existingSubmission.old_kta_number || prev.oldKtaNumber,
-        publisherName: existingSubmission.publisher_name || prev.publisherName,
-        leaderName: existingSubmission.leader_name || prev.leaderName,
-        address: existingSubmission.address || prev.address,
-        city: existingSubmission.city || prev.city,
-        phone: existingSubmission.publisher_phone || existingSubmission.phone || prev.phone
+        oldKtaNumber: existingSubmission.old_kta_number || parsed.oldKtaNumber || prev.oldKtaNumber,
+        publisherName: existingSubmission.publisher_name || parsed.publisherName || prev.publisherName,
+        leaderName: existingSubmission.leader_name || parsed.leaderName || prev.leaderName,
+        address: existingSubmission.address || parsed.address || prev.address,
+        city: existingSubmission.city || parsed.city || prev.city,
+        phone: existingSubmission.publisher_phone || existingSubmission.phone || parsed.phone || prev.phone
       }));
     }
   }, [existingSubmission]);
@@ -107,33 +147,39 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
 
   const handleSpecializationToggle = (spec) => {
     setFormData(prev => {
-      const exists = prev.specialization.includes(spec);
-      const updated = exists
-        ? prev.specialization.filter(s => s !== spec)
-        : [...prev.specialization, spec];
+      const current = Array.isArray(prev.specialization) ? prev.specialization : [prev.specialization].filter(Boolean);
+      const exists = current.includes(spec);
+      const updated = exists ? current.filter(s => s !== spec) : [...current, spec];
       return { ...prev, specialization: updated };
     });
   };
+
+  const handleFileSelect = (docType, file) => {
+    if (!file) return;
+    setSelectedFiles(prev => ({ ...prev, [docType]: file }));
+  };
+
+  const requiredDocs = getRequiredDocsList(formData.submissionType, formData.category);
 
   const handleSubmit = async (isDraft = false) => {
     if (!isDraft) {
       if (!formData.publisherName.trim()) {
         alert('Nama penerbit wajib diisi.');
-        setActiveTab(2);
+        setActiveTab(1);
         return;
       }
       if (!formData.address.trim()) {
         alert('Alamat kantor wajib diisi.');
-        setActiveTab(2);
+        setActiveTab(1);
         return;
       }
       if (!formData.leaderName.trim()) {
         alert('Nama pimpinan wajib diisi.');
-        setActiveTab(3);
+        setActiveTab(1);
         return;
       }
       if (formData.submissionType === 'Heregistrasi' && !formData.oldKtaNumber.trim()) {
-        alert('Untuk pengajuan Heregistrasi, Nomor KTA Lama wajib dicantumkan.');
+        alert('Nomor KTA Lama wajib diisi untuk Heregistrasi.');
         setActiveTab(1);
         return;
       }
@@ -141,6 +187,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
 
     setSubmitting(true);
     try {
+      const token = localStorage.getItem('ikapi_token');
       const endpoint = existingSubmission?.id
         ? `/api/submissions/${existingSubmission.id}`
         : '/api/submissions';
@@ -150,7 +197,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('ikapi_token')}`
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
           ...formData,
@@ -162,8 +209,26 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      alert(isDraft ? 'Draf formulir berhasil disimpan!' : 'Formulir berhasil disubmit! Silakan lanjut mengunggah berkas persyaratan & bukti pembayaran.');
-      if (onComplete) onComplete(data.submissionId || existingSubmission?.id);
+      const subId = data.submissionId || existingSubmission?.id;
+
+      if (subId && Object.keys(selectedFiles).length > 0) {
+        for (const docItem of requiredDocs) {
+          const file = selectedFiles[docItem.type];
+          if (file) {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('documentType', docItem.type);
+            fd.append('documentTitle', docItem.title);
+            await fetch(`/api/submissions/${subId}/documents`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+              body: fd
+            });
+          }
+        }
+      }
+
+      if (onComplete) onComplete(subId);
     } catch (err) {
       alert('Gagal menyimpan formulir: ' + err.message);
     } finally {
@@ -171,639 +236,769 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
     }
   };
 
+  const inputCls = "w-full text-sm px-4 py-3 bg-[#f8fbfe] border border-[#b8e6fc] rounded-xl focus:bg-white focus:ring-2 focus:ring-[#dff2fd] focus:border-[#0da2e7] outline-none transition text-slate-900 font-medium";
+  const labelCls = "text-sm font-bold text-[#065986] block mb-1.5";
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      
-      {/* Top Header Card */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
+    <div className="w-full">
+      <div className="bg-white rounded-2xl shadow-lg shadow-[#0884c4]/5 border border-[#b8e6fc] overflow-hidden">
+
+        {/* Top Header */}
+        <div className="bg-white border-b border-[#d8effd] px-8 py-5 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
             {onCancel && (
               <button
                 onClick={onCancel}
-                className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition mr-1"
+                className="p-2 bg-[#f0f9ff] hover:bg-[#dff2fd] border border-[#b8e6fc] rounded-xl text-[#0884c4] transition"
                 title="Kembali"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
-            <div className="p-3 bg-[#0da2e7] rounded-xl text-amber-400">
-              <FileText className="w-6 h-6" />
-            </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-900">
-                Formulir Pendaftaran Digital Anggota IKAPI 2026
+              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+                Formulir Keanggotaan IKAPI Jawa Barat
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Pengurus Daerah Ikatan Penerbit Indonesia (IKAPI) Jawa Barat
-              </p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => handleSubmit(true)}
               disabled={submitting}
-              className="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
+              className="px-4 py-2.5 bg-[#f0f9ff] hover:bg-[#dff2fd] border border-[#b8e6fc] text-[#0884c4] text-sm font-bold rounded-xl flex items-center gap-2 transition"
             >
-              <Save className="w-4 h-4 text-slate-500" /> Simpan Draf
+              <Save className="w-4 h-4" />
+              <span>Simpan Draf</span>
             </button>
             <button
               type="button"
               onClick={() => handleSubmit(false)}
               disabled={submitting}
-              className="px-5 py-2 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-lg shadow flex items-center gap-1.5 transition"
+              className="px-5 py-2.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-sm font-extrabold rounded-xl shadow-md shadow-[#0da2e7]/20 flex items-center gap-2 transition"
             >
-              <Send className="w-4 h-4 text-amber-400" /> Submit Pengajuan
+              <Send className="w-4 h-4" />
+              <span>Submit Pengajuan</span>
             </button>
           </div>
         </div>
 
-        {/* Step Indicator Tabs */}
-        <div className="grid grid-cols-4 gap-2 mt-6 pt-4 border-t border-slate-100 text-center text-xs font-bold">
+        {/* Step Navigation */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 border-b border-[#cdeafd] bg-[#eaf6fe] text-sm font-bold">
           {[
-            { step: 1, label: 'Kategori & Jenis' },
-            { step: 2, label: 'Identitas Penerbit' },
-            { step: 3, label: 'Pimpinan & Redaksi' },
-            { step: 4, label: 'Spesialisasi & Berkas' }
+            { step: 1, label: '1. Identitas Penerbit' },
+            { step: 2, label: '2. Terbitan & Naskah' },
+            { step: 3, label: '3. Organisasi & Produksi' },
+            { step: 4, label: '4. Unggah Berkas' }
           ].map(s => (
             <button
               key={s.step}
+              type="button"
               onClick={() => setActiveTab(s.step)}
-              className={`py-2 px-3 rounded-lg transition ${
+              className={`py-4 px-4 border-b-3 transition text-center ${
                 activeTab === s.step
-                  ? 'bg-[#0da2e7] text-white shadow'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'border-[#0884c4] text-[#0884c4] bg-white font-extrabold shadow-sm'
+                  : 'border-transparent text-slate-600 hover:text-[#0884c4] hover:bg-[#f4faff]'
               }`}
             >
-              {s.step}. {s.label}
+              {s.label}
             </button>
           ))}
         </div>
-      </div>
 
-      {/* Form Content */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-6">
-        
-        {/* TAB 1: KATEGORI & JENIS PENGAJUAN */}
-        {activeTab === 1 && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-base font-bold text-slate-900 mb-1">
-                Pilih Jenis Pengajuan & Kategori Keanggotaan
-              </h3>
-              <p className="text-xs text-slate-500">
-                Pilihan ini akan menentukan persyaratan berkas dan rincian biaya resmi keanggotaan IKAPI.
-              </p>
-            </div>
+        {/* Form Body — Semua Tersusun Vertikal Ke Bawah dalam Full Container */}
+        <div className="p-8 bg-gradient-to-b from-[#f6fbff] to-white">
 
-            {/* Jenis Pengajuan */}
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-2">
-                Jenis Pengajuan:
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <label className={`p-4 rounded-xl border-2 cursor-pointer transition flex items-start space-x-3 ${
-                  formData.submissionType === 'Baru'
-                    ? 'border-[#0da2e7] bg-blue-50/30'
-                    : 'border-slate-200 hover:border-slate-300'
-                }`}>
-                  <input
-                    type="radio"
+          {/* TAB 1: IDENTITAS */}
+          {activeTab === 1 && (
+            <div className="space-y-5">
+              <div className="space-y-5 p-6 bg-[#eaf6fe]/70 rounded-2xl border border-[#b8e6fc]">
+                <div>
+                  <label className={labelCls}>Jenis Pengajuan *</label>
+                  <select
                     name="submissionType"
-                    value="Baru"
-                    checked={formData.submissionType === 'Baru'}
+                    value={formData.submissionType}
                     onChange={handleChange}
-                    className="mt-1 text-[#0884c4]"
-                  />
-                  <div>
-                    <span className="font-bold text-sm text-slate-900 block">Anggota Baru</span>
-                    <span className="text-xs text-slate-500 leading-relaxed block mt-1">
-                      Penerbit belum pernah memiliki KTA IKAPI. Total biaya Rp 1.700.000 (Uang Pangkal Rp 250rb + Iuran 24 Bulan Rp 1,2jt + Administrasi Rp 250rb).
-                    </span>
-                  </div>
-                </label>
+                    className={inputCls}
+                  >
+                    <option value="Baru">Anggota Baru</option>
+                    <option value="Heregistrasi">Heregistrasi (Perpanjangan)</option>
+                  </select>
+                </div>
 
-                <label className={`p-4 rounded-xl border-2 cursor-pointer transition flex items-start space-x-3 ${
-                  formData.submissionType === 'Heregistrasi'
-                    ? 'border-[#0da2e7] bg-blue-50/30'
-                    : 'border-slate-200 hover:border-slate-300'
-                }`}>
-                  <input
-                    type="radio"
-                    name="submissionType"
-                    value="Heregistrasi"
-                    checked={formData.submissionType === 'Heregistrasi'}
-                    onChange={handleChange}
-                    className="mt-1 text-[#0884c4]"
-                  />
-                  <div>
-                    <span className="font-bold text-sm text-slate-900 block">Heregistrasi (Anggota Lama)</span>
-                    <span className="text-xs text-slate-500 leading-relaxed block mt-1">
-                      Perpanjangan masa berlaku KTA yang telah habis. Total biaya Rp 1.200.000 (Iuran 24 Bulan).
-                    </span>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {/* KTA Lama Input if Heregistrasi */}
-            {formData.submissionType === 'Heregistrasi' && (
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
-                <label className="text-xs font-bold text-amber-900 block">
-                  Nomor KTA IKAPI Lama (Wajib untuk Heregistrasi):
-                </label>
-                <input
-                  type="text"
-                  name="oldKtaNumber"
-                  value={formData.oldKtaNumber}
-                  onChange={handleChange}
-                  placeholder="Contoh: 008/JBR/2022"
-                  className="w-full text-xs p-2.5 bg-white border border-amber-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-            )}
-
-            {/* Kategori Anggota */}
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-2">
-                Kategori Anggota IKAPI:
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <label className={`p-4 rounded-xl border-2 cursor-pointer transition flex items-start space-x-3 ${
-                  formData.category === 'Biasa'
-                    ? 'border-[#0da2e7] bg-blue-50/30'
-                    : 'border-slate-200 hover:border-slate-300'
-                }`}>
-                  <input
-                    type="radio"
+                <div>
+                  <label className={labelCls}>Kategori Keanggotaan *</label>
+                  <select
                     name="category"
-                    value="Biasa"
-                    checked={formData.category === 'Biasa'}
+                    value={formData.category}
                     onChange={handleChange}
-                    className="mt-1 text-[#0884c4]"
-                  />
-                  <div>
-                    <span className="font-bold text-sm text-slate-900 block">Anggota Biasa</span>
-                    <span className="text-xs text-slate-500 leading-relaxed block mt-1">
-                      Badan usaha penerbitan komersial berbentuk <strong>PT</strong> atau <strong>CV</strong> yang berbadan hukum sah.
-                    </span>
-                  </div>
-                </label>
+                    className={inputCls}
+                  >
+                    <option value="Biasa">Anggota Biasa (Badan Usaha)</option>
+                    <option value="Luar Biasa">Anggota Luar Biasa (Institusi)</option>
+                  </select>
+                </div>
 
-                <label className={`p-4 rounded-xl border-2 cursor-pointer transition flex items-start space-x-3 ${
-                  formData.category === 'Luar Biasa'
-                    ? 'border-[#0da2e7] bg-blue-50/30'
-                    : 'border-slate-200 hover:border-slate-300'
-                }`}>
+                {formData.submissionType === 'Heregistrasi' && (
+                  <div>
+                    <label className={labelCls}>Nomor KTA Lama *</label>
+                    <input
+                      type="text"
+                      name="oldKtaNumber"
+                      value={formData.oldKtaNumber}
+                      onChange={handleChange}
+                      placeholder="Contoh: 008/JBR/2024"
+                      className={inputCls}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-5 bg-white p-6 rounded-2xl border border-[#d6eefc]">
+                <div>
+                  <label className={labelCls}>Nama Penerbit *</label>
                   <input
-                    type="radio"
-                    name="category"
-                    value="Luar Biasa"
-                    checked={formData.category === 'Luar Biasa'}
+                    type="text"
+                    name="publisherName"
+                    value={formData.publisherName}
                     onChange={handleChange}
-                    className="mt-1 text-[#0884c4]"
+                    placeholder="Nama perusahaan / press"
+                    className={inputCls}
                   />
-                  <div>
-                    <span className="font-bold text-sm text-slate-900 block">Anggota Luar Biasa</span>
-                    <span className="text-xs text-slate-500 leading-relaxed block mt-1">
-                      Institusi pendidikan, perguruan tinggi (<strong>University Press</strong>), atau yayasan lembaga riset.
-                    </span>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Bentuk Badan Hukum *</label>
+                  <select
+                    name="legalEntity"
+                    value={formData.legalEntity}
+                    onChange={handleChange}
+                    className={inputCls}
+                  >
+                    <option value="Perseroan Terbatas (PT)">Perseroan Terbatas (PT)</option>
+                    <option value="Commanditaire Vennootschap (CV)">Commanditaire Vennootschap (CV)</option>
+                    <option value="Perguruan Tinggi (University Press)">Perguruan Tinggi (University Press)</option>
+                    <option value="Yayasan / Lembaga Pendidikan">Yayasan / Lembaga Pendidikan</option>
+                    <option value="Koperasi / Badan Hukum Lainnya">Koperasi / Badan Hukum Lainnya</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Nomor Induk Berusaha (NIB)</label>
+                  <input
+                    type="text"
+                    name="nib"
+                    value={formData.nib}
+                    onChange={handleChange}
+                    placeholder="Nomor NIB"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>NPWP</label>
+                  <input
+                    type="text"
+                    name="npwp"
+                    value={formData.npwp}
+                    onChange={handleChange}
+                    placeholder="Nomor NPWP"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Alamat Kantor *</label>
+                  <textarea
+                    rows="3"
+                    name="address"
+                    value={formData.address}
+                    onChange={handleChange}
+                    placeholder="Alamat lengkap kantor penerbit"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Kota / Kabupaten *</label>
+                  <select
+                    name="city"
+                    value={formData.city}
+                    onChange={handleChange}
+                    className={inputCls}
+                  >
+                    {CITIES_JABAR.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Kode Pos</label>
+                  <input
+                    type="text"
+                    name="postalCode"
+                    value={formData.postalCode}
+                    onChange={handleChange}
+                    placeholder="Kode pos"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Telepon *</label>
+                  <input
+                    type="text"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleChange}
+                    placeholder="Nomor telepon / HP"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Faksimili</label>
+                  <input
+                    type="text"
+                    name="fax"
+                    value={formData.fax}
+                    onChange={handleChange}
+                    placeholder="Opsional"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Email *</label>
+                  <input
+                    type="email"
+                    name="email"
+                    value={formData.email}
+                    onChange={handleChange}
+                    placeholder="Email resmi penerbit"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Website</label>
+                  <input
+                    type="text"
+                    name="website"
+                    value={formData.website}
+                    onChange={handleChange}
+                    placeholder="https://"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Nama Pimpinan *</label>
+                  <input
+                    type="text"
+                    name="leaderName"
+                    value={formData.leaderName}
+                    onChange={handleChange}
+                    placeholder="Nama lengkap pimpinan"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Jabatan Pimpinan *</label>
+                  <input
+                    type="text"
+                    name="leaderTitle"
+                    value={formData.leaderTitle}
+                    onChange={handleChange}
+                    placeholder="Direktur / Kepala Press"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Penanggung Jawab Penerbitan *</label>
+                  <input
+                    type="text"
+                    name="personInCharge"
+                    value={formData.personInCharge}
+                    onChange={handleChange}
+                    placeholder="Nama penanggung jawab"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>No. Sertifikat BNSP *</label>
+                  <input
+                    type="text"
+                    name="bnspCertificateNo"
+                    value={formData.bnspCertificateNo}
+                    onChange={handleChange}
+                    placeholder="Nomor sertifikat BNSP"
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(2)}
+                  className="px-6 py-3 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white text-sm font-bold rounded-xl shadow-md shadow-[#0884c4]/20 flex items-center gap-2 transition"
+                >
+                  <span>Selanjutnya</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: PROFIL, TERBITAN, PEMASARAN & NASKAH (Semua Ke Bawah) */}
+          {activeTab === 2 && (
+            <div className="space-y-5">
+              <div className="space-y-5 bg-white p-6 rounded-2xl border border-[#d6eefc]">
+                {formData.submissionType === 'Baru' && (
+                  <>
+                    <div>
+                      <label className={labelCls}>Tujuan Menjadi Anggota *</label>
+                      <input
+                        type="text"
+                        name="tujuanMenjadiAnggota"
+                        value={formData.tujuanMenjadiAnggota}
+                        onChange={handleChange}
+                        placeholder="Tujuan bergabung dengan IKAPI"
+                        className={inputCls}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Tahun Mulai Usaha *</label>
+                      <input
+                        type="text"
+                        name="tahunMulaiUsaha"
+                        value={formData.tahunMulaiUsaha}
+                        onChange={handleChange}
+                        placeholder="Contoh: 2021"
+                        className={inputCls}
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className={labelCls}>Jenis Terbitan</label>
+                  <div className="space-y-2 mt-1.5">
+                    {SPECIALIZATIONS.map(spec => {
+                      const current = Array.isArray(formData.specialization) ? formData.specialization : [formData.specialization];
+                      const checked = current.includes(spec);
+                      return (
+                        <label
+                          key={spec}
+                          className={`px-4 py-3 rounded-xl border text-sm cursor-pointer flex items-center gap-3 transition ${
+                            checked
+                              ? 'bg-[#eaf6fe] border-[#0da2e7] font-bold text-[#0884c4]'
+                              : 'border-[#d6eefc] bg-[#f8fbfe] text-slate-700 hover:bg-[#f0f9ff]'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => handleSpecializationToggle(spec)}
+                            className="w-4 h-4 rounded text-[#0da2e7]"
+                          />
+                          <span>{spec}</span>
+                        </label>
+                      );
+                    })}
                   </div>
-                </label>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Jumlah Judul Terbit</label>
+                  <input
+                    type="number"
+                    name="jumlahJudulTerbit"
+                    value={formData.jumlahJudulTerbit}
+                    onChange={handleChange}
+                    placeholder="0"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Rata-rata Oplah Cetakan Pertama (Eksemplar)</label>
+                  <input
+                    type="number"
+                    name="rataRataOplah"
+                    value={formData.rataRataOplah}
+                    onChange={handleChange}
+                    placeholder="1000"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Rencana Produksi (Judul / Tahun)</label>
+                  <input
+                    type="number"
+                    name="annualBookCount"
+                    value={formData.annualBookCount}
+                    onChange={handleChange}
+                    placeholder="10"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Sistem Pemasaran Buku</label>
+                  <input
+                    type="text"
+                    name="sistemPemasaran"
+                    value={formData.sistemPemasaran}
+                    onChange={handleChange}
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Rata-rata Diskon (%)</label>
+                  <input
+                    type="text"
+                    name="rataRataDiskon"
+                    value={formData.rataRataDiskon}
+                    onChange={handleChange}
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Sistem Penjualan</label>
+                  <select
+                    name="sistemPenjualan"
+                    value={formData.sistemPenjualan}
+                    onChange={handleChange}
+                    className={inputCls}
+                  >
+                    <option value="Tunai, Kredit, dan Konsinyasi">Tunai, Kredit & Konsinyasi</option>
+                    <option value="Tunai dan Konsinyasi">Tunai & Konsinyasi</option>
+                    <option value="Tunai (Cash)">Tunai</option>
+                    <option value="Konsinyasi">Konsinyasi</option>
+                    <option value="Kredit">Kredit</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Sistem Pengadaan Naskah</label>
+                  <select
+                    name="sistemPengadaanNaskah"
+                    value={formData.sistemPengadaanNaskah}
+                    onChange={handleChange}
+                    className={inputCls}
+                  >
+                    <option value="Royalti Penulis & Beli Putus">Royalti & Beli Putus</option>
+                    <option value="Sistem Royalti Penulis">Royalti Penulis</option>
+                    <option value="Beli Putus (Flat Fee)">Beli Putus</option>
+                    <option value="Ditulis Sendiri oleh Tim Internal / Dosen">Ditulis Internal</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Besaran Royalti Rata-rata (%)</label>
+                  <input
+                    type="text"
+                    name="persentaseRoyalti"
+                    value={formData.persentaseRoyalti}
+                    onChange={handleChange}
+                    className={inputCls}
+                  />
+                </div>
               </div>
-            </div>
 
-            <div className="flex justify-end pt-4">
-              <button
-                type="button"
-                onClick={() => setActiveTab(2)}
-                className="px-5 py-2 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-lg shadow transition"
-              >
-                Lanjut ke Identitas Penerbit →
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 2: IDENTITAS BADAN USAHA */}
-        {activeTab === 2 && (
-          <div className="space-y-4">
-            <h3 className="text-base font-bold text-slate-900 mb-1">
-              Data Badan Usaha / Lembaga Penerbitan
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Nama Penerbit / Lembaga Press *
-                </label>
-                <input
-                  type="text"
-                  name="publisherName"
-                  value={formData.publisherName}
-                  onChange={handleChange}
-                  placeholder="Contoh: PT Pustaka Jaya Abadi"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Bentuk Badan Hukum *
-                </label>
-                <select
-                  name="legalEntity"
-                  value={formData.legalEntity}
-                  onChange={handleChange}
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
+              <div className="flex justify-between pt-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(1)}
+                  className="px-5 py-3 bg-white border border-[#b8e6fc] text-[#0884c4] text-sm font-bold rounded-xl hover:bg-[#f0f9ff]"
                 >
-                  <option value="Perseroan Terbatas (PT)">Perseroan Terbatas (PT)</option>
-                  <option value="Commanditaire Vennootschap (CV)">Commanditaire Vennootschap (CV)</option>
-                  <option value="Perguruan Tinggi (University Press)">Perguruan Tinggi (University Press)</option>
-                  <option value="Yayasan">Yayasan</option>
-                  <option value="Koperasi / Lembaga Lain">Koperasi / Lembaga Lain</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Nomor Induk Berusaha (NIB)
-                </label>
-                <input
-                  type="text"
-                  name="nib"
-                  value={formData.nib}
-                  onChange={handleChange}
-                  placeholder="13 digit angka NIB OSS"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  NPWP Perusahaan / Lembaga
-                </label>
-                <input
-                  type="text"
-                  name="npwp"
-                  value={formData.npwp}
-                  onChange={handleChange}
-                  placeholder="00.000.000.0-000.000"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Alamat Kantor Lengkap *
-                </label>
-                <textarea
-                  rows="2"
-                  name="address"
-                  value={formData.address}
-                  onChange={handleChange}
-                  placeholder="Nama jalan, nomor gedung/kantor, RT/RW, kelurahan, kecamatan..."
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Kota / Kabupaten di Jawa Barat *
-                </label>
-                <select
-                  name="city"
-                  value={formData.city}
-                  onChange={handleChange}
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
+                  Kembali
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(3)}
+                  className="px-6 py-3 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white text-sm font-bold rounded-xl shadow-md shadow-[#0884c4]/20 flex items-center gap-2"
                 >
-                  {CITIES_JABAR.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Kode Pos
-                </label>
-                <input
-                  type="text"
-                  name="postalCode"
-                  value={formData.postalCode}
-                  onChange={handleChange}
-                  placeholder="Contoh: 40252"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Telepon Kantor *
-                </label>
-                <input
-                  type="text"
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleChange}
-                  placeholder="022-XXXXXXX"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Email Penerbit *
-                </label>
-                <input
-                  type="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  placeholder="redaksi@penerbit.co.id"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Website Penerbit
-                </label>
-                <input
-                  type="text"
-                  name="website"
-                  value={formData.website}
-                  onChange={handleChange}
-                  placeholder="https://penerbit.co.id"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Nomor Faksimili
-                </label>
-                <input
-                  type="text"
-                  name="fax"
-                  value={formData.fax}
-                  onChange={handleChange}
-                  placeholder="022-XXXXXXX"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
+                  <span>Selanjutnya</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
+          )}
 
-            <div className="flex justify-between pt-4">
-              <button
-                type="button"
-                onClick={() => setActiveTab(1)}
-                className="px-4 py-2 border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50"
-              >
-                ← Kembali
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab(3)}
-                className="px-5 py-2 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-lg shadow"
-              >
-                Lanjut ke Pimpinan & Redaksi →
-              </button>
+          {/* TAB 3: ORGANISASI & PRODUKSI (Semua Ke Bawah) */}
+          {activeTab === 3 && (
+            <div className="space-y-5">
+              <div className="space-y-5 bg-white p-6 rounded-2xl border border-[#d6eefc]">
+                <div>
+                  <label className={labelCls}>Jumlah Karyawan Redaksi (Orang)</label>
+                  <input
+                    type="number"
+                    name="jumlahKaryawanRedaksi"
+                    value={formData.jumlahKaryawanRedaksi}
+                    onChange={handleChange}
+                    placeholder="0"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Jumlah Karyawan Produksi (Orang)</label>
+                  <input
+                    type="number"
+                    name="jumlahKaryawanProduksi"
+                    value={formData.jumlahKaryawanProduksi}
+                    onChange={handleChange}
+                    placeholder="0"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Jumlah Karyawan Pemasaran (Orang)</label>
+                  <input
+                    type="number"
+                    name="jumlahKaryawanPemasaran"
+                    value={formData.jumlahKaryawanPemasaran}
+                    onChange={handleChange}
+                    placeholder="0"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Jumlah Karyawan Admin / Umum (Orang)</label>
+                  <input
+                    type="number"
+                    name="jumlahKaryawanAdmin"
+                    value={formData.jumlahKaryawanAdmin}
+                    onChange={handleChange}
+                    placeholder="0"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Kepemilikan Kantor</label>
+                  <select
+                    name="kepemilikanKantor"
+                    value={formData.kepemilikanKantor}
+                    onChange={handleChange}
+                    className={inputCls}
+                  >
+                    <option value="Milik Sendiri">Milik Sendiri</option>
+                    <option value="Sewa / Kontrak">Sewa / Kontrak</option>
+                    <option value="Gedung Kampus / Institusi Induk">Gedung Kampus / Institusi</option>
+                    <option value="Pinjam Pakai">Pinjam Pakai</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Lokasi Kantor</label>
+                  <select
+                    name="lokasiKantor"
+                    value={formData.lokasiKantor}
+                    onChange={handleChange}
+                    className={inputCls}
+                  >
+                    <option value="Gedung Perkantoran / Ruko">Gedung Perkantoran / Ruko</option>
+                    <option value="Lingkungan Kampus / Lembaga">Lingkungan Kampus / Lembaga</option>
+                    <option value="Kawasan Bisnis / Komersial">Kawasan Bisnis</option>
+                    <option value="Rumah Tinggal / Perumahan">Rumah Tinggal</option>
+                  </select>
+                </div>
+
+                {formData.submissionType === 'Heregistrasi' && (
+                  <>
+                    <div>
+                      <label className={labelCls}>Kantor Cabang</label>
+                      <input
+                        type="text"
+                        name="kantorCabang"
+                        value={formData.kantorCabang}
+                        onChange={handleChange}
+                        className={inputCls}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Lini Penerbitan / Imprint</label>
+                      <input
+                        type="text"
+                        name="liniPenerbitan"
+                        value={formData.liniPenerbitan}
+                        onChange={handleChange}
+                        className={inputCls}
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className={labelCls}>Software Produksi</label>
+                  <input
+                    type="text"
+                    name="softwareProduksi"
+                    value={formData.softwareProduksi}
+                    onChange={handleChange}
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Contoh ISBN</label>
+                  <input
+                    type="text"
+                    name="contohIsbn"
+                    value={formData.contohIsbn}
+                    onChange={handleChange}
+                    placeholder="978-623-..."
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Jenis Kertas</label>
+                  <input
+                    type="text"
+                    name="jenisKertas"
+                    value={formData.jenisKertas}
+                    onChange={handleChange}
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Pelaksanaan Cetak</label>
+                  <select
+                    name="sistemCetak"
+                    value={formData.sistemCetak}
+                    onChange={handleChange}
+                    className={inputCls}
+                  >
+                    <option value="Cetak di Luar (Percetakan Mitra)">Cetak di Luar</option>
+                    <option value="Cetak Sendiri (Memiliki Mesin Percetakan)">Cetak Sendiri</option>
+                    <option value="Kombinasi (Cetak Sendiri & Cetak di Luar)">Kombinasi</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Pekerjaan Outsource</label>
+                  <input
+                    type="text"
+                    name="pekerjaanOutsource"
+                    value={formData.pekerjaanOutsource}
+                    onChange={handleChange}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-between pt-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(2)}
+                  className="px-5 py-3 bg-white border border-[#b8e6fc] text-[#0884c4] text-sm font-bold rounded-xl hover:bg-[#f0f9ff]"
+                >
+                  Kembali
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(4)}
+                  className="px-6 py-3 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white text-sm font-bold rounded-xl shadow-md shadow-[#0884c4]/20 flex items-center gap-2"
+                >
+                  <span>Selanjutnya</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* TAB 3: PIMPINAN & REDAKSI */}
-        {activeTab === 3 && (
-          <div className="space-y-4">
-            <h3 className="text-base font-bold text-slate-900 mb-1">
-              Data Pimpinan & Penanggung Jawab Redaksi
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Nama Lengkap Pimpinan (Beserta Gelar) *
-                </label>
-                <input
-                  type="text"
-                  name="leaderName"
-                  value={formData.leaderName}
-                  onChange={handleChange}
-                  placeholder="Contoh: Dr. H. Ahmad Fauzi, M.Pd."
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Jabatan Pimpinan *
-                </label>
-                <input
-                  type="text"
-                  name="leaderTitle"
-                  value={formData.leaderTitle}
-                  onChange={handleChange}
-                  placeholder="Direktur Utama / Rektor / Kepala Press"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Nomor HP / WhatsApp Pimpinan *
-                </label>
-                <input
-                  type="text"
-                  name="leaderPhone"
-                  value={formData.leaderPhone}
-                  onChange={handleChange}
-                  placeholder="0812XXXXXXXX"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  NIK KTP Pimpinan
-                </label>
-                <input
-                  type="text"
-                  name="leaderNik"
-                  value={formData.leaderNik}
-                  onChange={handleChange}
-                  placeholder="16 digit NIK KTP"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div className="sm:col-span-2 pt-2 border-t border-slate-100">
-                <h4 className="text-xs font-bold text-[#0884c4] uppercase tracking-wider mb-2">
-                  Penanggung Jawab Editorial & Sertifikasi BNSP
-                </h4>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Nama Penanggung Jawab Redaksi / Editor *
-                </label>
-                <input
-                  type="text"
-                  name="personInCharge"
-                  value={formData.personInCharge}
-                  onChange={handleChange}
-                  placeholder="Nama Kepala Redaksi / Editor"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Nomor Sertifikat Kompetensi BNSP Editor
-                </label>
-                <input
-                  type="text"
-                  name="bnspCertificateNo"
-                  value={formData.bnspCertificateNo}
-                  onChange={handleChange}
-                  placeholder="Contoh: BNSP-EDT-2025-XXXXX"
-                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-between pt-4">
-              <button
-                type="button"
-                onClick={() => setActiveTab(2)}
-                className="px-4 py-2 border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50"
-              >
-                ← Kembali
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab(4)}
-                className="px-5 py-2 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-lg shadow"
-              >
-                Lanjut ke Spesialisasi & Berkas →
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: SPESIALISASI & RINGKASAN PERSYARATAN BERKAS */}
-        {activeTab === 4 && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-base font-bold text-slate-900 mb-1">
-                Fokus Spesialisasi Buku & Dokumen Persyaratan
-              </h3>
-              <p className="text-xs text-slate-500">
-                Pilih bidang penerbitan utama yang ditekuni oleh institusi Anda.
-              </p>
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-2">
-                Jenis Buku / Spesialisasi:
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {SPECIALIZATIONS.map(spec => {
-                  const checked = formData.specialization.includes(spec);
+          {/* TAB 4: UNGGAH BERKAS & SUBMIT */}
+          {activeTab === 4 && (
+            <div className="space-y-5">
+              <div className="divide-y divide-[#d6eefc] border border-[#b8e6fc] rounded-2xl overflow-hidden bg-white">
+                {requiredDocs.map((docItem, idx) => {
+                  const chosenFile = selectedFiles[docItem.type];
                   return (
-                    <label
-                      key={spec}
-                      className={`p-3 rounded-lg border text-xs cursor-pointer flex items-center space-x-2 transition ${
-                        checked ? 'bg-blue-50 border-[#0da2e7] font-semibold text-blue-950' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    <div
+                      key={docItem.type}
+                      className={`p-5 flex items-center justify-between gap-4 ${
+                        idx % 2 === 0 ? 'bg-white' : 'bg-[#f8fbfe]'
                       }`}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => handleSpecializationToggle(spec)}
-                        className="rounded text-[#0884c4] focus:ring-[#0da2e7]"
-                      />
-                      <span>{spec}</span>
-                    </label>
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-slate-900">{docItem.title} *</div>
+                        {chosenFile ? (
+                          <div className="text-xs text-emerald-700 font-bold flex items-center gap-1.5 mt-1">
+                            <CheckCircle className="w-4 h-4" />
+                            <span className="truncate">{chosenFile.name}</span>
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-400 mt-0.5">Format PDF / JPG / PNG</div>
+                        )}
+                      </div>
+
+                      <label className="px-4 py-2.5 bg-[#eaf6fe] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] text-xs font-extrabold rounded-xl cursor-pointer transition flex items-center gap-2 flex-shrink-0">
+                        <Upload className="w-4 h-4 text-[#0da2e7]" />
+                        <span>{chosenFile ? 'Ganti File' : 'Pilih File'}</span>
+                        <input
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          className="hidden"
+                          onChange={(e) => handleFileSelect(docItem.type, e.target.files?.[0])}
+                        />
+                      </label>
+                    </div>
                   );
                 })}
               </div>
-            </div>
 
-            {/* Berkas Checklist Preview */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Info className="w-4 h-4 text-[#0884c4]" /> Dokumen Wajib yang Harus Diunggah Setelah Ini:
-              </h4>
-              <ul className="text-xs text-slate-600 space-y-1.5 list-disc list-inside">
-                {formData.submissionType === 'Heregistrasi' ? (
-                  <>
-                    <li>Formulir Heregistrasi resmi bertandatangan</li>
-                    <li>Scan KTA IKAPI lama yang telah habis masa berlakunya</li>
-                    <li>NIB / SK Legalitas pembaruan lembaga (jika ada)</li>
-                    <li>Bukti transfer pembayaran iuran heregistrasi</li>
-                  </>
-                ) : formData.category === 'Biasa' ? (
-                  <>
-                    <li>Akta Notaris & SK Kemenkumham Pendirian/Perubahan Perusahaan</li>
-                    <li>Nomor Induk Berusaha (NIB) & NPWP Perusahaan</li>
-                    <li>Formulir Pendaftaran resmi bertandatangan</li>
-                    <li>Sertifikat Kompetensi BNSP Editor / Penerbitan</li>
-                    <li>Bukti transfer pembayaran (Uang pangkal + iuran + administrasi)</li>
-                  </>
-                ) : (
-                  <>
-                    <li>SK Rektor / Pimpinan Lembaga tentang Pembentukan University Press</li>
-                    <li>Surat Keterangan Domisili Lembaga Penerbitan Kampus</li>
-                    <li>Formulir Pendaftaran resmi bertandatangan</li>
-                    <li>Sertifikat Kompetensi BNSP Editor / Penerbitan</li>
-                    <li>Bukti transfer pembayaran resmi IKAPI</li>
-                  </>
-                )}
-              </ul>
-              <p className="text-[11px] text-[#0884c4] font-medium mt-3 bg-blue-100/60 p-2 rounded">
-                Catatan: Anda dapat mengunggah berkas-berkas di atas langsung pada dashboard setelah formulir ini disubmit.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setActiveTab(3)}
-                className="px-4 py-2 border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50"
-              >
-                ← Kembali
-              </button>
-
-              <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center justify-between gap-4 pt-4">
                 <button
                   type="button"
-                  onClick={() => handleSubmit(true)}
-                  disabled={submitting}
-                  className="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
+                  onClick={() => setActiveTab(3)}
+                  className="px-5 py-3 bg-white border border-[#b8e6fc] text-[#0884c4] text-sm font-bold rounded-xl hover:bg-[#f0f9ff]"
                 >
-                  <Save className="w-4 h-4 text-slate-500" /> Simpan sebagai Draf
+                  Kembali
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleSubmit(false)}
-                  disabled={submitting}
-                  className="px-6 py-2 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-lg shadow flex items-center gap-1.5 transition"
-                >
-                  <Send className="w-4 h-4 text-amber-400" /> Submit Formulir Pendaftaran
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit(true)}
+                    disabled={submitting}
+                    className="px-5 py-3 bg-white border border-[#b8e6fc] hover:bg-[#f0f9ff] text-[#0884c4] text-sm font-bold rounded-xl flex items-center gap-2 transition"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Simpan Draf</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit(false)}
+                    disabled={submitting}
+                    className="px-7 py-3 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white text-sm font-extrabold rounded-xl shadow-lg shadow-[#0884c4]/25 flex items-center gap-2 transition"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>{submitting ? 'Memproses...' : 'Submit Pengajuan'}</span>
+                  </button>
+                </div>
               </div>
             </div>
+          )}
 
-          </div>
-        )}
-
+        </div>
       </div>
-
     </div>
   );
 }
-

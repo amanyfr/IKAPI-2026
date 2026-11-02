@@ -75,6 +75,26 @@ export default function MembersManagement() {
     }
   };
 
+  const handleExportExcel = async () => {
+    try {
+      const res = await fetch('/api/members/export', {
+        headers: { Authorization: `Bearer ${token()}` }
+      });
+      if (!res.ok) throw new Error('Gagal mengunduh file Excel');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Data_Anggota_IKAPI_Jawa_Barat.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Ekspor Excel gagal: ' + err.message);
+    }
+  };
+
   return (
     <div className="space-y-6">
 
@@ -92,13 +112,13 @@ export default function MembersManagement() {
           </div>
         </div>
 
-        <a
-          href="/api/members/export"
-          download="Data_Anggota_IKAPI_Jawa_Barat.xlsx"
+        <button
+          type="button"
+          onClick={handleExportExcel}
           className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow transition flex items-center gap-2"
         >
           <Download className="w-4 h-4" /> Ekspor Excel (.XLSX)
-        </a>
+        </button>
       </div>
 
       {/* ── Filter & Search ── */}

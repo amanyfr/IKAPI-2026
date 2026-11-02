@@ -445,28 +445,27 @@ app.post('/api/submissions', authenticate, async (req, res) => {
 
     const submissionId = subRes.lastID;
 
-    // Create required document slots based on category & type
+    // Create required document slots based on category & type (PRD Section 5)
     const requiredDocs = [];
     if (submissionType === 'Heregistrasi') {
       requiredDocs.push(
-        { type: 'formulir_heregistrasi', title: 'Formulir Heregistrasi Resmi IKAPI 2026' },
-        { type: 'kta_lama', title: 'Scan KTA IKAPI Lama (Habis Masa Berlaku)' },
-        { type: 'nib_sk_update', title: 'NIB / SK Legalitas Terkini Lembaga' }
+        { type: 'formulir_heregistrasi', title: 'Formulir Heregistrasi IKAPI 2026' },
+        { type: 'kta_lama', title: 'KTA Lama yang Habis Masa Berlakunya' }
       );
     } else if (category === 'Biasa') {
       requiredDocs.push(
-        { type: 'akta_pendirian', title: 'Akta Notaris & SK Kemenkumham Pendirian Perusahaan' },
-        { type: 'nib_npwp', title: 'Nomor Induk Berusaha (NIB) & NPWP Perusahaan' },
-        { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran Resmi IKAPI 2026' },
-        { type: 'sertifikat_bnsp', title: 'Sertifikat Kompetensi BNSP Editor / Penerbitan' }
+        { type: 'akta_pendirian', title: 'Akta Notaris / Pendirian Perusahaan' },
+        { type: 'nib', title: 'Nomor Induk Berusaha (NIB)' },
+        { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran IKAPI 2026' },
+        { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan Buku atau Editor)' }
       );
     } else {
       // Luar Biasa (Institusi Pendidikan)
       requiredDocs.push(
-        { type: 'sk_pembentukan', title: 'SK Rektor / Pimpinan Pembentukan University Press' },
-        { type: 'domisili_press', title: 'Surat Keterangan Domisili Lembaga Penerbitan Kampus' },
-        { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran Resmi IKAPI 2026' },
-        { type: 'sertifikat_bnsp', title: 'Sertifikat Kompetensi BNSP Editor / Penerbitan' }
+        { type: 'sk_pembentukan', title: 'SK Pembentukan Penerbitan Buku' },
+        { type: 'domisili_press', title: 'Surat Keterangan Domisili Press' },
+        { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran IKAPI 2026' },
+        { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan Buku atau Editor)' }
       );
     }
 
@@ -533,23 +532,33 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
 
     const newStatus = isSubmit ? 'Menunggu Pembayaran' : sub.status;
     const submittedAt = isSubmit ? new Date().toISOString() : sub.submitted_at;
+    const subType = formData.submissionType || sub.submission_type;
+    const oldKta = formData.oldKtaNumber !== undefined ? formData.oldKtaNumber : sub.old_kta_number;
 
     await query.run(
-      `UPDATE submissions SET form_data = ?, status = ?, submitted_at = ?, updated_at = datetime('now', 'localtime')
+      `UPDATE submissions SET submission_type = ?, old_kta_number = ?, form_data = ?, status = ?, submitted_at = ?, updated_at = datetime('now', 'localtime')
        WHERE id = ?`,
-      [JSON.stringify(formData), newStatus, submittedAt, subId]
+      [subType, oldKta || null, JSON.stringify(formData), newStatus, submittedAt, subId]
     );
 
     // Also update member record if available
     if (sub.member_id && formData.publisherName) {
       await query.run(
         `UPDATE members SET
-          publisher_name = ?, leader_name = ?, address = ?, city = ?, phone = ?, email = ?,
-          person_in_charge = ?, updated_at = datetime('now', 'localtime')
+          publisher_name = ?, category = COALESCE(?, category), leader_name = ?, leader_title = COALESCE(?, leader_title),
+          leader_phone = COALESCE(?, leader_phone), legal_entity = COALESCE(?, legal_entity), nib = COALESCE(?, nib),
+          npwp = COALESCE(?, npwp), address = ?, city = ?, postal_code = COALESCE(?, postal_code),
+          phone = ?, fax = COALESCE(?, fax), email = ?, website = COALESCE(?, website),
+          person_in_charge = ?, bnsp_certificate_no = COALESCE(?, bnsp_certificate_no),
+          specialization = COALESCE(?, specialization), updated_at = datetime('now', 'localtime')
          WHERE id = ?`,
         [
-          formData.publisherName, formData.leaderName, formData.address,
-          formData.city, formData.phone, formData.email, formData.personInCharge,
+          formData.publisherName, formData.category || null, formData.leaderName, formData.leaderTitle || null,
+          formData.leaderPhone || null, formData.legalEntity || null, formData.nib || null,
+          formData.npwp || null, formData.address, formData.city, formData.postalCode || null,
+          formData.phone, formData.fax || null, formData.email, formData.website || null,
+          formData.personInCharge, formData.bnspCertificateNo || null,
+          Array.isArray(formData.specialization) ? formData.specialization.join(', ') : (formData.specialization || null),
           sub.member_id
         ]
       );
@@ -557,6 +566,7 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
 
     res.json({
       message: isSubmit ? 'Formulir berhasil disubmit. Silakan lanjut ke pembayaran.' : 'Draf berhasil diperbarui.',
+      submissionId: Number(subId),
       status: newStatus
     });
   } catch (err) {

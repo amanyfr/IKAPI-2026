@@ -40,6 +40,7 @@ export default function AuthPage() {
   const handleRegister = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
     if (regPassword.length < 6) { setError('Kata sandi minimal 6 karakter.'); return; }
     setLoading(true);
     try {
@@ -52,7 +53,14 @@ export default function AuthPage() {
         category:      'Biasa',
         legalEntity:   'PT'
       });
-      setSuccess('Akun berhasil dibuat! Mengarahkan ke dashboard...');
+      setLoginEmail(regEmail);
+      setLoginPassword('');
+      setRegName('');
+      setRegEmail('');
+      setRegPassword('');
+      setRegPhone('');
+      setActiveTab('login');
+      setSuccess('Pendaftaran akun berhasil! Silakan masuk menggunakan email dan kata sandi Anda.');
     } catch (err) {
       setError(err.message || 'Pendaftaran gagal. Silakan coba kembali.');
     } finally { setLoading(false); }
@@ -78,19 +86,6 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-[#f8fbfe] flex flex-col font-sans">
-
-      {/* ── Top Bar ── */}
-      <header className="bg-white border-b border-slate-100 shadow-sm">
-        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center">
-          <div className="flex items-center gap-3">
-            <img src="/logo-ikapi.jpg" alt="IKAPI" className="w-10 h-10 rounded-xl object-cover" />
-            <div className="leading-tight">
-              <p className="font-black text-[#0da2e7] text-base tracking-tight">IKAPI</p>
-              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Pengurus Daerah Jawa Barat</p>
-            </div>
-          </div>
-        </div>
-      </header>
 
       {/* ── Main ── */}
       <main className="flex-1 flex items-center justify-center px-4 py-12">
@@ -123,6 +118,13 @@ export default function AuthPage() {
 
               {/* Kartu body */}
               <div className="px-8 py-7 space-y-5">
+                {success && (
+                  <div className="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-sm text-emerald-700 font-medium">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-500" />
+                    <span>{success}</span>
+                  </div>
+                )}
+
                 {error && (
                   <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl text-sm text-red-700">
                     <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-400" />
@@ -230,6 +232,13 @@ export default function AuthPage() {
 
               {/* Kartu body */}
               <div className="px-8 py-7 space-y-5">
+                {success && (
+                  <div className="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-sm text-emerald-700 font-medium">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-500" />
+                    <span>{success}</span>
+                  </div>
+                )}
+
                 {error && (
                   <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl text-sm text-red-700">
                     <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-400" />

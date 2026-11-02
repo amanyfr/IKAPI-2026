@@ -12,11 +12,10 @@ export default function Admin1Portal() {
   const navBtn = (tab, icon, label) => (
     <button
       onClick={() => setActiveTab(tab)}
-      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
-        activeTab === tab
+      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === tab
           ? 'bg-[#0da2e7] text-white shadow-sm shadow-[#0da2e7]/30'
           : 'text-slate-600 hover:text-[#0da2e7] hover:bg-[#f0f9ff]'
-      }`}
+        }`}
     >
       {icon}
       <span>{label}</span>
@@ -67,9 +66,8 @@ export default function Admin1Portal() {
 
           {/* Sub Nav */}
           <div className="flex gap-1 border-t border-slate-100 pt-1 pb-2 overflow-x-auto">
-            {navBtn('screening', <ShieldCheck className="w-4 h-4" />, 'Screening Berkas & Pembayaran')}
-            {navBtn('members',   <Users       className="w-4 h-4" />, 'Kelola Data Anggota (Input KTA)')}
-            {navBtn('new_form',  <FileEdit    className="w-4 h-4" />, 'Bantu Formulir Pemohon')}
+            {navBtn('screening', <ShieldCheck className="w-4 h-4" />, 'Daftar Pengajuan Masuk, Screening Berkas & Pembayaran')}
+            {navBtn('members', <Users className="w-4 h-4" />, 'Kelola Data Anggota, Ekspor Excel & Input No. KTA')}
           </div>
         </div>
       </header>
@@ -80,12 +78,6 @@ export default function Admin1Portal() {
           <Admin1Screening onNavigateToMembers={() => setActiveTab('members')} />
         )}
         {activeTab === 'members' && <MembersManagement />}
-        {activeTab === 'new_form' && (
-          <RegistrationForm
-            onComplete={() => setActiveTab('screening')}
-            onCancel={() => setActiveTab('screening')}
-          />
-        )}
       </main>
 
       {/* Footer */}
