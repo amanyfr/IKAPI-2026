@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================
+   CSS Custom Properties — Warna Resmi IKAPI
+   Biru logo IKAPI: #0da2e7
+   ============================================= */
+:root {
+  --ikapi-primary:    #0da2e7;
+  --ikapi-primary-dk: #0884c4;
+  --ikapi-primary-lt: #dff2fd;
+  --ikapi-bg:         #f8fbfe;
+}
+
+@layer base {
+  body {
+    @apply bg-[#f8fbfe] text-slate-800 antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Focus outline IKAPI blue */
+  *:focus-visible {
+    outline: 2px solid #0da2e7;
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Tombol primer IKAPI */
+  .btn-ikapi {
+    @apply bg-ikapi-500 hover:bg-ikapi-600 active:bg-ikapi-700
+           text-white font-bold rounded-xl
+           shadow-lg shadow-ikapi-500/20
+           transition-all duration-150;
+  }
+
+  /* Badge/pill IKAPI */
+  .badge-ikapi {
+    @apply bg-ikapi-100 text-ikapi-700 font-semibold
+           border border-ikapi-200 rounded-full px-2.5 py-0.5 text-xs;
+  }
+
+  /* Card standar */
+  .card {
+    @apply bg-white rounded-2xl border border-slate-100
+           shadow-sm shadow-slate-200/60;
+  }
+}
+
+/* =============================================
+   Custom Scrollbar — IKAPI Blue
+   ============================================= */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #f0f9ff;
+}
+::-webkit-scrollbar-thumb {
+  background: #7ad2f9;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #0da2e7;
+}
+
+/* =============================================
+   Print Styles
+   ============================================= */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+}
