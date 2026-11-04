@@ -63,6 +63,7 @@ export async function runSeed() {
   const existingUsers = await query.all('SELECT * FROM users');
   if (existingUsers.length > 0) {
     console.log(`Database already has ${existingUsers.length} users. Skipping user & demo seeding.`);
+    await ensureAdminAccount();
     return;
   }
 
@@ -70,21 +71,29 @@ export async function runSeed() {
   const hashedPassword = await bcryptjs.hash('password123', salt);
 
   // Users to create:
-  // Admin 1, Admin 2, Anggota 1 (Mizan), Anggota 2 (Unpad), Anggota 3 (Baru), Anggota 4 (Heregistrasi)
+  // Sekretaris, Ketua, Anggota 1 (Mizan), Anggota 2 (Unpad), Anggota 3 (Baru), Anggota 4 (Heregistrasi)
   const users = [
     {
-      name: 'Rian Pratama, S.Kom (Verifikator)',
-      email: 'admin1@ikapi-jabar.or.id',
+      name: 'Administrator Sistem IKAPI Jabar',
+      email: 'admin@ikapi-jabar.or.id',
       password: hashedPassword,
-      role: 'Admin 1',
+      role: 'Admin',
+      phone: '081234567890',
+      email_verified_at: '2026-01-10 08:00:00'
+    },
+    {
+      name: 'Drs. H. Anwar Rosyid, M.Si. (Sekretaris)',
+      email: 'sekretaris@ikapi-jabar.or.id',
+      password: hashedPassword,
+      role: 'Sekretaris',
       phone: '081234567891',
       email_verified_at: '2026-01-10 08:00:00'
     },
     {
       name: 'Dr. H. Mahpudi, M.T. (Ketua)',
-      email: 'admin2@ikapi-jabar.or.id',
+      email: 'ketua@ikapi-jabar.or.id',
       password: hashedPassword,
-      role: 'Admin 2',
+      role: 'Ketua',
       phone: '081234567892',
       email_verified_at: '2026-01-10 08:00:00'
     },
@@ -328,7 +337,7 @@ export async function runSeed() {
         email: 'press@unpad.ac.id',
         city: 'Kabupaten Sumedang'
       }),
-      'Semua berkas persyaratan dan bukti pembayaran terverifikasi valid oleh Admin 1. Diteruskan ke Admin 2 untuk persetujuan surat pengantar.'
+      'Semua berkas persyaratan dan bukti pembayaran terverifikasi valid oleh Sekretaris. Diteruskan ke Ketua untuk persetujuan surat pengantar.'
     ]
   );
 
@@ -379,7 +388,7 @@ export async function runSeed() {
         email: 'redaksi@nuansacendekia.com',
         city: 'Kota Bandung'
       }),
-      'Catatan Verifikasi Admin 1: Scan Sertifikat BNSP Penanggung Jawab Redaksi terpotong pada nomor registrasi. Mohon unggah ulang dengan scan yang lebih jelas.'
+      'Catatan Verifikasi Sekretaris: Scan Sertifikat BNSP Penanggung Jawab Redaksi terpotong pada nomor registrasi. Mohon unggah ulang dengan scan yang lebih jelas.'
     ]
   );
 
@@ -407,7 +416,7 @@ export async function runSeed() {
         245000,
         'application/pdf',
         doc.status,
-        userIds['admin1@ikapi-jabar.or.id']
+        userIds['sekretaris@ikapi-jabar.or.id']
       ]
     );
   }
@@ -463,7 +472,7 @@ export async function runSeed() {
         'application/pdf',
         doc.status,
         doc.notes || null,
-        userIds['admin1@ikapi-jabar.or.id']
+        userIds['sekretaris@ikapi-jabar.or.id']
       ]
     );
   }
@@ -492,7 +501,7 @@ export async function runSeed() {
       '131-00-1928371-2',
       '2026-02-11',
       'Valid',
-      userIds['admin1@ikapi-jabar.or.id']
+      userIds['sekretaris@ikapi-jabar.or.id']
     ]
   );
 
@@ -545,7 +554,7 @@ export async function runSeed() {
       '021-988-7712',
       '2026-02-15',
       'Valid',
-      userIds['admin1@ikapi-jabar.or.id']
+      userIds['sekretaris@ikapi-jabar.or.id']
     ]
   );
 
@@ -555,7 +564,31 @@ export async function runSeed() {
     fs.writeFileSync(samplePdfPath, '%PDF-1.4 Mock IKAPI Document Sample %EOF');
   }
 
+  await query.run(
+    `UPDATE users SET
+       onboarded_at = datetime('now', 'localtime'),
+       member_type = CASE WHEN EXISTS (
+         SELECT 1 FROM submissions s WHERE s.user_id = users.id AND s.submission_type = 'Heregistrasi'
+       ) THEN 'Lama' ELSE 'Baru' END,
+       member_category = COALESCE((SELECT m.category FROM members m WHERE m.user_id = users.id LIMIT 1), 'Biasa')
+     WHERE role = 'Anggota'`
+  );
+
   console.log('Database seeding completed successfully!');
+}
+
+// Akun Admin (kelola sistem & akun) untuk database yang dibuat sebelum peran Admin ada
+async function ensureAdminAccount() {
+  const admin = await query.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+  if (admin) return;
+  const salt = await bcryptjs.genSalt(10);
+  const hashedPassword = await bcryptjs.hash('password123', salt);
+  await query.run(
+    `INSERT INTO users (name, email, password, role, phone, email_verified_at)
+     VALUES (?, ?, ?, 'Admin', ?, datetime('now', 'localtime'))`,
+    ['Administrator Sistem IKAPI Jabar', 'admin@ikapi-jabar.or.id', hashedPassword, '081234567890']
+  );
+  console.log('Akun Admin dibuat: admin@ikapi-jabar.or.id');
 }
 
 // Run directly if called as a script

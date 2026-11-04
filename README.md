@@ -3,8 +3,8 @@
 
 Aplikasi web sistem pendaftaran dan pendataan anggota IKAPI Jawa Barat dengan halaman autentikasi mandiri (Login & Register bertema latar belakang putih dan aksen warna biru cerah / bukan navy) serta **pemisahan halaman penuh (portal mandiri) per peran pengguna**:
 1. **Portal Anggota (Pemohon Keanggotaan)**
-2. **Portal Admin 1 (Screening & Verifikasi Berkas)**
-3. **Portal Admin 2 (Ketua & Sekretaris / Approval Pimpinan)**
+2. **Portal Sekretaris (Screening & Verifikasi Berkas)**
+3. **Portal Ketua (Ketua & Sekretaris / Approval Pimpinan)**
 
 ---
 
@@ -12,7 +12,7 @@ Aplikasi web sistem pendaftaran dan pendataan anggota IKAPI Jawa Barat dengan ha
 - **Latar Belakang:** Putih bersih (`bg-white` & border halus slate).
 - **Tema Aksen Tombol & Elemen:** **Biru Cerah / Biru-Biru (`bg-blue-600` / `#2563eb`)**, bukan navy gelap.
 - **Tab Masuk (Login):**
-  - Pemilihan peran cepat: **Anggota**, **Admin 1**, **Admin 2** (dengan pengisian otomatis kredensial demo untuk kemudahan pengujian).
+  - Pemilihan peran cepat: **Anggota**, **Sekretaris**, **Ketua** (dengan pengisian otomatis kredensial demo untuk kemudahan pengujian).
   - Form input email & kata sandi dengan deteksi otomatis role pengguna.
   - Tombol masuk berwarna biru cerah dengan animasi loading responsif.
   - Opsi login langsung 1-klik untuk setiap peran.
@@ -39,12 +39,12 @@ Aplikasi web sistem pendaftaran dan pendataan anggota IKAPI Jawa Barat dengan ha
 
 ---
 
-### 2. Portal Admin 1 (Screening & Verifikasi Berkas)
+### 2. Portal Sekretaris (Screening & Verifikasi Berkas)
 - **Screening Berkas & Pembayaran:**
   - Tabel pengajuan masuk dengan filter 9 status, jenis pengajuan (*Baru* / *Heregistrasi*), kategori (*Biasa* / *Luar Biasa*), dan pencarian instan.
   - Modal *screening* berkas: memeriksa dokumen satu per satu dan menandai **Sesuai** atau **Perlu Revisi** disertai catatan perbaikan spesifik.
   - Verifikasi pembayaran mencocokkan nominal dan bukti mutasi rekening.
-  - Tindakan: **Kembalikan ke Pemohon untuk Revisi** atau **Loloskan & Teruskan ke Admin 2** (otomatis men-generate nomor surat resmi `{urut}/PD-Ikapi Jabar/{bulan romawi}/{tahun}`).
+  - Tindakan: **Kembalikan ke Pemohon untuk Revisi** atau **Loloskan & Teruskan ke Ketua** (otomatis men-generate nomor surat resmi `{urut}/PD-Ikapi Jabar/{bulan romawi}/{tahun}`).
 - **Kelola Data Anggota (Input No. KTA):**
   - Direktori seluruh anggota penerbit terdaftar.
   - Tombol **Ekspor Data ke Format Excel (.xlsx)**.
@@ -53,12 +53,12 @@ Aplikasi web sistem pendaftaran dan pendataan anggota IKAPI Jawa Barat dengan ha
 
 ---
 
-### 3. Portal Admin 2 (Ketua & Sekretaris / Approval Pimpinan)
+### 3. Portal Ketua (Ketua & Sekretaris / Approval Pimpinan)
 - **Monitoring & Dashboard Eksekutif:**
   - Kartu KPI ringkasan: antrian approval, siap kirim ke Pusat, anggota aktif, dan total iuran kas masuk.
   - Alur *funnel* visual posisi seluruh pengajuan dalam 9 tahapan sistem.
 - **Antrian Approval & Tanda Tangan Digital:**
-  - Review pengajuan yang telah lolos verifikasi berkas & pembayaran dari Admin 1 (*Menunggu Approval*).
+  - Review pengajuan yang telah lolos verifikasi berkas & pembayaran dari Sekretaris (*Menunggu Approval*).
   - Pembubuhan tanda tangan digital resmi (Ketua: *Dr. H. Mahpudi, M.T.* & Sekretaris: *Drs. H. Anwar Rosyid, M.Si.*) serta stempel resmi PD IKAPI Jawa Barat.
   - Keputusan: **Setujui** (menerbitkan surat pengantar resmi & paket 3 dokumen) atau **Tolak** (disertai alasan penolakan tertulis wajib).
 - **Ekspedisi Dokumen ke IKAPI Pusat:**
@@ -75,10 +75,11 @@ Aplikasi web sistem pendaftaran dan pendataan anggota IKAPI Jawa Barat dengan ha
 
 | Peran Pengguna | Email | Kata Sandi | Halaman / Portal |
 |---|---|---|---|
+| **Admin** | `admin@ikapi-jabar.or.id` | `password123` | Portal Admin (Kelola Akun & Pengaturan Sistem) |
 | **Anggota Biasa** | `mizan@penerbit.id` | `password123` | Portal Anggota (PT Mizan Pustaka) |
 | **Anggota Luar Biasa** | `press@unpad.ac.id` | `password123` | Portal Anggota (Unpad Press) |
-| **Admin 1** | `admin1@ikapi-jabar.or.id` | `password123` | Portal Admin 1 (Screening & Verifikasi) |
-| **Admin 2** | `admin2@ikapi-jabar.or.id` | `password123` | Portal Admin 2 (Ketua & Sekretaris / Approval) |
+| **Sekretaris** | `sekretaris@ikapi-jabar.or.id` | `password123` | Portal Sekretaris (Screening & Verifikasi) |
+| **Ketua** | `ketua@ikapi-jabar.or.id` | `password123` | Portal Ketua (Approval & Tanda Tangan Surat) |
 
 ---
 

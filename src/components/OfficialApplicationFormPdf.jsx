@@ -1,9 +1,12 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Printer, Download, FileSpreadsheet } from 'lucide-react';
 import { jsPDF } from 'jspdf';
+import { PengurusSignatureBlock, drawPengurusSignaturesPdf } from './PengurusSignature';
 
-export default function OfficialApplicationFormPdf({ submission }) {
-  const printRef = useRef(null);
+const PENGESAHAN_TEXT = 'Formulir ini telah diperiksa dan disahkan oleh Pengurus Daerah IKAPI Jawa Barat.';
+
+// `signing` (opsional): mode pembubuhan TTD pada kolom pengesahan pengurus (lihat PengurusSignature)
+export default function OfficialApplicationFormPdf({ submission, settings, signing = null }) {
   if (!submission) return null;
 
   const formData = typeof submission.form_data === 'string'
@@ -133,12 +136,26 @@ export default function OfficialApplicationFormPdf({ submission }) {
     doc.setFont('times', 'bold');
     doc.text(submission.leader_name || formData.leaderName || 'Pimpinan Penerbit', 140, y + 22);
 
+    // Pengesahan Pengurus Daerah (TTD Ketua & Sekretaris)
+    y += 34;
+    if (y > 225) {
+      doc.addPage();
+      y = 25;
+    }
+    doc.setFont('times', 'italic');
+    doc.setFontSize(9);
+    doc.text(PENGESAHAN_TEXT, 105, y, { align: 'center' });
+    drawPengurusSignaturesPdf(doc, {
+      submission, settings, docKey: 'formulir', y: y + 10,
+      heading: ['PENGESAHAN PENGURUS DAERAH', 'IKAPI JAWA BARAT'],
+    });
+
     doc.save(`Formulir_IKAPI_2026_${submission.publisher_name ? submission.publisher_name.replace(/\s+/g, '_') : 'Pemohon'}.pdf`);
   };
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-      <div className="bg-[#f0f9ff] px-6 py-3 border-b border-[#b8e6fc] flex flex-wrap items-center justify-between gap-3 no-print">
+      <div className={`bg-[#f0f9ff] px-6 py-3 border-b border-[#b8e6fc] flex-wrap items-center justify-between gap-3 no-print ${signing ? 'hidden' : 'flex'}`}>
         <div className="flex items-center gap-2">
           <FileSpreadsheet className="w-5 h-5 text-[#0da2e7]" />
           <span className="font-bold text-slate-800 text-sm">
@@ -161,7 +178,7 @@ export default function OfficialApplicationFormPdf({ submission }) {
         </div>
       </div>
 
-      <div ref={printRef} className="p-8 sm:p-10 max-w-3xl mx-auto font-sans text-slate-900 bg-white space-y-6">
+      <div className="p-8 sm:p-10 max-w-3xl mx-auto font-sans text-slate-900 bg-white space-y-6">
         {/* Header */}
         <div className="text-center border-b-2 border-slate-800 pb-4">
           <h2 className="text-base sm:text-lg font-black tracking-wide text-[#0884c4] uppercase">
@@ -259,6 +276,19 @@ export default function OfficialApplicationFormPdf({ submission }) {
               <p className="text-slate-500">{submission.leader_title || formData.leaderTitle || 'Pimpinan'}</p>
             </div>
           </div>
+        </div>
+
+        {/* Pengesahan Pengurus Daerah */}
+        <div className="border-t border-dashed border-slate-300 pt-4">
+          <p className="text-xs text-slate-500 italic text-center">{PENGESAHAN_TEXT}</p>
+          <PengurusSignatureBlock
+            submission={submission}
+            settings={settings}
+            docKey="formulir"
+            signing={signing}
+            heading={<>PENGESAHAN PENGURUS DAERAH<br />IKAPI JAWA BARAT</>}
+            className="mt-10 pt-2"
+          />
         </div>
       </div>
     </div>

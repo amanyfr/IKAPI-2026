@@ -46,6 +46,40 @@
     @apply bg-white rounded-2xl border border-slate-100
            shadow-sm shadow-slate-200/60;
   }
+
+  /* ── Permukaan putih bersih untuk semua portal (tanpa efek kaca) ── */
+
+  /* Latar halaman: gradasi biru sangat muda agar kartu putih tetap terlihat terpisah */
+  .portal-bg {
+    @apply bg-gradient-to-br from-sky-100 via-slate-50 to-blue-100;
+  }
+
+  /* Kartu/section utama */
+  .card-surface {
+    @apply bg-white rounded-3xl border border-slate-200/70
+           shadow-[0_10px_30px_-15px_rgba(15,40,90,0.25)];
+  }
+
+  /* Kartu kecil (filter, statistik) */
+  .panel-surface {
+    @apply bg-white rounded-2xl border border-slate-200/70
+           shadow-[0_6px_18px_-10px_rgba(15,40,90,0.22)];
+  }
+
+  /* Kotak di dalam kartu (rincian, form, berkas) */
+  .panel-inner {
+    @apply bg-slate-50 rounded-2xl border border-slate-200/70;
+  }
+
+  /* Modal / dialog */
+  .modal-surface {
+    @apply bg-white rounded-3xl border border-slate-200 shadow-2xl shadow-slate-900/25;
+  }
+
+  /* Footer portal */
+  .bar-surface {
+    @apply bg-white border-t border-slate-200;
+  }
 }
 
 /* =============================================
@@ -80,4 +114,120 @@
     background: white !important;
     color: black !important;
   }
+}
+
+/* =============================================
+   Header portal admin — gradasi gelap ke biru
+   seperti footer ikapi.org, dengan pola titik
+   ============================================= */
+.brand-header {
+  background: linear-gradient(100deg, #0b1120 0%, #0b1a4a 42%, #0a3bb8 100%);
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow: 0 6px 24px -10px rgb(8 38 145 / 0.5);
+}
+.brand-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgb(255 255 255 / 0.12) 1px, transparent 1.6px);
+  background-size: 18px 18px;
+  -webkit-mask-image: linear-gradient(to right, transparent 10%, black 85%);
+  mask-image: linear-gradient(to right, transparent 10%, black 85%);
+}
+.brand-header > * {
+  position: relative;
+}
+
+/* =============================================
+   Tema lembut portal Anggota
+   Latar abu muda, kartu putih keabuan bersudut besar,
+   tombol pil putih, dan widget aksen berwarna cerah.
+   ============================================= */
+.theme-soft {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif; /* sama dengan semua dashboard */
+  color: #1f2430;
+  background: #eceef2;
+}
+.theme-soft .card-surface {
+  background: #f6f7f9;
+  border: 1px solid #ffffff;
+  border-radius: 28px;
+  box-shadow: inset 0 1px 0 #ffffff, 0 12px 32px -20px rgb(30 40 60 / 0.35);
+}
+.theme-soft .panel-surface {
+  background: #f6f7f9;
+  border: 1px solid #ffffff;
+  border-radius: 22px;
+  box-shadow: inset 0 1px 0 #ffffff, 0 8px 22px -16px rgb(30 40 60 / 0.3);
+}
+.theme-soft .panel-inner {
+  background: #ffffff;
+  border: 1px solid #eef0f4;
+  border-radius: 20px;
+  box-shadow: 0 2px 8px -4px rgb(30 40 60 / 0.12);
+}
+.theme-soft .bar-surface {
+  background: rgb(246 247 249 / 0.92);
+  border-color: #dfe3e9;
+}
+.theme-soft .soft-header {
+  background: rgb(246 247 249 / 0.92);
+  border-bottom: 1px solid #ffffff;
+  box-shadow: 0 6px 20px -16px rgb(30 40 60 / 0.35);
+}
+
+@layer components {
+  /* Tombol pil putih dengan bayangan lembut */
+  .soft-pill {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full
+           bg-white text-slate-700 text-sm font-medium border border-slate-200/70
+           shadow-[0_3px_10px_-4px_rgba(30,40,60,0.25)]
+           hover:bg-slate-50 transition disabled:opacity-60;
+  }
+  /* Tombol utama: pil biru (seperti penanda hari aktif) */
+  .soft-pill-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full
+           bg-[#3b82f6] hover:bg-[#2f6fe0] text-white text-sm font-medium
+           shadow-[0_8px_18px_-8px_rgba(59,130,246,0.7)]
+           transition disabled:opacity-60;
+  }
+  /* Label status: pil putih kecil dengan titik */
+  .soft-chip {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full
+           bg-white text-[11px] font-medium text-slate-600
+           border border-slate-200/70 shadow-sm whitespace-nowrap;
+  }
+  /* Widget aksen berwarna */
+  .accent-violet { @apply bg-gradient-to-r from-[#7b5cff] to-[#a68bff] text-white; }
+  .accent-green  { @apply bg-gradient-to-r from-[#12c26f] to-[#2ee38f] text-white; }
+  .accent-yellow { @apply bg-gradient-to-r from-[#fcd34d] to-[#fde68a] text-slate-900; }
+  .accent-blue   { @apply bg-gradient-to-r from-[#3b82f6] to-[#60a5fa] text-white; }
+  /* Isian form lembut */
+  .soft-input {
+    @apply w-full text-sm px-4 py-2.5 bg-white text-slate-800 border border-slate-200/80 rounded-2xl
+           focus:border-[#3b82f6] focus:ring-2 focus:ring-blue-100 outline-none transition placeholder:text-slate-400;
+  }
+}
+
+/* Tahapan status (komponen bersama) di dalam tema lembut Anggota */
+.theme-soft .stepper-status {
+  background: #ffffff;
+  border-color: rgb(226 232 240 / 0.7);
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+}
+.theme-soft .stepper-dot {
+  border-radius: 9999px;
+}
+
+/* =============================================
+   Latar foto buku IKAPI & lampu (semua halaman Anggota)
+   ============================================= */
+.anggota-photo-bg {
+  background: #8ccbec url('/bg-ikapi-anggota.webp') 70% 85% / cover no-repeat;
+}
+/* Layar sempit: geser fokus ke buku & lampu */
+@media (max-width: 640px) {
+  .anggota-photo-bg { background-position: 66% 100%; }
 }

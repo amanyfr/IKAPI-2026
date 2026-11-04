@@ -119,13 +119,13 @@ export default function SystemSettings() {
     <div className="max-w-5xl mx-auto space-y-6">
 
       {/* Header Card */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="card-surface p-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
           <div className="p-3 bg-[#0da2e7] rounded-xl text-white shadow-sm">
             <Settings className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-900">
+            <h2 className="text-2xl font-light tracking-tight text-slate-900">
               Pengaturan Sistem, Biaya, Template Surat & TTD Resmi
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -144,10 +144,10 @@ export default function SystemSettings() {
       <form onSubmit={handleSave} className="space-y-6">
 
         {/* 1. INFORMASI REKENING RESMI */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+        <div className="card-surface p-6 space-y-4">
           <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
             <CreditCard className="w-5 h-5 text-[#0da2e7]" />
-            <h3 className="font-bold text-slate-900 text-sm">
+            <h3 className="text-lg text-slate-800">
               1. Informasi Rekening Resmi Pembayaran Iuran IKAPI Jabar
             </h3>
           </div>
@@ -195,11 +195,11 @@ export default function SystemSettings() {
         </div>
 
         {/* 2. RINCIAN BIAYA PENDAFTARAN & HEREGISTRASI */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+        <div className="card-surface p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 gap-2">
             <div className="flex items-center space-x-2">
               <Award className="w-5 h-5 text-[#0da2e7]" />
-              <h3 className="font-bold text-slate-900 text-sm">
+              <h3 className="text-lg text-slate-800">
                 2. Konfigurasi Biaya Pendaftaran & Heregistrasi
               </h3>
             </div>
@@ -297,11 +297,11 @@ export default function SystemSettings() {
         </div>
 
         {/* 3. PEJABAT PENANDATANGAN & UNGGAH TANDA TANGAN + STEMPEL RESMI */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-5">
+        <div className="card-surface p-6 space-y-5">
           <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
             <PenTool className="w-5 h-5 text-[#0da2e7]" />
             <div>
-              <h3 className="font-bold text-slate-900 text-sm">
+              <h3 className="text-lg text-slate-800">
                 3. Data Penandatangan & Unggah Gambar Tanda Tangan / Stempel Resmi
               </h3>
               <p className="text-[11px] text-slate-500">
@@ -386,12 +386,12 @@ export default function SystemSettings() {
         </div>
 
         {/* 4. TEMPLATE SURAT PENGANTAR REKOMENDASI */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+        <div className="card-surface p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 gap-2">
             <div className="flex items-center space-x-2">
               <FileText className="w-5 h-5 text-[#0da2e7]" />
               <div>
-                <h3 className="font-bold text-slate-900 text-sm">
+                <h3 className="text-lg text-slate-800">
                   4. Pengaturan Template Surat Pengantar Rekomendasi
                 </h3>
                 <p className="text-[11px] text-slate-500">

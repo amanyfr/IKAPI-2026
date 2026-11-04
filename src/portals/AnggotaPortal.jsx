@@ -2,16 +2,18 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import AnggotaDashboard from '../pages/AnggotaDashboard';
 import RegistrationForm from '../pages/RegistrationForm';
-import {
-  LayoutDashboard, FileEdit, LogOut, User
-} from 'lucide-react';
+import { LogOut, User } from 'lucide-react';
 
 export default function AnggotaPortal() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [editingDraft, setEditingDraft] = useState(null);
-  const [initSubType,  setInitSubType]  = useState('Baru');
-  const [initCategory, setInitCategory] = useState('Biasa');
+
+  // Nilai awal formulir dari jawaban pertanyaan login pertama
+  const profileType     = user?.member_type === 'Lama' ? 'Heregistrasi' : 'Baru';
+  const profileCategory = user?.member_category || 'Biasa';
+  const [initSubType,  setInitSubType]  = useState(profileType);
+  const [initCategory, setInitCategory] = useState(profileCategory);
 
   const handleEditDraft = (draftSub) => {
     setEditingDraft(draftSub);
@@ -19,8 +21,9 @@ export default function AnggotaPortal() {
   };
 
   const handleNewSubmission = (opts) => {
-    setInitSubType(opts?.submissionType || 'Baru');
-    setInitCategory(opts?.category || 'Biasa');
+    // Satu akun = satu pengajuan; jenisnya selalu mengikuti profil
+    setInitSubType(profileType);
+    setInitCategory(opts?.category || profileCategory);
     setEditingDraft(null);
     setActiveTab('form');
   };
@@ -30,58 +33,66 @@ export default function AnggotaPortal() {
     setActiveTab('dashboard');
   };
 
-  const navBtn = (tab, icon, label) => (
-    <button
-      onClick={() => setActiveTab(tab)}
-      className="flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-bold transition-all bg-[#0da2e7] hover:bg-[#0884c4] text-white shadow-md shadow-[#0da2e7]/25"
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
-  );
-
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#eaf6fe] via-[#f2f9fe] to-[#f8fbfe] flex flex-col font-sans">
+    <div className="theme-soft relative min-h-screen flex flex-col">
 
-      {/* ── Top Navigation Bar (Putih Bersih) ── */}
-      <header className="bg-white border-b border-[#cdeafd] sticky top-0 z-40 shadow-sm">
-        <div className="w-full max-w-[1440px] mx-auto px-6 lg:px-10">
-          <div className="flex items-center justify-between py-3.5 gap-4">
+      {/* Latar foto buku IKAPI di semua halaman Anggota */}
+      <div aria-hidden="true" className="anggota-photo-bg fixed inset-0" />
 
-            {/* Navigation Tabs */}
-            <div className="flex gap-2 overflow-x-auto">
-              {navBtn('dashboard', <LayoutDashboard className="w-4 h-4" />, 'Dashboard Pengajuan')}
+
+      {/* ── Header Portal Anggota ── */}
+      <header className="soft-header sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between gap-3 py-3">
+
+            {/* Logo */}
+            <div className="flex items-center gap-3 min-w-0">
+              <img src="/logo-ikapi.jpg" alt="IKAPI" className="w-9 h-9 sm:w-11 sm:h-11 flex-shrink-0 rounded-2xl object-cover bg-white ring-1 ring-slate-200/70 shadow-sm" />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-base sm:text-lg text-slate-900 whitespace-nowrap">IKAPI Jawa Barat</span>
+                  <span className="hidden sm:inline-flex soft-chip">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#12c26f]" />
+                    Anggota penerbit
+                  </span>
+                </div>
+                <p className="sm:hidden text-[11px] text-emerald-600 font-medium">Anggota penerbit</p>
+                <p className="hidden md:block text-xs text-slate-500">Pendaftaran & Registrasi Keanggotaan IKAPI Jawa Barat</p>
+              </div>
             </div>
 
-            {/* User Profile & Logout */}
-            <div className="flex items-center gap-3 flex-shrink-0">
-              <div className="hidden sm:flex items-center gap-2.5 bg-[#f0f9ff] rounded-xl px-4 py-2 border border-[#b8e6fc]">
-                <div className="w-7 h-7 rounded-full bg-[#0da2e7] text-white flex items-center justify-center font-bold">
-                  <User className="w-4 h-4" />
+            {/* User & Logout */}
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-2 bg-white rounded-full pl-1.5 pr-4 py-1.5 border border-slate-200/70 shadow-sm">
+                <div className="w-7 h-7 rounded-full bg-[#3b82f6] text-white flex items-center justify-center">
+                  <User className="w-3.5 h-3.5" />
                 </div>
-                <div className="text-left leading-tight">
-                  <div className="text-sm font-bold text-slate-900">{user?.name}</div>
-                  <div className="text-[11px] text-[#0884c4] font-semibold">Anggota Penerbit</div>
+                <div className="leading-tight">
+                  <div className="text-xs font-medium text-slate-800">{user?.name}</div>
+                  <div className="text-[10px] text-slate-500">Anggota penerbit</div>
                 </div>
               </div>
               <button
                 onClick={logout}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 text-sm font-bold rounded-xl border border-slate-200 hover:border-red-200 transition flex items-center gap-2"
+                aria-label="Keluar"
+                className="soft-pill !p-2.5 sm:!px-4 sm:!py-2 !text-xs hover:!text-red-600"
               >
-                <LogOut className="w-4 h-4" />
-                <span>Keluar</span>
+                <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" /> <span className="hidden sm:inline">Keluar</span>
               </button>
             </div>
           </div>
+
         </div>
       </header>
 
-      {/* Main Content — Full Width Professional Container */}
-      <main className="flex-1 w-full max-w-[1440px] mx-auto px-6 lg:px-10 py-8">
+      {/* Main */}
+      <main className="relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {activeTab === 'dashboard' && (
           <AnggotaDashboard
             onNewSubmission={handleNewSubmission}
             onEditDraft={handleEditDraft}
+            defaultType={profileType}
+            defaultCategory={profileCategory}
           />
         )}
         {activeTab === 'form' && (
@@ -89,6 +100,8 @@ export default function AnggotaPortal() {
             existingSubmission={editingDraft}
             initialSubmissionType={initSubType}
             initialCategory={initCategory}
+            initialOldKtaNumber={user?.old_kta_number || ''}
+            lockSubmissionType={Boolean(user?.member_type)}
             onComplete={handleFormComplete}
             onCancel={handleFormComplete}
           />
@@ -96,8 +109,11 @@ export default function AnggotaPortal() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-[#cce9fb] bg-white py-4 text-center text-sm text-slate-500">
-        <span>© 2026 IKAPI Pengurus Daerah Jawa Barat</span>
+      <footer className="relative bar-surface border-t py-4 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>© 2026 IKAPI Pengurus Daerah Jawa Barat</span>
+          <span className="text-slate-500">Portal Anggota — Pendaftaran & Registrasi</span>
+        </div>
       </footer>
     </div>
   );

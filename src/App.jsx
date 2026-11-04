@@ -4,6 +4,8 @@ import AuthPage from './pages/AuthPage';
 import AnggotaPortal from './portals/AnggotaPortal';
 import Admin1Portal from './portals/Admin1Portal';
 import Admin2Portal from './portals/Admin2Portal';
+import AdminPortal from './portals/AdminPortal';
+import OnboardingPage from './pages/OnboardingPage';
 
 export default function App() {
   const { user, loading, isAuthenticated } = useAuth();
@@ -27,14 +29,22 @@ export default function App() {
   }
 
   // Halaman terpisah sesuai role pengguna
-  if (user.role === 'Admin 2') {
+  if (user.role === 'Admin') {
+    return <AdminPortal />;
+  }
+
+  if (user.role === 'Ketua') {
     return <Admin2Portal />;
   }
 
-  if (user.role === 'Admin 1') {
+  if (user.role === 'Sekretaris') {
     return <Admin1Portal />;
   }
 
-  // Default untuk Anggota Pemohon
+  // Anggota baru menjawab pertanyaan status & kategori keanggotaan dulu (login pertama)
+  if (!user.onboarded_at) {
+    return <OnboardingPage />;
+  }
+
   return <AnggotaPortal />;
 }

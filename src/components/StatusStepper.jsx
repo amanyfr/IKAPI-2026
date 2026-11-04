@@ -11,7 +11,7 @@ import {
   BadgeCheck
 } from 'lucide-react';
 
-export default function StatusStepper({ currentStatus, rejectionReason }) {
+export default function StatusStepper({ currentStatus, rejectionReason, cardClassName = 'card-surface' }) {
   const isRejected = currentStatus === 'Ditolak';
   const isNeedRevision = currentStatus === 'Perlu Revisi';
 
@@ -43,12 +43,12 @@ export default function StatusStepper({ currentStatus, rejectionReason }) {
   ];
 
   return (
-    <div className="bg-white rounded-2xl shadow-md shadow-[#0884c4]/5 border border-[#b8e6fc] overflow-hidden">
+    <div className={`${cardClassName} overflow-hidden`}>
       {/* Header Strip */}
-      <div className="bg-white border-b border-[#d8effd] px-7 py-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">Tahapan Status Pengajuan</span>
-          <span className={`px-3.5 py-1 rounded-full text-xs font-bold border ${
+          <span className="stepper-title text-lg text-slate-800">Tahapan Status Pengajuan</span>
+          <span className={`stepper-status px-3.5 py-1 rounded-full text-xs font-bold border ${
             isRejected ? 'bg-red-50 text-red-700 border-red-200' :
             isNeedRevision ? 'bg-amber-50 text-amber-800 border-amber-200' :
             currentStatus === 'Aktif' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
@@ -74,7 +74,7 @@ export default function StatusStepper({ currentStatus, rejectionReason }) {
       </div>
 
       {/* Stepper Track */}
-      <div className="p-7 bg-gradient-to-b from-[#f4faff] to-white overflow-x-auto">
+      <div className="p-4 sm:p-7 overflow-x-auto">
         <div className="min-w-[760px] flex items-center justify-between relative px-4">
           <div className="absolute top-6 left-12 right-12 h-1 bg-[#d8effd] z-0 rounded-full">
             <div
@@ -97,7 +97,7 @@ export default function StatusStepper({ currentStatus, rejectionReason }) {
 
             return (
               <div key={step.key} className="relative z-10 flex flex-col items-center text-center w-28">
-                <div className={`w-12 h-12 rounded-2xl border-2 flex items-center justify-center transition-all ${circleColor}`}>
+                <div className={`stepper-dot w-12 h-12 rounded-2xl border-2 flex items-center justify-center transition-all ${circleColor}`}>
                   {isDone ? <CheckCircle2 className="w-6 h-6 text-white" /> : <Icon className="w-5 h-5" />}
                 </div>
                 <span className={`text-sm mt-3 ${

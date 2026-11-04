@@ -61,6 +61,25 @@ function authenticate(req, res, next) {
   }
 }
 
+const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota'];
+
+// Data pengguna yang aman dikirim ke browser (tanpa password)
+function publicUser(user, member = null) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    phone: user.phone,
+    member_type: user.member_type || null,
+    member_category: user.member_category || null,
+    old_kta_number: user.old_kta_number || null,
+    onboarded_at: user.onboarded_at || null,
+    created_at: user.created_at,
+    member: member || null
+  };
+}
+
 function authorize(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
@@ -171,14 +190,7 @@ app.post('/api/auth/login', async (req, res) => {
     res.json({
       message: 'Login berhasil.',
       token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        phone: user.phone,
-        member: member || null
-      }
+      user: publicUser(user, member)
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -189,12 +201,12 @@ app.post('/api/auth/login', async (req, res) => {
 // Current User Me
 app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
-    const user = await query.get('SELECT id, name, email, role, phone, email_verified_at, created_at FROM users WHERE id = ?', [req.user.id]);
+    const user = await query.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
     if (!user) {
       return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
     }
     const member = await query.get('SELECT * FROM members WHERE user_id = ?', [user.id]);
-    res.json({ user: { ...user, member: member || null } });
+    res.json({ user: publicUser(user, member) });
   } catch (err) {
     res.status(500).json({ error: 'Gagal mengambil data profil.' });
   }
@@ -236,6 +248,197 @@ app.post('/api/auth/quick-switch', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Gagal beralih akun demo.' });
+  }
+});
+
+// Pertanyaan login pertama anggota: anggota lama/baru & kategori biasa/luar biasa
+app.put('/api/auth/onboarding', authenticate, authorize('Anggota'), async (req, res) => {
+  try {
+    const { memberType, category, oldKtaNumber } = req.body;
+    if (!['Lama', 'Baru'].includes(memberType)) {
+      return res.status(400).json({ error: 'Pilih status keanggotaan: anggota lama atau anggota baru.' });
+    }
+    if (!['Biasa', 'Luar Biasa'].includes(category)) {
+      return res.status(400).json({ error: 'Pilih kategori keanggotaan: biasa atau luar biasa.' });
+    }
+    const kta = memberType === 'Lama' && oldKtaNumber ? String(oldKtaNumber).trim() : null;
+
+    await query.run(
+      `UPDATE users SET member_type = ?, member_category = ?, old_kta_number = ?,
+         onboarded_at = datetime('now', 'localtime')
+       WHERE id = ?`,
+      [memberType, category, kta, req.user.id]
+    );
+    await query.run(
+      `UPDATE members SET category = ?, updated_at = datetime('now', 'localtime')
+       WHERE user_id = ? AND membership_status = 'Calon'`,
+      [category, req.user.id]
+    );
+
+    const user = await query.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    const member = await query.get('SELECT * FROM members WHERE user_id = ?', [req.user.id]);
+    res.json({ message: 'Profil keanggotaan tersimpan.', user: publicUser(user, member) });
+  } catch (err) {
+    console.error('Onboarding error:', err);
+    res.status(500).json({ error: 'Gagal menyimpan profil keanggotaan.' });
+  }
+});
+
+// Tanda tangan tersimpan milik Ketua & Sekretaris (masing-masing akun): dibuat sekali,
+// dipakai berulang saat membubuhkan TTD pada surat pengantar
+const SIGNATURE_PATTERN = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+const SIGNATURE_MAX_LENGTH = 1.5 * 1024 * 1024;
+
+app.get('/api/auth/signature', authenticate, authorize('Ketua', 'Sekretaris'), async (req, res) => {
+  try {
+    const row = await query.get('SELECT signature_img FROM users WHERE id = ?', [req.user.id]);
+    res.json({ signature: row?.signature_img || null });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal memuat tanda tangan.' });
+  }
+});
+
+app.put('/api/auth/signature', authenticate, authorize('Ketua', 'Sekretaris'), async (req, res) => {
+  try {
+    const { signature } = req.body;
+    if (typeof signature !== 'string' || !SIGNATURE_PATTERN.test(signature)) {
+      return res.status(400).json({ error: 'Format tanda tangan tidak valid (PNG/JPG).' });
+    }
+    if (signature.length > SIGNATURE_MAX_LENGTH) {
+      return res.status(400).json({ error: 'Ukuran gambar tanda tangan terlalu besar (maks. ±1 MB).' });
+    }
+    await query.run('UPDATE users SET signature_img = ? WHERE id = ?', [signature, req.user.id]);
+    res.json({ message: 'Tanda tangan tersimpan dan siap dipakai.', signature });
+  } catch (err) {
+    console.error('Save signature error:', err);
+    res.status(500).json({ error: 'Gagal menyimpan tanda tangan.' });
+  }
+});
+
+// Dokumen yang ditandatangani Ketua & Sekretaris sekaligus (lihat SIGNABLE_DOCS di frontend)
+const SIGNABLE_DOC_KEYS = ['surat', 'formulir', 'berita_acara', 'sk'];
+
+// Posisi TTD {x, y, w} relatif (0–1) terhadap area tanda tangan dokumen; null bila tidak valid
+function parseSignaturePos(pos) {
+  const inUnit = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+  if (!pos || !inUnit(pos.x) || !inUnit(pos.y) || !inUnit(pos.w) || pos.w < 0.08) return null;
+  return { x: pos.x, y: pos.y, w: pos.w };
+}
+
+// Posisi TTD untuk setiap dokumen yang ditandatangani; null bila ada yang hilang / tidak valid
+function parseSignaturePositions(positions) {
+  if (!positions || typeof positions !== 'object') return null;
+  const parsed = {};
+  for (const key of SIGNABLE_DOC_KEYS) {
+    parsed[key] = parseSignaturePos(positions[key]);
+    if (!parsed[key]) return null;
+  }
+  return parsed;
+}
+
+// Gabungkan posisi milik satu penandatangan ke JSON { dokumen: { chairman, secretary } }
+function mergeSignaturePositions(existingJson, role, positions) {
+  let current = {};
+  try {
+    current = JSON.parse(existingJson || '{}') || {};
+  } catch {
+    current = {};
+  }
+  for (const [key, pos] of Object.entries(positions)) {
+    current[key] = { ...(current[key] || {}), [role]: pos };
+  }
+  return JSON.stringify(current);
+}
+
+app.delete('/api/auth/signature', authenticate, authorize('Ketua', 'Sekretaris'), async (req, res) => {
+  try {
+    await query.run('UPDATE users SET signature_img = NULL WHERE id = ?', [req.user.id]);
+    res.json({ message: 'Tanda tangan dihapus.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal menghapus tanda tangan.' });
+  }
+});
+
+// ==========================================
+// 1b. KELOLA AKUN PENGGUNA (ADMIN)
+// ==========================================
+
+app.get('/api/admin/users', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const users = await query.all('SELECT * FROM users ORDER BY role, name');
+    res.json({ users: users.map((u) => publicUser(u)) });
+  } catch (err) {
+    console.error('List users error:', err);
+    res.status(500).json({ error: 'Gagal memuat daftar akun.' });
+  }
+});
+
+app.post('/api/admin/users', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const { name, email, password, role, phone } = req.body;
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({ error: 'Nama, email, kata sandi, dan peran wajib diisi.' });
+    }
+    if (!ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Peran tidak valid.' });
+    }
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
+    }
+    const existing = await query.get('SELECT id FROM users WHERE email = ?', [email]);
+    if (existing) {
+      return res.status(400).json({ error: 'Email sudah dipakai akun lain.' });
+    }
+    const hashed = await bcryptjs.hash(password, await bcryptjs.genSalt(10));
+    const result = await query.run(
+      `INSERT INTO users (name, email, password, role, phone, email_verified_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))`,
+      [name, email, hashed, role, phone || null]
+    );
+    const user = await query.get('SELECT * FROM users WHERE id = ?', [result.lastID]);
+    res.json({ message: `Akun ${user.name} berhasil dibuat.`, user: publicUser(user) });
+  } catch (err) {
+    console.error('Create user error:', err);
+    res.status(500).json({ error: 'Gagal membuat akun.' });
+  }
+});
+
+app.put('/api/admin/users/:id', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const target = await query.get('SELECT * FROM users WHERE id = ?', [id]);
+    if (!target) {
+      return res.status(404).json({ error: 'Akun tidak ditemukan.' });
+    }
+    const { name, email, role, phone, password } = req.body;
+    if (role && !ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Peran tidak valid.' });
+    }
+    // Cegah Admin mengunci dirinya sendiri dari halaman kelola akun
+    if (id === req.user.id && role && role !== 'Admin') {
+      return res.status(400).json({ error: 'Anda tidak bisa mengubah peran akun Anda sendiri.' });
+    }
+    if (email && email !== target.email) {
+      const dup = await query.get('SELECT id FROM users WHERE email = ? AND id != ?', [email, id]);
+      if (dup) return res.status(400).json({ error: 'Email sudah dipakai akun lain.' });
+    }
+    if (password && String(password).length < 6) {
+      return res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
+    }
+
+    await query.run(
+      'UPDATE users SET name = ?, email = ?, role = ?, phone = ? WHERE id = ?',
+      [name || target.name, email || target.email, role || target.role, phone ?? target.phone, id]
+    );
+    if (password) {
+      const hashed = await bcryptjs.hash(password, await bcryptjs.genSalt(10));
+      await query.run('UPDATE users SET password = ? WHERE id = ?', [hashed, id]);
+    }
+    const user = await query.get('SELECT * FROM users WHERE id = ?', [id]);
+    res.json({ message: `Akun ${user.name} berhasil diperbarui.`, user: publicUser(user) });
+  } catch (err) {
+    console.error('Update user error:', err);
+    res.status(500).json({ error: 'Gagal memperbarui akun.' });
   }
 });
 
@@ -354,6 +557,15 @@ app.get('/api/submissions/:id', authenticate, async (req, res) => {
 });
 
 // Create or save submission
+// Jenis pengajuan mengikuti jawaban profil anggota: lama -> Heregistrasi, baru -> Baru
+async function profileSubmissionType(userId) {
+  const u = await query.get('SELECT member_type FROM users WHERE id = ?', [userId]);
+  if (!u || !u.member_type) return null;
+  return u.member_type === 'Lama' ? 'Heregistrasi' : 'Baru';
+}
+
+const TYPE_LABEL = { Baru: 'Anggota Baru', Heregistrasi: 'Registrasi (perpanjangan)' };
+
 app.post('/api/submissions', authenticate, async (req, res) => {
   try {
     const {
@@ -389,6 +601,18 @@ app.post('/api/submissions', authenticate, async (req, res) => {
 
     if (!publisherName || !category || !submissionType) {
       return res.status(400).json({ error: 'Nama penerbit, kategori, dan jenis pengajuan wajib diisi.' });
+    }
+
+    if (req.user.role === 'Anggota') {
+      // Satu akun anggota hanya untuk satu pengajuan
+      const existing = await query.get('SELECT id FROM submissions WHERE user_id = ? LIMIT 1', [req.user.id]);
+      if (existing) {
+        return res.status(400).json({ error: `Akun ini sudah memiliki pengajuan (#${existing.id}). Satu akun hanya untuk satu pengajuan.` });
+      }
+      const expectedType = await profileSubmissionType(req.user.id);
+      if (expectedType && submissionType !== expectedType) {
+        return res.status(400).json({ error: `Jenis pengajuan untuk akun ini adalah ${TYPE_LABEL[expectedType]}, sesuai profil keanggotaan.` });
+      }
     }
 
     // Upsert or create member record
@@ -449,7 +673,7 @@ app.post('/api/submissions', authenticate, async (req, res) => {
     const requiredDocs = [];
     if (submissionType === 'Heregistrasi') {
       requiredDocs.push(
-        { type: 'formulir_heregistrasi', title: 'Formulir Heregistrasi IKAPI 2026' },
+        { type: 'formulir_heregistrasi', title: 'Formulir Registrasi IKAPI 2026' },
         { type: 'kta_lama', title: 'KTA Lama yang Habis Masa Berlakunya' }
       );
     } else if (category === 'Biasa') {
@@ -533,6 +757,12 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
     const newStatus = isSubmit ? 'Menunggu Pembayaran' : sub.status;
     const submittedAt = isSubmit ? new Date().toISOString() : sub.submitted_at;
     const subType = formData.submissionType || sub.submission_type;
+    if (req.user.role === 'Anggota') {
+      const expectedType = await profileSubmissionType(req.user.id);
+      if (expectedType && subType !== expectedType) {
+        return res.status(400).json({ error: `Jenis pengajuan untuk akun ini adalah ${TYPE_LABEL[expectedType]}, sesuai profil keanggotaan.` });
+      }
+    }
     const oldKta = formData.oldKtaNumber !== undefined ? formData.oldKtaNumber : sub.old_kta_number;
 
     await query.run(
@@ -625,7 +855,7 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
         [subId]
       );
       if (stillNeedsRevision.count === 0) {
-        // Automatically put back into 'Menunggu Verifikasi' so Admin 1 re-screens
+        // Automatically put back into 'Menunggu Verifikasi' so Sekretaris re-screens
         await query.run(
           `UPDATE submissions SET status = 'Menunggu Verifikasi', admin_notes = 'Berkas revisi telah diunggah kembali oleh pemohon.', updated_at = datetime('now', 'localtime')
            WHERE id = ?`,
@@ -645,8 +875,8 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
   }
 });
 
-// Admin 1: Screen single document
-app.put('/api/documents/:docId/screen', authenticate, authorize('Admin 1', 'Admin 2'), async (req, res) => {
+// Sekretaris: Screen single document
+app.put('/api/documents/:docId/screen', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const docId = req.params.docId;
     const { status, revisionNotes } = req.body;
@@ -703,7 +933,7 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
     );
 
     res.json({
-      message: 'Bukti pembayaran berhasil diunggah. Menunggu verifikasi Admin 1.',
+      message: 'Bukti pembayaran berhasil diunggah. Menunggu verifikasi Sekretaris.',
       status: 'Menunggu Verifikasi'
     });
   } catch (err) {
@@ -712,8 +942,8 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
   }
 });
 
-// Admin 1 verify payment
-app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin 1', 'Admin 2'), async (req, res) => {
+// Sekretaris verify payment
+app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const subId = req.params.id;
     const { status, notes } = req.body; // 'Valid' or 'Perlu Revisi'
@@ -749,11 +979,11 @@ app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin 1'
 // 5. WORKFLOW ACTIONS (ADMIN 1 & ADMIN 2)
 // ==========================================
 
-// Admin 1 Action: Request Revision or Pass to Admin 2
-app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin 1', 'Admin 2'), async (req, res) => {
+// Sekretaris Action: Request Revision or Pass to Ketua
+app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const subId = req.params.id;
-    const { action, notes } = req.body; // 'request_revision' | 'pass_to_admin2' | 'update_kta'
+    const { action, notes, signaturePositions } = req.body; // 'request_revision' | 'pass_to_admin2' | 'update_kta'
 
     const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
     if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
@@ -774,16 +1004,35 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin 1'
         [subId]
       );
       if (unverifiedDocs.count > 0) {
-        return res.status(400).json({ error: 'Semua berkas persyaratan wajib bertatus "Sesuai" sebelum diteruskan ke Admin 2.' });
+        return res.status(400).json({ error: 'Semua berkas persyaratan wajib bertatus "Sesuai" sebelum diteruskan ke Ketua.' });
       }
 
       // Check payment status
       const payment = await query.get('SELECT verification_status FROM payments WHERE submission_id = ?', [subId]);
       if (!payment || payment.verification_status !== 'Valid') {
-        return res.status(400).json({ error: 'Pembayaran wajib diverifikasi "Valid" sebelum diteruskan ke Admin 2.' });
+        return res.status(400).json({ error: 'Pembayaran wajib diverifikasi "Valid" sebelum diteruskan ke Ketua.' });
       }
 
       // Generate or reserve reference number if not already present
+      // Sekretaris membubuhkan TTD tersimpannya pada semua dokumen sebelum diteruskan ke Ketua
+      let secretarySig = null;
+      let secretaryPos = null;
+      let positionsJson = sub.signature_positions;
+      if (req.user.role === 'Sekretaris') {
+        const sekretaris = await query.get('SELECT signature_img FROM users WHERE id = ?', [req.user.id]);
+        if (!sekretaris?.signature_img) {
+          return res.status(400).json({ error: 'Buat dan simpan tanda tangan Anda terlebih dahulu.' });
+        }
+        const positions = parseSignaturePositions(signaturePositions);
+        if (!positions) {
+          return res.status(400).json({ error: 'Posisi tanda tangan pada dokumen tidak valid.' });
+        }
+        secretarySig = sekretaris.signature_img;
+        secretaryPos = JSON.stringify(positions.surat);
+        positionsJson = mergeSignaturePositions(sub.signature_positions, 'secretary', positions);
+      }
+      const secretaryNameRow = await query.get(`SELECT value FROM settings WHERE key = 'sekretaris_nama'`);
+
       let refNumber = sub.reference_number;
       if (!refNumber) {
         const counterSetting = await query.get(`SELECT value FROM settings WHERE key = 'surat_counter'`);
@@ -798,13 +1047,27 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin 1'
           reference_number = ?,
           letter_date = date('now', 'localtime'),
           admin_notes = ?,
+          secretary_signature_img = COALESCE(?, secretary_signature_img),
+          secretary_signature_pos = COALESCE(?, secretary_signature_pos),
+          signature_positions = ?,
+          signed_by_secretary = CASE WHEN ? IS NOT NULL THEN ? ELSE signed_by_secretary END,
+          secretary_signature_date = CASE WHEN ? IS NOT NULL THEN datetime('now', 'localtime') ELSE secretary_signature_date END,
           updated_at = datetime('now', 'localtime')
          WHERE id = ?`,
-        [refNumber, notes || 'Berkas dan pembayaran telah diverifikasi lengkap dan valid oleh Admin 1.', subId]
+        [
+          refNumber,
+          notes || 'Berkas dan pembayaran telah diverifikasi lengkap dan valid oleh Sekretaris.',
+          secretarySig,
+          secretaryPos,
+          positionsJson,
+          secretarySig, secretaryNameRow?.value || 'Drs. H. Anwar Rosyid, M.Si.',
+          secretarySig,
+          subId
+        ]
       );
 
       return res.json({
-        message: 'Pengajuan berhasil diteruskan ke Admin 2 untuk proses persetujuan dan tanda tangan surat.',
+        message: 'Pengajuan berhasil diteruskan ke Ketua untuk proses persetujuan dan tanda tangan surat.',
         status: 'Menunggu Approval',
         referenceNumber: refNumber
       });
@@ -836,24 +1099,38 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin 1'
 
     res.status(400).json({ error: 'Tindakan tidak dikenal.' });
   } catch (err) {
-    console.error('Admin 1 action error:', err);
-    res.status(500).json({ error: 'Gagal memproses tindakan Admin 1.' });
+    console.error('Sekretaris action error:', err);
+    res.status(500).json({ error: 'Gagal memproses tindakan Sekretaris.' });
   }
 });
 
-// Admin 2 Action: Approve, Reject, or Send to Central
-app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Admin 2', 'Admin 1'), async (req, res) => {
+// Ketua Action: Approve, Reject, or Send to Central
+app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 'Sekretaris'), async (req, res) => {
   try {
     const subId = req.params.id;
-    const { action, reason, chairmanSign, secretarySign } = req.body;
+    const { action, reason, signaturePositions } = req.body;
 
     const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
     if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
 
     if (action === 'approve') {
-      // Require Admin 2 role
-      if (req.user.role !== 'Admin 2') {
-        return res.status(403).json({ error: 'Hanya Admin 2 (Ketua & Sekretaris) yang dapat menyetujui pengajuan.' });
+      // Require Ketua role
+      if (req.user.role !== 'Ketua') {
+        return res.status(403).json({ error: 'Hanya Ketua yang dapat menyetujui pengajuan.' });
+      }
+
+      if (sub.status !== 'Menunggu Approval') {
+        return res.status(400).json({ error: 'Pengajuan ini tidak sedang menunggu approval.' });
+      }
+
+      // TTD tersimpan milik Ketua dibubuhkan pada posisi yang dipilih di setiap pratinjau dokumen
+      const ketua = await query.get('SELECT signature_img FROM users WHERE id = ?', [req.user.id]);
+      if (!ketua?.signature_img) {
+        return res.status(400).json({ error: 'Buat dan simpan tanda tangan Anda terlebih dahulu.' });
+      }
+      const positions = parseSignaturePositions(signaturePositions);
+      if (!positions) {
+        return res.status(400).json({ error: 'Posisi tanda tangan pada dokumen tidak valid.' });
       }
 
       const settingsList = await query.all(`SELECT key, value FROM settings WHERE key IN ('ketua_nama', 'sekretaris_nama')`);
@@ -868,12 +1145,20 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Admin 2'
           status = 'Disetujui',
           approved_at = datetime('now', 'localtime'),
           signed_by_chairman = ?,
-          signed_by_secretary = ?,
+          signed_by_secretary = COALESCE(signed_by_secretary, ?),
           chairman_signature_date = datetime('now', 'localtime'),
-          secretary_signature_date = datetime('now', 'localtime'),
+          secretary_signature_date = COALESCE(secretary_signature_date, datetime('now', 'localtime')),
+          chairman_signature_img = ?,
+          chairman_signature_pos = ?,
+          signature_positions = ?,
           updated_at = datetime('now', 'localtime')
          WHERE id = ?`,
-        [chairmanName, secretaryName, subId]
+        [
+          chairmanName, secretaryName, ketua.signature_img,
+          JSON.stringify(positions.surat),
+          mergeSignaturePositions(sub.signature_positions, 'chairman', positions),
+          subId
+        ]
       );
 
       return res.json({
@@ -883,8 +1168,8 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Admin 2'
     }
 
     if (action === 'reject') {
-      if (req.user.role !== 'Admin 2') {
-        return res.status(403).json({ error: 'Hanya Admin 2 yang dapat menolak pengajuan.' });
+      if (req.user.role !== 'Ketua') {
+        return res.status(403).json({ error: 'Hanya Ketua yang dapat menolak pengajuan.' });
       }
       if (!reason) {
         return res.status(400).json({ error: 'Alasan penolakan wajib disertakan.' });
@@ -923,8 +1208,8 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Admin 2'
 
     res.status(400).json({ error: 'Tindakan tidak dikenal.' });
   } catch (err) {
-    console.error('Admin 2 action error:', err);
-    res.status(500).json({ error: 'Gagal memproses tindakan Admin 2.' });
+    console.error('Ketua action error:', err);
+    res.status(500).json({ error: 'Gagal memproses tindakan Ketua.' });
   }
 });
 
@@ -932,7 +1217,7 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Admin 2'
 // 6. DASHBOARD & STATS (ADMIN 2 MONITORING)
 // ==========================================
 
-app.get('/api/admin/dashboard-stats', authenticate, authorize('Admin 1', 'Admin 2'), async (req, res) => {
+app.get('/api/admin/dashboard-stats', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const totalSubmissions = await query.get('SELECT COUNT(*) as count FROM submissions');
     const pendingScreening = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu Verifikasi'`);
@@ -996,7 +1281,7 @@ app.get('/api/admin/dashboard-stats', authenticate, authorize('Admin 1', 'Admin 
 // ==========================================
 
 // List members
-app.get('/api/members', authenticate, authorize('Admin 1', 'Admin 2'), async (req, res) => {
+app.get('/api/members', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const { category, status, search } = req.query;
     let sql = 'SELECT * FROM members WHERE 1=1';
@@ -1026,7 +1311,7 @@ app.get('/api/members', authenticate, authorize('Admin 1', 'Admin 2'), async (re
 });
 
 // Update KTA number for a member
-app.put('/api/members/:id/kta', authenticate, authorize('Admin 1', 'Admin 2'), async (req, res) => {
+app.put('/api/members/:id/kta', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const { id } = req.params;
     const { kta_number } = req.body;
@@ -1048,7 +1333,7 @@ app.put('/api/members/:id/kta', authenticate, authorize('Admin 1', 'Admin 2'), a
 });
 
 // Export members to Excel
-app.get('/api/members/export', authenticate, authorize('Admin 1', 'Admin 2'), async (req, res) => {
+app.get('/api/members/export', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const members = await query.all(`
       SELECT 
@@ -1102,7 +1387,7 @@ app.get('/api/settings', async (req, res) => {
   }
 });
 
-app.put('/api/settings', authenticate, authorize('Admin 2'), async (req, res) => {
+app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
   try {
     const { settings } = req.body;
     if (!settings || typeof settings !== 'object') {

@@ -51,26 +51,26 @@ export default function Header({ onOpenAuth }) {
             <button
               onClick={() => quickSwitch(null, 'admin1@ikapi-jabar.or.id')}
               className={`px-2.5 py-1 text-xs rounded font-medium transition flex items-center gap-1.5 ${
-                user?.role === 'Admin 1'
+                user?.role === 'Sekretaris'
                   ? 'bg-blue-600 text-white shadow-sm ring-1 ring-white/30'
                   : 'text-slate-300 hover:text-white hover:bg-white/10'
               }`}
               title="Screening berkas & verifikasi pembayaran"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-blue-300" />
-              Admin 1 (Screening)
+              Sekretaris (Screening)
             </button>
             <button
               onClick={() => quickSwitch(null, 'admin2@ikapi-jabar.or.id')}
               className={`px-2.5 py-1 text-xs rounded font-medium transition flex items-center gap-1.5 ${
-                user?.role === 'Admin 2'
+                user?.role === 'Ketua'
                   ? 'bg-amber-600 text-white shadow-sm ring-1 ring-white/30'
                   : 'text-slate-300 hover:text-white hover:bg-white/10'
               }`}
               title="Approval Ketua/Sekretaris, TTD Digital & Surat Resmi"
             >
               <Award className="w-3.5 h-3.5 text-amber-300" />
-              Admin 2 (Approval)
+              Ketua (Approval)
             </button>
             <button
               onClick={() => quickSwitch(null, 'mizan@penerbit.id')}
@@ -108,8 +108,8 @@ export default function Header({ onOpenAuth }) {
                   </div>
                   <div className="text-[11px] flex items-center justify-end gap-1 text-slate-300">
                     <span className={`inline-block w-2 h-2 rounded-full ${
-                      user.role === 'Admin 2' ? 'bg-amber-400' :
-                      user.role === 'Admin 1' ? 'bg-blue-400' : 'bg-emerald-400'
+                      user.role === 'Ketua' ? 'bg-amber-400' :
+                      user.role === 'Sekretaris' ? 'bg-blue-400' : 'bg-emerald-400'
                     }`} />
                     {user.role} {user.member ? `(${user.member.publisher_name})` : ''}
                   </div>

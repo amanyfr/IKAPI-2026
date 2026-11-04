@@ -4,7 +4,7 @@ import StatusStepper from '../components/StatusStepper';
 import CentralPacketExporter from '../components/CentralPacketExporter';
 import {
   Building2, CreditCard, Upload, FileText, AlertCircle,
-  CheckCircle, ExternalLink, Plus, RefreshCw,
+  CheckCircle, ExternalLink, RefreshCw,
   Edit3, GraduationCap, ArrowRight, UserPlus, X,
   ShieldCheck, Landmark
 } from 'lucide-react';
@@ -26,11 +26,11 @@ const REQUIRED_DOCS = {
   },
   Heregistrasi: {
     Biasa: [
-      'Formulir Heregistrasi IKAPI 2026',
+      'Formulir Registrasi IKAPI 2026',
       'KTA Lama',
     ],
     'Luar Biasa': [
-      'Formulir Heregistrasi IKAPI 2026',
+      'Formulir Registrasi IKAPI 2026',
       'KTA Lama',
     ],
   },
@@ -38,7 +38,7 @@ const REQUIRED_DOCS = {
 
 const token = () => localStorage.getItem('ikapi_token');
 
-export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
+export default function AnggotaDashboard({ onNewSubmission, onEditDraft, defaultType = 'Baru', defaultCategory = 'Biasa' }) {
   const { user } = useAuth();
   const [submissions,    setSubmissions]    = useState([]);
   const [selectedSub,    setSelectedSub]    = useState(null);
@@ -46,9 +46,11 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
   const [loading,        setLoading]        = useState(true);
   const [uploadingDocId, setUploadingDocId] = useState(null);
   const [showPacket,     setShowPacket]     = useState(false);
+  const [refreshing,     setRefreshing]     = useState(false);
+  const [lastUpdated,    setLastUpdated]    = useState(null);
 
-  const [pickType,     setPickType]     = useState('Baru');
-  const [pickCategory, setPickCategory] = useState('Biasa');
+  const [pickType,     setPickType]     = useState(defaultType);
+  const [pickCategory, setPickCategory] = useState(defaultCategory);
 
   const [payForm, setPayForm] = useState({
     senderBank: '',
@@ -82,10 +84,34 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
       const data = await res.json();
       setDetailData(data);
       setSelectedSub(data.submission);
+      setLastUpdated(new Date());
     } catch (e) { console.error(e); }
   };
 
   useEffect(() => { loadSubmissions(); }, [user]);
+
+  // Perbarui status pengajuan: tombol manual dengan indikator, otomatis tiap 30 detik,
+  // dan saat pengguna kembali ke tab ini
+  const refreshStatus = async () => {
+    if (!selectedSub?.id) return;
+    setRefreshing(true);
+    await loadDetail(selectedSub.id);
+    setRefreshing(false);
+  };
+
+  useEffect(() => {
+    if (!selectedSub?.id) return;
+    const id = selectedSub.id;
+    const tick = () => {
+      if (document.visibilityState === 'visible') loadDetail(id);
+    };
+    const timer = setInterval(tick, 30000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [selectedSub?.id]);
 
   const handleDocUpload = async (doc, file) => {
     if (!file) return;
@@ -130,7 +156,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[420px]">
-        <div className="w-10 h-10 border-3 border-[#0da2e7] border-t-transparent rounded-full animate-spin" />
+        <div className="w-10 h-10 border-[3px] border-[#3b82f6] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -140,37 +166,39 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
      ══════════════════════════════════════════════════════════ */
   if (submissions.length === 0) {
     return (
-      <div className="w-full">
-        <div className="bg-white rounded-2xl border border-[#b8e6fc] shadow-lg shadow-[#0884c4]/5 overflow-hidden">
+      <>
+      {/* Tinggi minimal = layar dikurangi header & footer, agar widget pas di tengah layar */}
+      <div className="relative w-full max-w-5xl mx-auto lg:min-h-[calc(100vh-14rem)] flex items-center">
+        <div className="card-surface overflow-hidden w-full">
 
           {/* Header */}
-          <div className="bg-white border-b border-[#d8effd] px-8 py-6 flex flex-wrap items-center justify-between gap-4">
+          <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 sm:py-5 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Pengajuan Keanggotaan IKAPI Jawa Barat</h2>
+              <h2 className="text-2xl font-light text-slate-900 tracking-tight">Pengajuan Keanggotaan</h2>
               <p className="text-sm text-slate-500 mt-0.5">Pilih jenis pengajuan dan kategori keanggotaan penerbit</p>
             </div>
-            <div className="bg-[#eaf6fe] border border-[#b8e6fc] px-5 py-2.5 rounded-xl text-right">
-              <div className="text-[11px] uppercase font-bold text-[#0884c4] tracking-wider">Biaya Pendaftaran</div>
-              <div className="text-xl font-extrabold text-[#0884c4]">
+            <div className="accent-yellow px-4 py-2 rounded-2xl text-right shadow-[0_10px_24px_-14px_rgba(234,179,8,0.8)]">
+              <div className="text-xs font-medium text-slate-700">Biaya pendaftaran</div>
+              <div className="text-xl font-medium text-slate-900">
                 {pickType === 'Baru' ? 'Rp 1.700.000' : 'Rp 1.200.000'}
               </div>
             </div>
           </div>
 
-          <div className="p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 bg-gradient-to-b from-[#f5fbff] to-white">
+          <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5">
 
             {/* Left Column: Choices */}
-            <div className="lg:col-span-8 space-y-6">
+            <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Jenis Pengajuan */}
-              <div>
-                <label className="text-sm font-bold text-[#065986] uppercase tracking-wider block mb-3">
+              <div className="flex flex-col">
+                <label className="text-sm font-medium text-slate-800 block mb-2">
                   1. Pilih Jenis Pengajuan
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex-1 grid grid-rows-2 gap-3">
                   {[
                     { id: 'Baru', label: 'Anggota Baru', sub: 'Pendaftaran anggota pertama kali', icon: UserPlus },
-                    { id: 'Heregistrasi', label: 'Heregistrasi', sub: 'Perpanjangan masa berlaku KTA', icon: RefreshCw }
-                  ].map(item => {
+                    { id: 'Heregistrasi', label: 'Registrasi', sub: 'Perpanjangan masa berlaku KTA', icon: RefreshCw }
+                  ].filter((item) => item.id === defaultType).map(item => {
                     const Icon = item.icon;
                     const active = pickType === item.id;
                     return (
@@ -178,36 +206,42 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                         key={item.id}
                         type="button"
                         onClick={() => setPickType(item.id)}
-                        className={`p-5 rounded-xl border-2 text-left transition-all flex items-center gap-4 ${
+                        className={`p-3.5 rounded-2xl border-2 text-left transition-all flex items-center gap-3 ${
                           active
-                            ? 'border-[#0da2e7] bg-[#eaf6fe] shadow-md shadow-[#0da2e7]/10'
-                            : 'border-[#d6eefc] hover:border-[#0da2e7] bg-white'
+                            ? 'border-[#3b82f6] bg-white shadow-[0_8px_20px_-12px_rgba(59,130,246,0.6)]'
+                            : 'border-white bg-white/70 hover:border-blue-200'
                         }`}
                       >
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition ${
-                          active ? 'bg-[#0884c4] text-white shadow' : 'bg-[#eaf6fe] text-[#0884c4]'
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition ${
+                          active ? 'bg-[#3b82f6] text-white' : 'bg-slate-100 text-slate-500'
                         }`}>
-                          <Icon className="w-6 h-6" />
+                          <Icon className="w-5 h-5" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between">
-                            <span className="text-base font-extrabold text-slate-900">{item.label}</span>
-                            {active && <CheckCircle className="w-5 h-5 text-[#0884c4]" />}
+                            <span className="text-sm font-medium text-slate-900">{item.label}</span>
+                            {active && <CheckCircle className="w-4 h-4 text-[#3b82f6]" />}
                           </div>
-                          <div className="text-xs text-slate-600 mt-0.5">{item.sub}</div>
+                          <div className="text-xs text-slate-500 mt-0.5 truncate">{item.sub}</div>
                         </div>
                       </button>
                     );
                   })}
+                  {/* Jenis pengajuan dikunci sesuai jawaban profil (anggota lama/baru) */}
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 px-3.5 py-3 text-xs text-slate-500 flex items-center">
+                    {defaultType === 'Heregistrasi'
+                      ? 'Anda terdaftar sebagai anggota lama, jadi pengajuan Anda adalah registrasi perpanjangan KTA.'
+                      : 'Anda terdaftar sebagai anggota baru, jadi pengajuan Anda adalah pendaftaran anggota baru.'}
+                  </div>
                 </div>
               </div>
 
               {/* Kategori Keanggotaan */}
-              <div>
-                <label className="text-sm font-bold text-[#065986] uppercase tracking-wider block mb-3">
+              <div className="flex flex-col">
+                <label className="text-sm font-medium text-slate-800 block mb-2">
                   2. Pilih Kategori Keanggotaan
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex-1 grid grid-rows-2 gap-3">
                   {[
                     { id: 'Biasa', label: 'Anggota Biasa', sub: 'Badan Usaha Penerbit (PT / CV)', icon: Building2 },
                     { id: 'Luar Biasa', label: 'Anggota Luar Biasa', sub: 'Perguruan Tinggi / Lembaga', icon: GraduationCap }
@@ -219,23 +253,23 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                         key={item.id}
                         type="button"
                         onClick={() => setPickCategory(item.id)}
-                        className={`p-5 rounded-xl border-2 text-left transition-all flex items-center gap-4 ${
+                        className={`p-3.5 rounded-2xl border-2 text-left transition-all flex items-center gap-3 ${
                           active
-                            ? 'border-[#0da2e7] bg-[#eaf6fe] shadow-md shadow-[#0da2e7]/10'
-                            : 'border-[#d6eefc] hover:border-[#0da2e7] bg-white'
+                            ? 'border-[#3b82f6] bg-white shadow-[0_8px_20px_-12px_rgba(59,130,246,0.6)]'
+                            : 'border-white bg-white/70 hover:border-blue-200'
                         }`}
                       >
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition ${
-                          active ? 'bg-[#0884c4] text-white shadow' : 'bg-[#eaf6fe] text-[#0884c4]'
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition ${
+                          active ? 'bg-[#3b82f6] text-white' : 'bg-slate-100 text-slate-500'
                         }`}>
-                          <Icon className="w-6 h-6" />
+                          <Icon className="w-5 h-5" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between">
-                            <span className="text-base font-extrabold text-slate-900">{item.label}</span>
-                            {active && <CheckCircle className="w-5 h-5 text-[#0884c4]" />}
+                            <span className="text-sm font-medium text-slate-900">{item.label}</span>
+                            {active && <CheckCircle className="w-4 h-4 text-[#3b82f6]" />}
                           </div>
-                          <div className="text-xs text-slate-600 mt-0.5">{item.sub}</div>
+                          <div className="text-xs text-slate-500 mt-0.5 truncate">{item.sub}</div>
                         </div>
                       </button>
                     );
@@ -245,32 +279,40 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
             </div>
 
             {/* Right Column: Docs & Action */}
-            <div className="lg:col-span-4 flex flex-col justify-between bg-[#eaf6fe] border border-[#b8e6fc] rounded-2xl p-6 space-y-6">
+            <div className="lg:col-span-5 panel-inner p-4">
               <div>
-                <div className="text-sm font-extrabold text-[#065986] uppercase tracking-wider mb-3">
+                <div className="text-sm font-medium text-slate-800 mb-2">
                   Berkas Persyaratan
                 </div>
-                <div className="space-y-2.5">
+                <div className="space-y-1.5">
                   {(REQUIRED_DOCS[pickType]?.[pickCategory] || []).map((title) => (
-                    <div key={title} className="flex items-center gap-2.5 bg-white px-3.5 py-2.5 rounded-xl border border-[#cdeafd] text-sm font-semibold text-slate-800">
-                      <CheckCircle className="w-4 h-4 text-[#0da2e7] flex-shrink-0" />
+                    <div key={title} className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200/70 text-[13px] text-slate-700">
+                      <CheckCircle className="w-4 h-4 text-[#12c26f] flex-shrink-0" />
                       <span>{title}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <button
-                onClick={() => onNewSubmission({ submissionType: pickType, category: pickCategory })}
-                className="w-full py-4 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white font-bold text-base rounded-xl shadow-lg shadow-[#0884c4]/25 transition flex items-center justify-center gap-2"
-              >
-                <span>Isi Formulir Pengajuan</span>
-                <ArrowRight className="w-5 h-5" />
-              </button>
             </div>
+          </div>
+
+          {/* Baris aksi: tombol di bawah agar kolom berkas tidak lebih tinggi dari kolom pilihan */}
+          <div className="border-t border-slate-100 px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs text-slate-500">
+              {(REQUIRED_DOCS[pickType]?.[pickCategory] || []).length} berkas perlu disiapkan. Formulir bisa disimpan sebagai draf.
+            </p>
+            <button
+              onClick={() => onNewSubmission({ submissionType: pickType, category: pickCategory })}
+              className="soft-pill-primary w-full sm:w-auto px-6 py-3 whitespace-nowrap"
+            >
+              <span>Isi Formulir Pengajuan</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
+      </>
     );
   }
 
@@ -283,7 +325,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
   if (!sub) {
     return (
       <div className="flex items-center justify-center min-h-[420px]">
-        <div className="w-10 h-10 border-3 border-[#0da2e7] border-t-transparent rounded-full animate-spin" />
+        <div className="w-10 h-10 border-[3px] border-[#3b82f6] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -295,71 +337,68 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
   return (
     <div className="space-y-6 w-full">
 
-      {/* ── Top Control Bar (Biru Muda & Putih) ── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-white px-6 py-4 rounded-2xl border border-[#b8e6fc] shadow-md shadow-[#0884c4]/5">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#eaf6fe] border border-[#b8e6fc] flex items-center justify-center text-[#0884c4]">
+      {/* ── Ringkasan pengajuan (satu akun = satu pengajuan) ── */}
+      <div className="flex flex-wrap items-center justify-between gap-4 card-surface px-4 sm:px-6 py-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 flex-shrink-0 rounded-full bg-white border border-slate-200/70 shadow-sm flex items-center justify-center text-slate-600">
             <Building2 className="w-5 h-5" />
           </div>
-          <select
-            value={selectedSub?.id}
-            onChange={(e) => loadDetail(Number(e.target.value))}
-            className="text-sm font-bold text-slate-900 bg-[#f4faff] border border-[#b8e6fc] rounded-xl px-4 py-2.5 focus:border-[#0da2e7] outline-none"
-          >
-            {submissions.map((s) => (
-              <option key={s.id} value={s.id}>
-                #{s.id} — {s.publisher_name} ({s.submission_type} / {s.member_category || s.category})
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => loadDetail(selectedSub?.id)}
-            title="Muat ulang"
-            className="p-2.5 bg-[#f4faff] border border-[#b8e6fc] hover:bg-[#dff2fd] rounded-xl text-[#0884c4] transition"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+          <div className="min-w-0">
+            <p className="text-lg text-slate-800 truncate">{sub.publisher_name}</p>
+            <p className="text-xs text-slate-500">
+              Pengajuan #{sub.id} · {sub.submission_type === 'Heregistrasi' ? 'Registrasi (perpanjangan)' : 'Anggota Baru'} · {sub.member_category || sub.category}
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
           {isDraf && (
             <button
               onClick={() => onEditDraft(sub)}
-              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-xl shadow-sm transition flex items-center gap-2"
+              className="soft-pill-primary"
             >
               <Edit3 className="w-4 h-4" />
               <span>Lanjutkan Draf</span>
             </button>
           )}
           <button
-            onClick={() => onNewSubmission({ submissionType: 'Baru', category: 'Biasa' })}
-            className="px-5 py-2.5 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white font-bold text-sm rounded-xl shadow-md shadow-[#0884c4]/20 transition flex items-center gap-2"
+            onClick={refreshStatus}
+            disabled={refreshing}
+            title="Status juga diperbarui otomatis setiap 30 detik"
+            className="soft-pill disabled:opacity-70"
           >
-            <Plus className="w-4 h-4" />
-            <span>Pengajuan Baru</span>
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <span className="flex flex-col items-start leading-tight">
+              <span>{refreshing ? 'Memperbarui...' : 'Perbarui status'}</span>
+              {lastUpdated && !refreshing && (
+                <span className="text-[10px] font-normal text-slate-400">
+                  Diperbarui {lastUpdated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
+            </span>
           </button>
         </div>
       </div>
 
       {/* ── Status Stepper ── */}
-      <StatusStepper currentStatus={sub.status} rejectionReason={sub.rejection_reason} />
+      <StatusStepper currentStatus={sub.status} rejectionReason={sub.rejection_reason} cardClassName="card-surface" />
 
       {/* ══ KTA AKTIF CARD ══ */}
       {sub.status === 'Aktif' && (
-        <div className="bg-gradient-to-r from-[#066ba3] via-[#0884c4] to-[#0da2e7] text-white rounded-2xl p-7 shadow-lg shadow-[#0884c4]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+        <div className="accent-green rounded-[28px] p-6 sm:p-7 shadow-[0_14px_30px_-16px_rgba(18,194,111,0.8)] flex flex-col sm:flex-row sm:items-center justify-between gap-5">
           <div className="space-y-1.5">
-            <div className="inline-flex items-center gap-2 bg-white/20 px-3.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider">
+            <div className="soft-chip !text-emerald-700">
               <ShieldCheck className="w-4 h-4" />
               <span>Anggota Resmi Aktif</span>
             </div>
-            <h3 className="text-2xl font-extrabold">{sub.publisher_name}</h3>
-            <p className="text-sm text-[#dff2fd] font-mono">
-              Nomor KTA: <strong className="text-white text-base">{sub.member_kta || sub.kta_number || '—'}</strong>
+            <h3 className="text-2xl sm:text-3xl font-light">{sub.publisher_name}</h3>
+            <p className="text-sm text-white/85">
+              Nomor KTA: <strong className="text-white text-lg font-medium tracking-wide">{sub.member_kta || sub.kta_number || '—'}</strong>
             </p>
           </div>
           <button
             onClick={() => setShowPacket(true)}
-            className="px-6 py-3 bg-white text-[#0884c4] hover:bg-[#f0f9ff] font-bold text-sm rounded-xl shadow transition flex items-center gap-2 self-start sm:self-center"
+            className="soft-pill self-start sm:self-center"
           >
             <FileText className="w-4 h-4" />
             <span>Unduh Dokumen Resmi</span>
@@ -369,7 +408,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
 
       {/* ══ CATATAN REVISI ADMIN ══ */}
       {isNeedRevision && sub.admin_notes && (
-        <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 flex items-start gap-3.5">
+        <div className="accent-yellow rounded-[22px] p-5 flex items-start gap-3.5">
           <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-amber-900">
             <span className="font-bold">Catatan Verifikator: </span>
@@ -380,21 +419,21 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
 
       {/* ══ PEMBAYARAN & UPLOAD BUKTI BAYAR ══ */}
       {(isWaitPayment || (payment && payment.verification_status !== 'Valid' && !isDraf)) && (
-        <div className="bg-white rounded-2xl border border-[#b8e6fc] shadow-md shadow-[#0884c4]/5 overflow-hidden">
-          <div className="bg-white border-b border-[#d8effd] px-7 py-4 flex items-center justify-between">
+        <div className="card-surface overflow-hidden">
+          <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <CreditCard className="w-5 h-5 text-[#0884c4]" />
-              <h3 className="font-extrabold text-sm text-slate-900 uppercase tracking-wider">Pembayaran Keanggotaan</h3>
+              <h3 className="text-lg text-slate-800">Pembayaran Keanggotaan</h3>
             </div>
-            <span className="text-xs font-bold px-3.5 py-1 rounded-full bg-[#eaf6fe] text-[#0884c4] border border-[#b8e6fc]">
+            <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
               {payment?.verification_status === 'Menunggu' ? 'Menunggu Verifikasi' : 'Belum Dibayar'}
             </span>
           </div>
 
-          <div className="p-7 grid grid-cols-1 lg:grid-cols-2 gap-8 bg-gradient-to-b from-[#f5fbff] to-white">
+          <div className="p-4 sm:p-7 grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
             {/* Info Tagihan & Rekening */}
             <div className="space-y-5">
-              <div className="bg-white border border-[#cdeafd] rounded-xl p-5 space-y-3 text-sm">
+              <div className="panel-inner p-4 sm:p-5 space-y-3 text-sm">
                 {sub.submission_type === 'Baru' ? (
                   <>
                     <div className="flex justify-between text-slate-600">
@@ -409,9 +448,9 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                       <span>Biaya Administrasi</span>
                       <span className="font-semibold text-slate-900">Rp 250.000</span>
                     </div>
-                    <div className="border-t border-[#d8effd] pt-3 flex justify-between font-extrabold text-base text-slate-900">
+                    <div className="border-t border-slate-200/70 pt-3 flex justify-between font-medium text-base text-slate-900">
                       <span>Total Tagihan</span>
-                      <span className="text-[#0884c4] text-lg">Rp 1.700.000</span>
+                      <span className="text-[#3b82f6] text-lg">Rp 1.700.000</span>
                     </div>
                   </>
                 ) : (
@@ -420,29 +459,29 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                       <span>Iuran Perpanjangan 24 Bulan</span>
                       <span className="font-semibold text-slate-900">Rp 1.200.000</span>
                     </div>
-                    <div className="border-t border-[#d8effd] pt-3 flex justify-between font-extrabold text-base text-slate-900">
+                    <div className="border-t border-slate-200/70 pt-3 flex justify-between font-medium text-base text-slate-900">
                       <span>Total Tagihan</span>
-                      <span className="text-[#0884c4] text-lg">Rp 1.200.000</span>
+                      <span className="text-[#3b82f6] text-lg">Rp 1.200.000</span>
                     </div>
                   </>
                 )}
               </div>
 
-              <div className="bg-gradient-to-r from-[#0884c4] to-[#0da2e7] text-white rounded-xl p-5 flex items-center justify-between shadow-sm">
+              <div className="accent-violet rounded-[22px] p-5 flex items-center justify-between shadow-[0_14px_30px_-16px_rgba(123,92,255,0.8)]">
                 <div>
-                  <p className="text-xs text-[#dff2fd] font-semibold uppercase tracking-wider">Rekening Tujuan (Bank BNI)</p>
-                  <p className="text-2xl font-mono font-extrabold mt-1 tracking-wider">2089992087</p>
+                  <p className="text-xs text-white/80">Rekening tujuan · Bank BNI</p>
+                  <p className="text-2xl sm:text-3xl font-medium mt-1 tracking-wide">2089992087</p>
                   <p className="text-sm text-white/90 font-semibold mt-0.5">a.n. Abdul Rasyid</p>
                 </div>
-                <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center">
+                <div className="w-12 h-12 rounded-full bg-white/20 border border-white/40 flex items-center justify-center">
                   <Landmark className="w-6 h-6 text-white" />
                 </div>
               </div>
             </div>
 
             {/* Form Konfirmasi */}
-            <form onSubmit={handlePaymentSubmit} className="bg-white border border-[#cdeafd] rounded-xl p-6 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <form onSubmit={handlePaymentSubmit} className="panel-inner p-4 sm:p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-sm font-bold text-slate-800 block mb-1.5">Bank Pengirim *</label>
                   <input
@@ -451,7 +490,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                     value={payForm.senderBank}
                     onChange={(e) => setPayForm({ ...payForm, senderBank: e.target.value })}
                     placeholder="BCA / Mandiri / BNI / BRI"
-                    className="w-full text-sm px-3.5 py-2.5 bg-[#f8fbfe] border border-[#b8e6fc] rounded-xl focus:border-[#0da2e7] outline-none"
+                    className="soft-input"
                   />
                 </div>
                 <div>
@@ -462,7 +501,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                     value={payForm.senderAccountName}
                     onChange={(e) => setPayForm({ ...payForm, senderAccountName: e.target.value })}
                     placeholder="Nama pemilik rekening"
-                    className="w-full text-sm px-3.5 py-2.5 bg-[#f8fbfe] border border-[#b8e6fc] rounded-xl focus:border-[#0da2e7] outline-none"
+                    className="soft-input"
                   />
                 </div>
                 <div>
@@ -472,7 +511,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                     value={payForm.senderAccountNumber}
                     onChange={(e) => setPayForm({ ...payForm, senderAccountNumber: e.target.value })}
                     placeholder="Nomor rekening"
-                    className="w-full text-sm px-3.5 py-2.5 bg-[#f8fbfe] border border-[#b8e6fc] rounded-xl focus:border-[#0da2e7] outline-none"
+                    className="soft-input"
                   />
                 </div>
                 <div>
@@ -482,7 +521,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                     required
                     value={payForm.transferDate}
                     onChange={(e) => setPayForm({ ...payForm, transferDate: e.target.value })}
-                    className="w-full text-sm px-3.5 py-2.5 bg-[#f8fbfe] border border-[#b8e6fc] rounded-xl focus:border-[#0da2e7] outline-none"
+                    className="soft-input"
                   />
                 </div>
               </div>
@@ -494,9 +533,9 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                   accept="image/*,application/pdf"
                   required={!payment?.proof_file}
                   onChange={(e) => setPayForm({ ...payForm, proofFile: e.target.files[0] })}
-                  className="w-full text-sm text-slate-600 bg-[#f8fbfe] border border-[#b8e6fc] rounded-xl p-2
-                             file:mr-3 file:py-1.5 file:px-3.5 file:rounded-lg file:border-0
-                             file:text-xs file:font-bold file:bg-[#0da2e7] file:text-white"
+                  className="w-full text-sm text-slate-600 bg-white border border-slate-200/80 rounded-2xl p-2
+                             file:mr-3 file:py-1.5 file:px-3.5 file:rounded-full file:border-0
+                             file:text-xs file:font-medium file:bg-[#3b82f6] file:text-white"
                 />
               </div>
 
@@ -510,7 +549,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
               <button
                 type="submit"
                 disabled={submittingPay}
-                className="w-full py-3 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] disabled:opacity-60 text-white text-sm font-bold rounded-xl shadow-md shadow-[#0884c4]/20 transition flex items-center justify-center gap-2"
+                className="soft-pill-primary w-full py-3"
               >
                 <Upload className="w-4 h-4" />
                 <span>{submittingPay ? 'Mengunggah...' : 'Unggah Bukti Pembayaran'}</span>
@@ -521,13 +560,13 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
       )}
 
       {/* ══ DAFTAR BERKAS PERSYARATAN ══ */}
-      <div className="bg-white rounded-2xl border border-[#b8e6fc] shadow-md shadow-[#0884c4]/5 overflow-hidden">
-        <div className="bg-white border-b border-[#d8effd] px-7 py-4 flex items-center justify-between">
+      <div className="card-surface overflow-hidden">
+        <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <FileText className="w-5 h-5 text-[#0884c4]" />
-            <h3 className="font-extrabold text-sm text-slate-900 uppercase tracking-wider">Dokumen Persyaratan</h3>
+            <h3 className="text-lg text-slate-800">Dokumen Persyaratan</h3>
           </div>
-          <span className="text-xs font-bold bg-[#eaf6fe] text-[#0884c4] border border-[#b8e6fc] px-3.5 py-1 rounded-full">
+          <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-[#12c26f]" />
             {docs.filter(d => d.screening_status === 'Sesuai').length}/{docs.length} Sesuai
           </span>
         </div>
@@ -546,17 +585,16 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
               <div
                 key={doc.id || idx}
                 className={`px-7 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition ${
-                  idx % 2 === 0 ? 'bg-white' : 'bg-[#f8fbfe]'
+                  idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'
                 }`}
               >
                 <div className="space-y-1 flex-1 min-w-0">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-bold text-slate-900">{doc.document_title}</span>
-                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold ${
-                      isSesuai  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                      : isRevisi ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                      : 'bg-[#eaf6fe] text-[#0884c4] border border-[#b8e6fc]'
-                    }`}>
+                    <span className="soft-chip">
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        isSesuai ? 'bg-[#12c26f]' : isRevisi ? 'bg-amber-400' : 'bg-[#3b82f6]'
+                      }`} />
                       {doc.screening_status || 'Menunggu'}
                     </span>
                   </div>
@@ -576,19 +614,19 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
                       href={doc.file_path}
                       target="_blank"
                       rel="noreferrer"
-                      className="px-3.5 py-2 text-xs bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] font-bold rounded-xl flex items-center gap-1.5 transition"
+                      className="soft-pill !px-3.5 !py-2 !text-xs"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       <span>Lihat</span>
                     </a>
                   )}
                   {canUpload ? (
-                    <label className={`px-4 py-2 text-xs font-bold rounded-xl cursor-pointer flex items-center gap-1.5 transition ${
+                    <label className={`px-4 py-2 text-xs font-medium rounded-full cursor-pointer flex items-center gap-1.5 transition ${
                       isRevisi
-                        ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-sm'
+                        ? 'bg-amber-400 hover:bg-amber-500 text-slate-900 shadow-sm'
                         : doc.file_path
-                        ? 'bg-white hover:bg-[#f0f9ff] text-[#0884c4] border border-[#b8e6fc]'
-                        : 'bg-[#0da2e7] hover:bg-[#0884c4] text-white shadow-sm'
+                        ? 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/70 shadow-sm'
+                        : 'bg-[#3b82f6] hover:bg-[#2f6fe0] text-white shadow-sm'
                     }`}>
                       <Upload className="w-3.5 h-3.5" />
                       <span>
@@ -619,7 +657,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft }) {
             <div className="flex justify-end mb-2">
               <button
                 onClick={() => setShowPacket(false)}
-                className="px-4 py-2 bg-white text-slate-800 font-bold text-xs rounded-xl shadow flex items-center gap-1.5"
+                className="soft-pill !py-2 !text-xs"
               >
                 <X className="w-4 h-4" />
                 <span>Tutup</span>

@@ -27,15 +27,15 @@ export default function Sidebar({ currentView, onChangeView }) {
             Peran Aktif:
           </div>
           <div className="text-sm font-extrabold text-white flex items-center gap-2 mt-0.5">
-            {role === 'Admin 2' ? (
+            {role === 'Ketua' ? (
               <>
                 <Award className="w-4 h-4 text-amber-400" />
-                <span>Admin 2 (Ketua/Approval)</span>
+                <span>Ketua (Approval)</span>
               </>
-            ) : role === 'Admin 1' ? (
+            ) : role === 'Sekretaris' ? (
               <>
                 <ShieldCheck className="w-4 h-4 text-blue-400" />
-                <span>Admin 1 (Verifikator)</span>
+                <span>Sekretaris (Screening)</span>
               </>
             ) : (
               <>
@@ -82,7 +82,7 @@ export default function Sidebar({ currentView, onChangeView }) {
           )}
 
           {/* ADMIN 1 MENU */}
-          {role === 'Admin 1' && (
+          {role === 'Sekretaris' && (
             <>
               <button
                 onClick={() => onChangeView('admin1_screening')}
@@ -123,7 +123,7 @@ export default function Sidebar({ currentView, onChangeView }) {
           )}
 
           {/* ADMIN 2 MENU */}
-          {role === 'Admin 2' && (
+          {role === 'Ketua' && (
             <>
               <button
                 onClick={() => onChangeView('admin2_approval')}

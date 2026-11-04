@@ -96,14 +96,14 @@ export default function AuthModal({ isOpen, onClose }) {
               onClick={() => handleDemoSwitch(null, 'admin1@ikapi-jabar.or.id')}
               className="px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-900 font-medium rounded-lg text-left truncate transition border border-blue-200"
             >
-              🛡️ Admin 1 (Verifikator)
+              🛡️ Sekretaris
             </button>
             <button
               type="button"
               onClick={() => handleDemoSwitch(null, 'admin2@ikapi-jabar.or.id')}
               className="px-2 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 font-medium rounded-lg text-left truncate transition border border-amber-200"
             >
-              👑 Admin 2 (Ketua)
+              👑 Ketua
             </button>
             <button
               type="button"

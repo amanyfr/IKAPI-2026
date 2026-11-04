@@ -21,7 +21,8 @@ export default function DocumentVerificationModal({
   payment, 
   onScreenDocument, 
   onVerifyPayment, 
-  onAdmin1Action 
+  onAdmin1Action,
+  onPassToAdmin2 // opsional: alur pembubuhan TTD Sekretaris sebelum diteruskan
 }) {
   const [activeTab, setActiveTab] = useState('documents'); // 'documents' | 'payment' | 'action'
   const [revisionNotes, setRevisionNotes] = useState({});
@@ -45,6 +46,10 @@ export default function DocumentVerificationModal({
   const handlePassToAdmin2 = async () => {
     if (!canPassToAdmin2) {
       alert('Semua berkas harus berstatus "Sesuai" dan bukti pembayaran harus "Valid".');
+      return;
+    }
+    if (onPassToAdmin2) {
+      onPassToAdmin2(generalNotes);
       return;
     }
     setProcessing(true);
@@ -81,8 +86,8 @@ export default function DocumentVerificationModal({
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base sm:text-lg leading-tight">
-                Screening Berkas & Verifikasi Pembayaran (Admin 1)
+              <h3 className="font-medium text-base sm:text-lg leading-tight">
+                Screening Berkas & Verifikasi Pembayaran (Sekretaris)
               </h3>
               <p className="text-xs text-[#dff2fd] mt-0.5">
                 {submission.publisher_name} • Kategori {submission.member_category || submission.category} ({submission.submission_type})
@@ -168,7 +173,7 @@ export default function DocumentVerificationModal({
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="text-xs sm:text-sm font-bold text-slate-800">
+                          <h4 className="text-xs sm:text-sm font-medium text-slate-800">
                             {doc.document_title}
                           </h4>
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
@@ -260,7 +265,7 @@ export default function DocumentVerificationModal({
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
                     <div>
                       <span className="text-xs text-slate-500 font-medium">Tagihan Pembayaran IKAPI</span>
-                      <h4 className="text-xl font-black text-slate-900">
+                      <h4 className="text-2xl font-light text-slate-900">
                         Rp {payment.amount?.toLocaleString('id-ID')}
                       </h4>
                     </div>
@@ -345,7 +350,7 @@ export default function DocumentVerificationModal({
           {activeTab === 'action' && (
             <div className="space-y-4">
               <div className="bg-[#f0f9ff]/50 p-4 rounded-xl border border-[#b8e6fc] text-xs space-y-2">
-                <h4 className="font-bold text-slate-900">Ringkasan Kelayakan Pengajuan:</h4>
+                <h4 className="font-medium text-slate-900">Ringkasan Kelayakan Pengajuan:</h4>
                 <div className="flex items-center gap-2">
                   <span className={`w-3 h-3 rounded-full ${allDocsSesuai ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                   <span>Berkas Persyaratan: {allDocsSesuai ? 'Lengkap & Sesuai' : 'Belum Semua Sesuai'}</span>
@@ -358,7 +363,7 @@ export default function DocumentVerificationModal({
 
               <div>
                 <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Catatan Admin 1 untuk Tahapan Ini:
+                  Catatan Sekretaris untuk Tahapan Ini:
                 </label>
                 <textarea
                   rows="3"
@@ -389,7 +394,7 @@ export default function DocumentVerificationModal({
                   }`}
                 >
                   <CheckCircle className="w-4 h-4 text-amber-300" />
-                  Loloskan & Teruskan ke Admin 2 (Approval)
+                  {onPassToAdmin2 ? 'Tanda Tangani & Teruskan ke Ketua' : 'Loloskan & Teruskan ke Ketua (Approval)'}
                 </button>
               </div>
             </div>

@@ -24,6 +24,18 @@ export default {
           // Aksen putih bersih
           bg:   '#f8fbfe',
           card: '#ffffff',
+        },
+        // Design system situs resmi ikapi.org
+        brand: {
+          blue:  '#0c71c3',  // tombol utama (READ MORE)
+          nav:   '#1e84bf',  // menu aktif / hover tombol
+          sky:   '#2ea3f2',  // link & tombol outline
+          navy:  '#082691',  // gradasi footer
+          gold:  '#e7b14e',  // subjudul aksen
+          ink:   '#232323',  // judul & tombol gelap
+          text:  '#666666',  // teks isi
+          line:  '#d8d8d8',  // garis / border
+          muted: '#f2f2f2',  // latar abu muda
         }
       },
       fontFamily: {

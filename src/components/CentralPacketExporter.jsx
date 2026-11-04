@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Package, FileText, FileSpreadsheet, Paperclip, Printer, CheckCircle, ExternalLink, Download } from 'lucide-react';
+import { Package, FileText, FileSpreadsheet, Paperclip, Printer, CheckCircle, ExternalLink, Download, ClipboardCheck, Gavel } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import OfficialLetterGenerator from './OfficialLetterGenerator';
 import OfficialApplicationFormPdf from './OfficialApplicationFormPdf';
+import { BeritaAcaraVerifikasi, SuratKeputusan } from './PengurusDocuments';
 
-export default function CentralPacketExporter({ submission, documents = [], settings }) {
-  const [activeTab, setActiveTab] = useState('surat'); // 'surat' | 'formulir' | 'berkas'
+export default function CentralPacketExporter({ submission, documents = [], settings, payment = null }) {
+  const [activeTab, setActiveTab] = useState('surat'); // 'surat' | 'formulir' | 'berita_acara' | 'sk' | 'berkas'
 
   if (!submission) return null;
 
@@ -39,7 +40,7 @@ export default function CentralPacketExporter({ submission, documents = [], sett
       doc.setFont('times', 'bold');
       doc.text(`${i + 1}. ${d.document_title}`, 24, y);
       doc.setFont('times', 'normal');
-      doc.text(`   Nama File : ${d.file_name || 'Dokumen.pdf'} | Status Screening Admin 1 : ${d.screening_status || 'Sesuai'}`, 24, y + 5);
+      doc.text(`   Nama File : ${d.file_name || 'Dokumen.pdf'} | Status Screening Sekretaris : ${d.screening_status || 'Sesuai'}`, 24, y + 5);
       y += 13;
     });
 
@@ -59,7 +60,7 @@ export default function CentralPacketExporter({ submission, documents = [], sett
       doc.text(`Penerbit Pemohon   : ${submission.publisher_name || '-'}`, 20, 48);
       doc.text(`Jenis Berkas       : ${d.document_title}`, 20, 55);
       doc.text(`Nama File Terunggah: ${d.file_name || '-'}`, 20, 62);
-      doc.text(`Hasil Verifikasi   : ${d.screening_status || 'Sesuai'} (Telah Diverifikasi oleh Admin 1 PD IKAPI Jabar)`, 20, 69);
+      doc.text(`Hasil Verifikasi   : ${d.screening_status || 'Sesuai'} (Telah Diverifikasi oleh Sekretaris PD IKAPI Jabar)`, 20, 69);
 
       doc.rect(20, 80, 170, 160);
       doc.setFont('times', 'italic');
@@ -133,6 +134,22 @@ export default function CentralPacketExporter({ submission, documents = [], sett
             2. Formulir PDF (IKAPI 2026)
           </button>
 
+          {[
+            { key: 'berita_acara', icon: ClipboardCheck, label: 'Berita Acara Verifikasi' },
+            { key: 'sk', icon: Gavel, label: 'Surat Keputusan' },
+          ].map(({ key, icon: Icon, label }) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition ${
+                activeTab === key ? 'bg-white text-[#0884c4] shadow' : 'text-white/90 hover:bg-white/15'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
+
           <button
             onClick={() => setActiveTab('berkas')}
             className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition ${
@@ -142,7 +159,7 @@ export default function CentralPacketExporter({ submission, documents = [], sett
             }`}
           >
             <Paperclip className="w-4 h-4" />
-            3. Gabungan Berkas Persyaratan ({documents.length} Berkas)
+            Gabungan Berkas Persyaratan ({documents.length} Berkas)
           </button>
         </div>
       </div>
@@ -154,7 +171,15 @@ export default function CentralPacketExporter({ submission, documents = [], sett
         )}
 
         {activeTab === 'formulir' && (
-          <OfficialApplicationFormPdf submission={submission} />
+          <OfficialApplicationFormPdf submission={submission} settings={settings} />
+        )}
+
+        {activeTab === 'berita_acara' && (
+          <BeritaAcaraVerifikasi submission={submission} settings={settings} documents={documents} payment={payment} />
+        )}
+
+        {activeTab === 'sk' && (
+          <SuratKeputusan submission={submission} settings={settings} />
         )}
 
         {activeTab === 'berkas' && (

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import DocumentVerificationModal from '../components/DocumentVerificationModal';
 import CentralPacketExporter from '../components/CentralPacketExporter';
+import { useMySignature, MySignatureCard, SignLetterModal } from '../components/LetterSigning';
+import { exportMembersExcel } from '../utils/exportMembers';
 import {
   ShieldCheck,
   Search,
@@ -19,16 +21,16 @@ import {
   Users
 } from 'lucide-react';
 
-export default function Admin1Screening({ onNavigateToMembers }) {
+export default function Admin1Screening({ onNavigateToMembers, initialStatus = 'Semua', initialSearch = '' }) {
   const { user } = useAuth();
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Filters
-  const [filterStatus, setFilterStatus] = useState('Semua');
+  // Filters (bisa diisi awal dari Dashboard)
+  const [filterStatus, setFilterStatus] = useState(initialStatus);
   const [filterType, setFilterType] = useState('Semua');
   const [filterCategory, setFilterCategory] = useState('Semua');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialSearch);
 
   // Selected for Verification Modal
   const [selectedSubDetail, setSelectedSubDetail] = useState(null);
@@ -42,6 +44,12 @@ export default function Admin1Screening({ onNavigateToMembers }) {
   const [ktaModalSub, setKtaModalSub] = useState(null);
   const [ktaInput, setKtaInput] = useState('');
   const [submittingKta, setSubmittingKta] = useState(false);
+
+  // TTD tersimpan Sekretaris, dibubuhkan saat meneruskan pengajuan ke Ketua
+  const isSekretaris = user?.role === 'Sekretaris';
+  const mySignature = useMySignature(isSekretaris);
+  const [passing, setPassing] = useState(null); // { submission, settings, notes }
+  const [processingPass, setProcessingPass] = useState(false);
 
   const fetchSubmissions = async () => {
     setLoading(true);
@@ -141,15 +149,15 @@ export default function Admin1Screening({ onNavigateToMembers }) {
     fetchSubmissions();
   };
 
-  // Admin 1 action (request_revision / pass_to_admin2 / update_kta)
-  const handleAdmin1Action = async (submissionId, action, notes) => {
+  // Sekretaris action (request_revision / pass_to_admin2 / update_kta)
+  const handleAdmin1Action = async (submissionId, action, notes, extra = {}) => {
     const res = await fetch(`/api/submissions/${submissionId}/admin1-action`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${localStorage.getItem('ikapi_token')}`
       },
-      body: JSON.stringify({ action, notes })
+      body: JSON.stringify({ action, notes, ...extra })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
@@ -158,7 +166,25 @@ export default function Admin1Screening({ onNavigateToMembers }) {
     fetchSubmissions();
   };
 
-  // Handle Send Packet to IKAPI Pusat (PRD Section 3 & 4: Status Disetujui -> Aksi oleh Admin 1: kirim)
+  // "Loloskan & Teruskan ke Ketua": Sekretaris membubuhkan TTD-nya pada pratinjau surat dulu
+  const startPassToKetua = (notes) => {
+    setPassing({ submission: selectedSubDetail.submission, settings: selectedSubDetail.settings, notes });
+    setIsVerifyModalOpen(false);
+  };
+
+  const confirmPassToKetua = async (signaturePositions) => {
+    setProcessingPass(true);
+    try {
+      await handleAdmin1Action(passing.submission.id, 'pass_to_admin2', passing.notes, { signaturePositions });
+      setPassing(null);
+    } catch (err) {
+      alert('Gagal meneruskan: ' + err.message);
+    } finally {
+      setProcessingPass(false);
+    }
+  };
+
+  // Handle Send Packet to IKAPI Pusat (PRD Section 3 & 4: Status Disetujui -> Aksi oleh Sekretaris: kirim)
   const handleSendToCentral = async (submissionId) => {
     try {
       const res = await fetch(`/api/submissions/${submissionId}/admin2-action`, {
@@ -212,39 +238,91 @@ export default function Admin1Screening({ onNavigateToMembers }) {
 
   const handleExportExcel = async () => {
     try {
-      const res = await fetch('/api/members/export', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` }
-      });
-      if (!res.ok) throw new Error('Gagal mengunduh file Excel');
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'Data_Anggota_IKAPI_Jawa_Barat.xlsx';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      await exportMembersExcel();
     } catch (err) {
       alert('Ekspor Excel gagal: ' + err.message);
     }
+  };
+
+  const statusChipClass = (status) =>
+    status === 'Aktif'             ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+    : status === 'Disetujui'         ? 'bg-blue-100 text-blue-800 border border-blue-200'
+    : status === 'Menunggu Approval' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+    : status === 'Dikirim ke Pusat'  ? 'bg-purple-100 text-purple-800 border border-purple-200'
+    : status === 'Perlu Revisi'      ? 'bg-amber-100 text-amber-800 border border-amber-200'
+    : status === 'Ditolak'           ? 'bg-red-100 text-red-800 border border-red-200'
+    : 'bg-slate-100 text-slate-700 border border-slate-200';
+
+  // Tombol aksi per pengajuan — dipakai di tabel (layar lebar) dan kartu (HP)
+  const renderActions = (sub) => {
+    const isReadyForKta = sub.status === 'Dikirim ke Pusat';
+    const isApproved = ['Disetujui', 'Dikirim ke Pusat', 'Aktif'].includes(sub.status);
+    return (
+      <>
+        {/* Screening Button */}
+        <button
+          onClick={() => openVerificationModal(sub.id)}
+          className="px-2.5 py-1.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white rounded-lg text-xs font-semibold shadow transition flex items-center gap-1"
+          title="Screening Berkas & Verifikasi Pembayaran"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+          <span>Screening</span>
+        </button>
+
+        {/* Packet Button if Approved */}
+        {isApproved && (
+          <button
+            onClick={() => openPacketModal(sub.id)}
+            className="px-2.5 py-1.5 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] rounded-lg text-xs font-bold transition flex items-center gap-1"
+            title="Lihat Paket 3 Dokumen ke Pusat"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Paket PDF</span>
+          </button>
+        )}
+
+        {/* Send to Central Button if Disetujui (PRD Hal. 4: Disetujui -> Aksi oleh Sekretaris: kirim) */}
+        {sub.status === 'Disetujui' && (
+          <button
+            onClick={() => handleSendToCentral(sub.id)}
+            className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold shadow transition flex items-center gap-1"
+            title="Tandai Paket Telah Dikirim ke IKAPI Pusat"
+          >
+            <Send className="w-3.5 h-3.5" />
+            <span>Kirim ke Pusat</span>
+          </button>
+        )}
+
+        {/* Input KTA Button if sent to central */}
+        {isReadyForKta && (
+          <button
+            onClick={() => { setKtaModalSub(sub); setKtaInput(''); }}
+            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow transition flex items-center gap-1"
+            title="Input No. KTA dari Pusat & Aktifkan"
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+            <span>Input KTA</span>
+          </button>
+        )}
+      </>
+    );
   };
 
   return (
     <div className="space-y-6">
 
       {/* Header Banner */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="card-surface p-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
           <div className="p-3 bg-[#0da2e7] rounded-xl text-white">
             <ShieldCheck className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-900">
-              Screening & Verifikasi Berkas (Admin 1)
+            <h2 className="text-2xl font-light tracking-tight text-slate-900">
+              Screening & Verifikasi Berkas (Sekretaris)
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Pemeriksaan kesesuaian berkas hukum, verifikasi bukti transfer, dan penerusan pengajuan ke Admin 2.
+              Pemeriksaan kesesuaian berkas hukum, verifikasi bukti transfer, dan penerusan pengajuan ke Ketua.
             </p>
           </div>
         </div>
@@ -269,8 +347,18 @@ export default function Admin1Screening({ onNavigateToMembers }) {
         </div>
       </div>
 
+      {/* Tanda tangan tersimpan Sekretaris */}
+      {isSekretaris && (
+        <MySignatureCard
+          roleLabel="Sekretaris"
+          signature={mySignature.signature}
+          saving={mySignature.saving}
+          onSave={mySignature.save}
+        />
+      )}
+
       {/* Filter & Search Bar */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+      <div className="panel-surface p-4">
         <form onSubmit={handleSearchSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
 
           {/* Search Input */}
@@ -343,19 +431,60 @@ export default function Admin1Screening({ onNavigateToMembers }) {
       </div>
 
       {/* Submissions Table */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="card-surface overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex justify-between items-center">
           <span className="text-xs font-bold text-slate-700">
             Daftar Pengajuan ({submissions.length})
           </span>
-          <span className="text-[11px] text-slate-500">
+          <span className="hidden sm:inline text-[11px] text-slate-500">
             Klik "Screening Berkas" untuk memeriksa dokumen & pembayaran
           </span>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* ── HP: daftar kartu ── */}
+        <div className="md:hidden divide-y divide-slate-100 bg-white">
+          {loading ? (
+            <p className="py-8 text-center text-xs text-slate-400">Memuat data pengajuan...</p>
+          ) : submissions.length === 0 ? (
+            <p className="py-8 text-center text-xs text-slate-400">Tidak ada pengajuan yang sesuai dengan filter.</p>
+          ) : (
+            submissions.map((sub) => (
+              <div key={sub.id} className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-bold text-blue-950 text-sm">{sub.publisher_name}</div>
+                    <div className="text-[11px] text-slate-500">Pimpinan: {sub.leader_name}</div>
+                  </div>
+                  <span className={`flex-shrink-0 inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
+                    {sub.status}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="bg-slate-50 rounded-xl px-3 py-2">
+                    <div className="text-slate-400">Kategori / Jenis</div>
+                    <div className="font-semibold text-slate-700">{sub.member_category || 'Biasa'} · {sub.submission_type}</div>
+                    <div className="text-slate-500">{sub.city || '-'}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl px-3 py-2">
+                    <div className="text-slate-400">Pembayaran</div>
+                    <div className="font-semibold text-slate-900">
+                      Rp {sub.payment_amount ? sub.payment_amount.toLocaleString('id-ID') : '-'}
+                    </div>
+                    <div className={`font-bold ${sub.payment_status === 'Valid' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {sub.payment_status || 'Belum Bayar'}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5">{renderActions(sub)}</div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* ── Layar lebar: tabel ── */}
+        <div className="hidden md:block overflow-x-auto bg-white">
           <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 text-slate-600 uppercase text-[10px] tracking-wider border-b border-slate-200">
+            <thead className="bg-slate-50 text-slate-600 uppercase text-[10px] tracking-wider border-b border-slate-100">
               <tr>
                 <th className="py-3 px-4">No</th>
                 <th className="py-3 px-4">Nama Penerbit & Pimpinan</th>
@@ -380,123 +509,61 @@ export default function Admin1Screening({ onNavigateToMembers }) {
                   </td>
                 </tr>
               ) : (
-                submissions.map((sub, idx) => {
-                  const isReadyForKta = sub.status === 'Dikirim ke Pusat';
-                  const isApproved = ['Disetujui', 'Dikirim ke Pusat', 'Aktif'].includes(sub.status);
+                submissions.map((sub, idx) => (
+                  <tr key={sub.id} className="hover:bg-slate-50 transition">
+                    <td className="py-3.5 px-4 font-mono font-bold text-slate-400">
+                      {idx + 1}
+                    </td>
 
-                  return (
-                    <tr key={sub.id} className="hover:bg-slate-50/70 transition">
-                      <td className="py-3.5 px-4 font-mono font-bold text-slate-400">
-                        {idx + 1}
-                      </td>
+                    <td className="py-3.5 px-4">
+                      <div className="font-bold text-blue-950 text-sm">
+                        {sub.publisher_name}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Pimpinan: {sub.leader_name}
+                      </div>
+                    </td>
 
-                      <td className="py-3.5 px-4">
-                        <div className="font-bold text-blue-950 text-sm">
-                          {sub.publisher_name}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          Pimpinan: {sub.leader_name}
-                        </div>
-                      </td>
+                    <td className="py-3.5 px-4">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${sub.member_category === 'Luar Biasa'
+                        ? 'bg-purple-100 text-purple-800'
+                        : 'bg-blue-100 text-blue-800'
+                        }`}>
+                        {sub.member_category || 'Biasa'}
+                      </span>
+                      <span className="block text-[10px] text-slate-500 mt-0.5">
+                        {sub.submission_type}
+                      </span>
+                    </td>
 
-                      <td className="py-3.5 px-4">
-                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${sub.member_category === 'Luar Biasa'
-                          ? 'bg-purple-100 text-purple-800'
-                          : 'bg-blue-100 text-blue-800'
-                          }`}>
-                          {sub.member_category || 'Biasa'}
-                        </span>
-                        <span className="block text-[10px] text-slate-500 mt-0.5">
-                          {sub.submission_type}
-                        </span>
-                      </td>
+                    <td className="py-3.5 px-4 text-slate-600">
+                      {sub.city || '-'}
+                    </td>
 
-                      <td className="py-3.5 px-4 text-slate-600">
-                        {sub.city || '-'}
-                      </td>
+                    <td className="py-3.5 px-4">
+                      <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
+                        {sub.status}
+                      </span>
+                    </td>
 
-                      <td className="py-3.5 px-4">
-                        <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${sub.status === 'Aktif'
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : sub.status === 'Disetujui'
-                            ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                            : sub.status === 'Menunggu Approval'
-                              ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                              : sub.status === 'Dikirim ke Pusat'
-                                ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                                : sub.status === 'Perlu Revisi'
-                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                  : sub.status === 'Ditolak'
-                                    ? 'bg-red-100 text-red-800 border border-red-200'
-                                    : 'bg-slate-100 text-slate-700 border border-slate-200'
-                          }`}>
-                          {sub.status}
-                        </span>
-                      </td>
+                    <td className="py-3.5 px-4">
+                      <div className="font-semibold text-slate-900">
+                        Rp {sub.payment_amount ? sub.payment_amount.toLocaleString('id-ID') : '-'}
+                      </div>
+                      <span className={`text-[10px] font-bold ${sub.payment_status === 'Valid' ? 'text-emerald-700' : 'text-amber-700'
+                        }`}>
+                        {sub.payment_status || 'Belum Bayar'}
+                      </span>
+                    </td>
 
-                      <td className="py-3.5 px-4">
-                        <div className="font-semibold text-slate-900">
-                          Rp {sub.payment_amount ? sub.payment_amount.toLocaleString('id-ID') : '-'}
-                        </div>
-                        <span className={`text-[10px] font-bold ${sub.payment_status === 'Valid' ? 'text-emerald-700' : 'text-amber-700'
-                          }`}>
-                          {sub.payment_status || 'Belum Bayar'}
-                        </span>
-                      </td>
+                    <td className="py-3.5 px-4 text-center">
+                      <div className="flex items-center justify-center space-x-1.5">
+                        {renderActions(sub)}
+                      </div>
+                    </td>
 
-                      <td className="py-3.5 px-4 text-center">
-                        <div className="flex items-center justify-center space-x-1.5">
-                          {/* Screening Button */}
-                          <button
-                            onClick={() => openVerificationModal(sub.id)}
-                            className="px-2.5 py-1.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white rounded-lg text-xs font-semibold shadow transition flex items-center gap-1"
-                            title="Screening Berkas & Verifikasi Pembayaran"
-                          >
-                            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Screening</span>
-                          </button>
-
-                          {/* Packet Button if Approved */}
-                          {isApproved && (
-                            <button
-                              onClick={() => openPacketModal(sub.id)}
-                              className="px-2.5 py-1.5 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] rounded-lg text-xs font-bold transition flex items-center gap-1"
-                              title="Lihat Paket 3 Dokumen ke Pusat"
-                            >
-                              <FileText className="w-3.5 h-3.5" />
-                              <span>Paket PDF</span>
-                            </button>
-                          )}
-
-                          {/* Send to Central Button if Disetujui (PRD Hal. 4: Disetujui -> Aksi oleh Admin 1: kirim) */}
-                          {sub.status === 'Disetujui' && (
-                            <button
-                              onClick={() => handleSendToCentral(sub.id)}
-                              className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold shadow transition flex items-center gap-1"
-                              title="Tandai Paket Telah Dikirim ke IKAPI Pusat"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                              <span>Kirim ke Pusat</span>
-                            </button>
-                          )}
-
-                          {/* Input KTA Button if sent to central */}
-                          {isReadyForKta && (
-                            <button
-                              onClick={() => { setKtaModalSub(sub); setKtaInput(''); }}
-                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow transition flex items-center gap-1"
-                              title="Input No. KTA dari Pusat & Aktifkan"
-                            >
-                              <KeyRound className="w-3.5 h-3.5" />
-                              <span>Input KTA</span>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-
-                    </tr>
-                  );
-                })
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -514,6 +581,25 @@ export default function Admin1Screening({ onNavigateToMembers }) {
           onScreenDocument={handleScreenDoc}
           onVerifyPayment={handleVerifyPayment}
           onAdmin1Action={handleAdmin1Action}
+          onPassToAdmin2={isSekretaris ? startPassToKetua : undefined}
+        />
+      )}
+
+      {/* Pembubuhan TTD Sekretaris sebelum diteruskan ke Ketua */}
+      {passing && (
+        <SignLetterModal
+          role="secretary"
+          submission={{ ...passing.submission, reference_number: passing.submission.reference_number || 'Otomatis saat diteruskan' }}
+          settings={passing.settings}
+          signature={mySignature.signature}
+          savingSignature={mySignature.saving}
+          onSaveSignature={mySignature.save}
+          title="Bubuhkan tanda tangan Sekretaris pada dokumen pengajuan"
+          subtitle={`${passing.submission.publisher_name} • diteruskan ke Ketua setelah ditandatangani`}
+          confirmLabel="Bubuhkan TTD (4 dokumen) & Teruskan"
+          processing={processingPass}
+          onConfirm={confirmPassToKetua}
+          onClose={() => setPassing(null)}
         />
       )}
 
@@ -533,6 +619,7 @@ export default function Admin1Screening({ onNavigateToMembers }) {
               submission={packetSubDetail.submission}
               documents={packetSubDetail.documents}
               settings={packetSubDetail.settings}
+              payment={packetSubDetail.payment}
             />
           </div>
         </div>
@@ -541,10 +628,10 @@ export default function Admin1Screening({ onNavigateToMembers }) {
       {/* MODAL 3: INPUT NO KTA DARI PUSAT */}
       {ktaModalSub && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
+          <div className="modal-surface max-w-md w-full p-6 space-y-4">
             <div className="flex items-center space-x-3 text-emerald-700">
               <BadgeCheck className="w-6 h-6" />
-              <h3 className="font-bold text-base text-slate-900">
+              <h3 className="font-medium text-lg text-slate-900">
                 Aktivasi Keanggotaan IKAPI (No. KTA)
               </h3>
             </div>

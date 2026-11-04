@@ -55,20 +55,32 @@ export const query = {
   }
 };
 
-export async function initDb() {
-  await query.exec(`
-    PRAGMA foreign_keys = ON;
-
-    CREATE TABLE IF NOT EXISTS users (
+// Definisi tabel users. Peran: Admin (kelola sistem & akun), Sekretaris (screening & verifikasi),
+// Ketua (approval & TTD), Anggota (penerbit). member_type/member_category/old_kta_number diisi
+// lewat pertanyaan saat login pertama anggota; onboarded_at menandai pertanyaan sudah dijawab.
+function usersTableSql(name) {
+  return `CREATE TABLE IF NOT EXISTS ${name} (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('Anggota', 'Admin 1', 'Admin 2')),
+      role TEXT NOT NULL CHECK(role IN ('Admin', 'Sekretaris', 'Ketua', 'Anggota')),
       phone TEXT,
       email_verified_at TEXT,
+      member_type TEXT CHECK(member_type IN ('Lama', 'Baru')),
+      member_category TEXT CHECK(member_category IN ('Biasa', 'Luar Biasa')),
+      old_kta_number TEXT,
+      onboarded_at TEXT,
+      signature_img TEXT, -- TTD tersimpan (PNG data URL), dipakai berulang oleh Ketua
       created_at TEXT DEFAULT (datetime('now', 'localtime'))
-    );
+    );`;
+}
+
+export async function initDb() {
+  await query.exec(`
+    PRAGMA foreign_keys = ON;
+
+    ${usersTableSql('users')}
 
     CREATE TABLE IF NOT EXISTS members (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,6 +136,11 @@ export async function initDb() {
       signed_by_secretary TEXT,
       chairman_signature_date TEXT,
       secretary_signature_date TEXT,
+      chairman_signature_img TEXT, -- salinan TTD Ketua saat dibubuhkan
+      chairman_signature_pos TEXT, -- JSON {x, y, w}: posisi relatif di area tanda tangan surat
+      secretary_signature_img TEXT, -- salinan TTD Sekretaris saat diteruskan ke Ketua
+      secretary_signature_pos TEXT,
+      signature_positions TEXT, -- JSON { dokumen: { chairman: {x,y,w}, secretary: {x,y,w} } }
       submitted_at TEXT,
       approved_at TEXT,
       sent_to_central_at TEXT,
@@ -180,6 +197,64 @@ export async function initDb() {
       description TEXT
     );
   `);
+
+  await migrateUserRoles();
+  await addColumnIfMissing('users', 'signature_img', 'TEXT');
+  await addColumnIfMissing('submissions', 'chairman_signature_img', 'TEXT');
+  await addColumnIfMissing('submissions', 'chairman_signature_pos', 'TEXT');
+  await addColumnIfMissing('submissions', 'secretary_signature_img', 'TEXT');
+  await addColumnIfMissing('submissions', 'secretary_signature_pos', 'TEXT');
+  await addColumnIfMissing('submissions', 'signature_positions', 'TEXT');
+}
+
+async function addColumnIfMissing(table, column, type) {
+  const cols = await query.all(`PRAGMA table_info(${table})`);
+  if (!cols.some((c) => c.name === column)) {
+    await query.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
+// Migrasi sekali jalan dari peran lama ('Admin 1' / 'Admin 2') ke peran baru.
+// SQLite tidak bisa mengubah CHECK constraint, jadi tabel users dibangun ulang.
+// foreign_keys dimatikan sementara agar DROP TABLE tidak memicu ON DELETE CASCADE.
+async function migrateUserRoles() {
+  const table = await query.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'");
+  if (!table || !table.sql.includes("'Admin 1'")) return;
+
+  try {
+    await query.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      ${usersTableSql('users_new')}
+      INSERT INTO users_new (id, name, email, password, role, phone, email_verified_at, created_at)
+        SELECT id, name, email, password,
+               CASE role WHEN 'Admin 1' THEN 'Sekretaris' WHEN 'Admin 2' THEN 'Ketua' ELSE role END,
+               phone, email_verified_at, created_at
+        FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_new RENAME TO users;
+
+      UPDATE users SET email = 'sekretaris@ikapi-jabar.or.id', name = 'Drs. H. Anwar Rosyid, M.Si. (Sekretaris)'
+        WHERE email = 'admin1@ikapi-jabar.or.id';
+      UPDATE users SET email = 'ketua@ikapi-jabar.or.id'
+        WHERE email = 'admin2@ikapi-jabar.or.id';
+
+      -- Anggota yang sudah ada dianggap sudah menjawab pertanyaan login pertama
+      UPDATE users SET
+        onboarded_at = datetime('now', 'localtime'),
+        member_type = CASE WHEN EXISTS (
+          SELECT 1 FROM submissions s WHERE s.user_id = users.id AND s.submission_type = 'Heregistrasi'
+        ) THEN 'Lama' ELSE 'Baru' END,
+        member_category = COALESCE((SELECT m.category FROM members m WHERE m.user_id = users.id LIMIT 1), 'Biasa')
+      WHERE role = 'Anggota';
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `);
+    console.log('Migrasi peran pengguna selesai: Admin 1 -> Sekretaris, Admin 2 -> Ketua.');
+  } catch (err) {
+    await query.exec('ROLLBACK; PRAGMA foreign_keys = ON;').catch(() => {});
+    throw err;
+  }
 }
 
 export default db;

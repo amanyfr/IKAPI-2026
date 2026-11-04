@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import CentralPacketExporter from '../components/CentralPacketExporter';
+import { useMySignature, MySignatureCard, SignLetterModal } from '../components/LetterSigning';
 import StatusStepper from '../components/StatusStepper';
 import {
   Award, CheckCircle, XCircle, Send, FileText, Users,
@@ -11,9 +12,9 @@ import {
 const STAGE_PROGRESS = {
   'Draf':                  { step: 1, total: 7, label: 'Tahap 1/7 · Pengisian Draf Pemohon', color: 'bg-slate-400' },
   'Menunggu Pembayaran':   { step: 2, total: 7, label: 'Tahap 2/7 · Menunggu Bukti Transfer', color: 'bg-amber-500' },
-  'Menunggu Verifikasi':   { step: 3, total: 7, label: 'Tahap 3/7 · Screening Berkas (Admin 1)', color: 'bg-[#0da2e7]' },
+  'Menunggu Verifikasi':   { step: 3, total: 7, label: 'Tahap 3/7 · Screening Berkas (Sekretaris)', color: 'bg-[#0da2e7]' },
   'Perlu Revisi':          { step: 3, total: 7, label: 'Tahap 3/7 · Dikembalikan untuk Revisi', color: 'bg-amber-500' },
-  'Menunggu Approval':     { step: 4, total: 7, label: 'Tahap 4/7 · Menunggu Approval & TTD Admin 2', color: 'bg-indigo-600' },
+  'Menunggu Approval':     { step: 4, total: 7, label: 'Tahap 4/7 · Menunggu Approval & TTD Ketua', color: 'bg-indigo-600' },
   'Disetujui':             { step: 5, total: 7, label: 'Tahap 5/7 · Disetujui & Surat Ditandatangani', color: 'bg-emerald-500' },
   'Dikirim ke Pusat':      { step: 6, total: 7, label: 'Tahap 6/7 · Paket Dikirim ke IKAPI Pusat', color: 'bg-purple-600' },
   'Aktif':                 { step: 7, total: 7, label: 'Tahap 7/7 · Anggota Resmi Aktif (KTA Terbit)', color: 'bg-emerald-600' },
@@ -32,16 +33,17 @@ const STATUS_BADGE = {
   'Ditolak':               'bg-red-50 text-red-800 border-red-200',
 };
 
-export default function Admin2Approval({ onOpenSettings }) {
+export default function Admin2Approval({ initialStatus = 'Semua', initialSearch = '', scrollToMonitoring = false }) {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
 
-  // Filter for Monitoring Table
-  const [monitorStatus, setMonitorStatus] = useState('Semua');
-  const [monitorSearch, setMonitorSearch] = useState('');
+  // Filter for Monitoring Table (bisa diisi awal dari Dashboard)
+  const [monitorStatus, setMonitorStatus] = useState(initialStatus);
+  const [monitorSearch, setMonitorSearch] = useState(initialSearch);
+  const monitoringRef = useRef(null);
   const [expandedSubId, setExpandedSubId] = useState(null);
 
   // Approval & Rejection Modal State
@@ -54,6 +56,10 @@ export default function Admin2Approval({ onOpenSettings }) {
   const [isPacketOpen, setIsPacketOpen] = useState(false);
 
   const [processing, setProcessing] = useState(false);
+
+  // TTD tersimpan Ketua (dibuat sekali, dipakai berulang)
+  const isKetua = user?.role === 'Ketua';
+  const mySignature = useMySignature(isKetua);
 
   const fetchData = async () => {
     setLoading(true);
@@ -83,6 +89,12 @@ export default function Admin2Approval({ onOpenSettings }) {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (!loading && (scrollToMonitoring || initialStatus !== 'Semua' || initialSearch)) {
+      monitoringRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [loading]);
+
   // Open Full Packet & Official Letter
   const openPacket = async (subId) => {
     try {
@@ -97,8 +109,8 @@ export default function Admin2Approval({ onOpenSettings }) {
     }
   };
 
-  // Admin 2 Action (approve / reject / send_to_central)
-  const handleAdmin2Action = async (subId, action, reason = null) => {
+  // Ketua Action (approve / reject / send_to_central)
+  const handleAdmin2Action = async (subId, action, reason = null, extra = {}) => {
     setProcessing(true);
     try {
       const res = await fetch(`/api/submissions/${subId}/admin2-action`, {
@@ -107,7 +119,7 @@ export default function Admin2Approval({ onOpenSettings }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('ikapi_token')}`
         },
-        body: JSON.stringify({ action, reason })
+        body: JSON.stringify({ action, reason, ...extra })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -147,14 +159,14 @@ export default function Admin2Approval({ onOpenSettings }) {
     <div className="space-y-6">
 
       {/* Top Banner */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="card-surface p-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
           <div className="p-3 bg-[#0da2e7] rounded-xl text-white shadow-sm">
             <Award className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-900">
-              Dashboard Monitoring, Approval & Tanda Tangan Surat (Admin 2)
+            <h2 className="text-2xl font-light tracking-tight text-slate-900">
+              Dashboard Monitoring, Approval & Tanda Tangan Surat (Ketua)
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
               Wewenang Ketua & Sekretaris PD IKAPI Jawa Barat: Monitoring tahapan pengajuan, keputusan kelayakan, dan pembubuhan TTD digital.
@@ -171,8 +183,8 @@ export default function Admin2Approval({ onOpenSettings }) {
       </div>
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="card-surface p-4 sm:p-5 flex items-center justify-between gap-2">
           <div>
             <span className="text-xs font-semibold text-slate-500 block">Total Seluruh Pengajuan</span>
             <span className="text-2xl font-black text-[#0da2e7] mt-1 block">
@@ -180,12 +192,12 @@ export default function Admin2Approval({ onOpenSettings }) {
             </span>
             <span className="text-[10px] text-slate-400">Terdaftar di sistem</span>
           </div>
-          <div className="p-3 bg-[#f0f9ff] text-[#0da2e7] rounded-xl">
+          <div className="hidden sm:block p-3 bg-[#f0f9ff] text-[#0da2e7] rounded-xl">
             <Activity className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+        <div className="card-surface p-4 sm:p-5 flex items-center justify-between gap-2">
           <div>
             <span className="text-xs font-semibold text-slate-500 block">Menunggu Approval Anda</span>
             <span className="text-2xl font-black text-indigo-600 mt-1 block">
@@ -193,12 +205,12 @@ export default function Admin2Approval({ onOpenSettings }) {
             </span>
             <span className="text-[10px] text-slate-400">Siap diputuskan & TTD</span>
           </div>
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+          <div className="hidden sm:block p-3 bg-indigo-50 text-indigo-600 rounded-xl">
             <PenTool className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+        <div className="card-surface p-4 sm:p-5 flex items-center justify-between gap-2">
           <div>
             <span className="text-xs font-semibold text-slate-500 block">Surat Telah Ditandatangani</span>
             <span className="text-2xl font-black text-emerald-600 mt-1 block">
@@ -206,12 +218,12 @@ export default function Admin2Approval({ onOpenSettings }) {
             </span>
             <span className="text-[10px] text-slate-400">Disetujui / Dikirim / Aktif</span>
           </div>
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+          <div className="hidden sm:block p-3 bg-emerald-50 text-emerald-600 rounded-xl">
             <CheckCircle className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+        <div className="card-surface p-4 sm:p-5 flex items-center justify-between gap-2">
           <div>
             <span className="text-xs font-semibold text-slate-500 block">Total Iuran Terverifikasi</span>
             <span className="text-xl font-black text-[#0884c4] mt-1 block">
@@ -219,25 +231,35 @@ export default function Admin2Approval({ onOpenSettings }) {
             </span>
             <span className="text-[10px] text-slate-400">Rekening BNI IKAPI Jabar</span>
           </div>
-          <div className="p-3 bg-[#f0f9ff] text-[#0884c4] rounded-xl">
+          <div className="hidden sm:block p-3 bg-[#f0f9ff] text-[#0884c4] rounded-xl">
             <DollarSign className="w-6 h-6" />
           </div>
         </div>
       </div>
 
+      {/* Tanda tangan tersimpan Ketua */}
+      {isKetua && (
+        <MySignatureCard
+          roleLabel="Ketua"
+          signature={mySignature.signature}
+          saving={mySignature.saving}
+          onSave={mySignature.save}
+        />
+      )}
+
       {/* =====================================================================
           FITUR 2 & 3: APPROVAL ALUR & PEMBUBUHAN TANDA TANGAN SURAT PENGANTAR
          ===================================================================== */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="bg-[#f0f9ff] px-6 py-4 border-b border-[#b8e6fc] flex flex-wrap items-center justify-between gap-2">
+      <div className="card-surface overflow-hidden">
+        <div className="bg-sky-50 px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center space-x-2.5">
             <PenTool className="w-5 h-5 text-[#0da2e7]" />
             <div>
-              <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+              <h3 className="text-lg text-slate-800">
                 Antrian Keputusan Akhir (Approval) & Pembubuhan TTD Surat Pengantar
               </h3>
               <p className="text-[11px] text-slate-500">
-                Pengajuan yang telah lolos screening berkas & verifikasi pembayaran oleh Admin 1.
+                Pengajuan yang telah lolos screening berkas & verifikasi pembayaran oleh Sekretaris.
               </p>
             </div>
           </div>
@@ -246,7 +268,7 @@ export default function Admin2Approval({ onOpenSettings }) {
           </span>
         </div>
 
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-slate-100 bg-white">
           {pendingApproval.length === 0 ? (
             <div className="p-8 text-center text-slate-400 text-xs">
               <CheckCircle className="w-8 h-8 mx-auto mb-2 text-emerald-400 opacity-60" />
@@ -254,10 +276,10 @@ export default function Admin2Approval({ onOpenSettings }) {
             </div>
           ) : (
             pendingApproval.map((sub) => (
-              <div key={sub.id} className="p-6 hover:bg-[#f8fbfe] transition flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div key={sub.id} className="p-6 hover:bg-slate-50 transition flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div className="space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="text-base font-bold text-slate-900">
+                    <h4 className="text-base font-medium text-slate-900">
                       {sub.publisher_name}
                     </h4>
                     <span className="text-xs bg-[#dff2fd] text-[#0884c4] px-2.5 py-0.5 rounded-full font-bold border border-[#b8e6fc]">
@@ -278,7 +300,7 @@ export default function Admin2Approval({ onOpenSettings }) {
 
                   {sub.admin_notes && (
                     <p className="text-xs text-slate-600 bg-[#f0f9ff] border border-[#b8e6fc] px-3 py-1.5 rounded-lg mt-2 inline-block">
-                      <strong>Catatan Verifikator (Admin 1):</strong> {sub.admin_notes}
+                      <strong>Catatan Sekretaris:</strong> {sub.admin_notes}
                     </p>
                   )}
                 </div>
@@ -317,12 +339,12 @@ export default function Admin2Approval({ onOpenSettings }) {
       {/* =====================================================================
           SURAT PENGANTAR YANG TELAH DITANDATANGANI & EKSPEDISI KE PUSAT
          ===================================================================== */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+      <div className="card-surface overflow-hidden">
+        <div className="bg-slate-50/70 px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center space-x-2">
             <FileText className="w-5 h-5 text-[#0da2e7]" />
             <div>
-              <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+              <h3 className="text-lg text-slate-800">
                 Dokumen Surat Pengantar Resmi & Pengiriman ke IKAPI Pusat
               </h3>
               <p className="text-[11px] text-slate-500">
@@ -335,7 +357,7 @@ export default function Admin2Approval({ onOpenSettings }) {
           </span>
         </div>
 
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-slate-100 bg-white">
           {signedList.length === 0 ? (
             <div className="p-8 text-center text-slate-400 text-xs">
               Belum ada surat pengantar yang diterbitkan.
@@ -344,10 +366,10 @@ export default function Admin2Approval({ onOpenSettings }) {
             signedList.map((sub) => {
               const isDisetujui = sub.status === 'Disetujui';
               return (
-                <div key={sub.id} className="p-5 hover:bg-[#f8fbfe] transition flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div key={sub.id} className="p-5 hover:bg-slate-50 transition flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h4 className="text-sm font-bold text-slate-900">
+                      <h4 className="text-sm font-medium text-slate-900">
                         {sub.publisher_name}
                       </h4>
                       <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${STATUS_BADGE[sub.status] || ''}`}>
@@ -392,13 +414,13 @@ export default function Admin2Approval({ onOpenSettings }) {
       {/* =====================================================================
           FITUR 1: MONITORING ALUR & POSISI TAHAPAN SELURUH PENGAJUAN
          ===================================================================== */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div ref={monitoringRef} className="card-surface overflow-hidden scroll-mt-40">
         <div className="p-6 border-b border-slate-200 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center space-x-2.5">
               <Activity className="w-5 h-5 text-[#0da2e7]" />
               <div>
-                <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                <h3 className="text-lg text-slate-800">
                   Monitoring Alur & Posisi Tahapan Seluruh Pengajuan
                 </h3>
                 <p className="text-xs text-slate-500">
@@ -427,9 +449,9 @@ export default function Admin2Approval({ onOpenSettings }) {
               >
                 <option value="Semua">Semua Tahapan Status ({submissions.length})</option>
                 <option value="Draf">Draf</option>
-                <option value="Menunggu Verifikasi">Menunggu Verifikasi (Admin 1)</option>
+                <option value="Menunggu Verifikasi">Menunggu Verifikasi (Sekretaris)</option>
                 <option value="Perlu Revisi">Perlu Revisi</option>
-                <option value="Menunggu Approval">Menunggu Approval (Admin 2)</option>
+                <option value="Menunggu Approval">Menunggu Approval (Ketua)</option>
                 <option value="Disetujui">Disetujui</option>
                 <option value="Dikirim ke Pusat">Dikirim ke Pusat</option>
                 <option value="Aktif">Aktif (KTA Terbit)</option>
@@ -441,7 +463,7 @@ export default function Admin2Approval({ onOpenSettings }) {
           {/* Mini Stage Summary Pills */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-1">
             {[
-              { label: 'Screening Admin 1', status: 'Menunggu Verifikasi', color: 'text-[#0884c4] bg-[#f0f9ff] border-[#b8e6fc]' },
+              { label: 'Screening Sekretaris', status: 'Menunggu Verifikasi', color: 'text-[#0884c4] bg-[#f0f9ff] border-[#b8e6fc]' },
               { label: 'Perlu Revisi', status: 'Perlu Revisi', color: 'text-amber-800 bg-amber-50 border-amber-200' },
               { label: 'Menunggu Approval', status: 'Menunggu Approval', color: 'text-indigo-800 bg-indigo-50 border-indigo-200' },
               { label: 'Disetujui & TTD', status: 'Disetujui', color: 'text-emerald-800 bg-emerald-50 border-emerald-200' },
@@ -467,11 +489,74 @@ export default function Admin2Approval({ onOpenSettings }) {
           </div>
         </div>
 
-        {/* Monitoring Table */}
-        <div className="overflow-x-auto">
+        {/* Monitoring — HP: daftar kartu */}
+        <div className="md:hidden divide-y divide-slate-100 bg-white">
+          {loading ? (
+            <p className="py-10 text-center text-xs text-slate-400">Memuat data monitoring pengajuan...</p>
+          ) : filteredMonitoring.length === 0 ? (
+            <p className="py-10 text-center text-xs text-slate-400">Tidak ada pengajuan yang sesuai dengan filter.</p>
+          ) : (
+            filteredMonitoring.map((sub) => {
+              const stage = STAGE_PROGRESS[sub.status] || STAGE_PROGRESS['Menunggu Verifikasi'];
+              const pct = stage.step === 0 ? 100 : Math.round((stage.step / stage.total) * 100);
+              const isExpanded = expandedSubId === sub.id;
+              return (
+                <div key={sub.id} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm text-slate-900">{sub.publisher_name}</div>
+                      <div className="text-[11px] text-slate-500">{sub.leader_name} • {sub.city}</div>
+                      <div className="text-[10px] text-[#0884c4] font-bold mt-0.5">
+                        {sub.submission_type} · Kategori {sub.member_category || 'Biasa'}
+                      </div>
+                    </div>
+                    <span className={`flex-shrink-0 inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${STATUS_BADGE[sub.status] || 'bg-slate-100 text-slate-700'}`}>
+                      {sub.status}
+                    </span>
+                  </div>
+                  {sub.rejection_reason && (
+                    <div className="text-[11px] text-red-600">Alasan: {sub.rejection_reason}</div>
+                  )}
+                  <div>
+                    <div className="flex items-center justify-between text-[10px] font-semibold text-slate-600 mb-1">
+                      <span>{stage.label}</span>
+                      <span>{stage.step > 0 ? `${pct}%` : 'Ditolak'}</span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${stage.color}`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => setExpandedSubId(isExpanded ? null : sub.id)}
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-[11px] flex items-center gap-1 transition"
+                    >
+                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      <span>Alur</span>
+                    </button>
+                    <button
+                      onClick={() => openPacket(sub.id)}
+                      className="px-2.5 py-1.5 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] rounded-lg font-semibold text-[11px] flex items-center gap-1 transition"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> Detail & Surat
+                    </button>
+                  </div>
+                  {isExpanded && (
+                    <div className="overflow-x-auto -mx-4 px-4 pt-2">
+                      <StatusStepper currentStatus={sub.status} />
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Monitoring — layar lebar: tabel */}
+        <div className="hidden md:block overflow-x-auto bg-white">
           <table className="min-w-full text-xs">
             <thead>
-              <tr className="bg-[#f0f9ff] border-b border-[#b8e6fc] text-[#0884c4]">
+              <tr className="bg-sky-50 border-b border-slate-100 text-[#0884c4]">
                 <th className="py-3 px-4 text-left font-bold">Penerbit & Pimpinan</th>
                 <th className="py-3 px-4 text-left font-bold">Jenis & Kategori</th>
                 <th className="py-3 px-4 text-left font-bold">Status Terkini</th>
@@ -500,7 +585,7 @@ export default function Admin2Approval({ onOpenSettings }) {
 
                   return (
                     <React.Fragment key={sub.id}>
-                      <tr className="hover:bg-[#f8fbfe] transition">
+                      <tr className="hover:bg-slate-50 transition">
                         <td className="py-3.5 px-4">
                           <div className="font-bold text-slate-900">{sub.publisher_name}</div>
                           <div className="text-[11px] text-slate-500">{sub.leader_name} • {sub.city}</div>
@@ -559,7 +644,7 @@ export default function Admin2Approval({ onOpenSettings }) {
                       </tr>
 
                       {isExpanded && (
-                        <tr className="bg-[#f8fbfe]">
+                        <tr className="bg-slate-50">
                           <td colSpan={5} className="px-6 py-4 border-t border-slate-100">
                             <StatusStepper currentStatus={sub.status} />
                           </td>
@@ -578,95 +663,20 @@ export default function Admin2Approval({ onOpenSettings }) {
           MODAL 1: APPROVAL & PEMBUBUHAN TANDA TANGAN DIGITAL KETUA & SEKRETARIS
          ===================================================================== */}
       {approvingSub && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full overflow-hidden">
-            <div className="bg-[#0da2e7] text-white px-6 py-4 flex items-center space-x-3">
-              <div className="p-2 bg-white/20 rounded-xl">
-                <PenTool className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-base">
-                  Persetujuan Akhir & Pembubuhan Tanda Tangan Surat Pengantar
-                </h3>
-                <p className="text-xs text-[#dff2fd]">
-                  {approvingSub.publisher_name} • {approvingSub.submission_type} ({approvingSub.member_category || 'Biasa'})
-                </p>
-              </div>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div className="bg-[#f0f9ff] p-4 rounded-xl border border-[#b8e6fc] text-xs space-y-2">
-                <p className="font-bold text-[#0884c4]">Dengan menekan tombol Setujui & Tandatangani, sistem akan:</p>
-                <ul className="list-disc list-inside text-slate-600 space-y-1">
-                  <li>Membubuhkan tanda tangan digital/elektronik <strong>Ketua ({chairmanName})</strong> dan <strong>Sekretaris ({secretaryName})</strong> beserta stempel resmi ke dalam Surat Pengantar.</li>
-                  <li>Mengesahkan Nomor Surat Pengantar: <strong className="font-mono text-[#0884c4]">{approvingSub.reference_number || '012/PD-Ikapi Jabar/IV/2026'}</strong>.</li>
-                  <li>Mengubah status pengajuan menjadi <strong>Disetujui</strong> untuk diteruskan ke IKAPI Pusat.</li>
-                </ul>
-              </div>
-
-              {/* Pratinjau Tanda Tangan yang Akan Dibubuhkan */}
-              <div className="border border-slate-200 rounded-xl p-4 bg-white">
-                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center mb-3">
-                  Pratinjau Tanda Tangan & Stempel pada Surat Pengantar
-                </div>
-                <div className="grid grid-cols-3 gap-2 items-center text-center">
-                  <div>
-                    <div className="text-[11px] text-slate-500">Ketua PD IKAPI</div>
-                    <div className="h-14 flex items-center justify-center my-1">
-                      {settings?.ketua_signature_img ? (
-                        <img src={settings.ketua_signature_img} alt="TTD Ketua" className="max-h-12 object-contain" />
-                      ) : (
-                        <span className="font-serif italic text-[#0884c4] font-bold text-sm">{chairmanName}</span>
-                      )}
-                    </div>
-                    <div className="text-[11px] font-bold text-slate-800 underline">{chairmanName}</div>
-                  </div>
-
-                  <div className="flex justify-center">
-                    {settings?.stempel_img ? (
-                      <img src={settings.stempel_img} alt="Stempel" className="w-16 h-16 object-contain" />
-                    ) : (
-                      <div className="w-16 h-16 rounded-full border-2 border-dashed border-[#0884c4] flex items-center justify-center text-[8px] font-bold text-[#0884c4] text-center p-1">
-                        STEMPEL RESMI IKAPI JABAR
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <div className="text-[11px] text-slate-500">Sekretaris PD IKAPI</div>
-                    <div className="h-14 flex items-center justify-center my-1">
-                      {settings?.sekretaris_signature_img ? (
-                        <img src={settings.sekretaris_signature_img} alt="TTD Sekretaris" className="max-h-12 object-contain" />
-                      ) : (
-                        <span className="font-serif italic text-[#0884c4] font-bold text-sm">{secretaryName}</span>
-                      )}
-                    </div>
-                    <div className="text-[11px] font-bold text-slate-800 underline">{secretaryName}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setApprovingSub(null)}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl hover:bg-slate-50"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleAdmin2Action(approvingSub.id, 'approve')}
-                  disabled={processing}
-                  className="px-5 py-2.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-xl shadow transition flex items-center gap-1.5"
-                >
-                  <CheckCircle className="w-4 h-4" />
-                  {processing ? 'Membubuhkan TTD...' : 'Sah & Bubuhkan Tanda Tangan'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <SignLetterModal
+          role="chairman"
+          submission={approvingSub}
+          settings={settings}
+          signature={mySignature.signature}
+          savingSignature={mySignature.saving}
+          onSaveSignature={mySignature.save}
+          title="Bubuhkan tanda tangan Ketua pada dokumen pengajuan"
+          subtitle={`${approvingSub.publisher_name} • ${approvingSub.submission_type} (${approvingSub.member_category || 'Biasa'})`}
+          confirmLabel="Bubuhkan TTD (4 dokumen) & Setujui"
+          processing={processing}
+          onConfirm={(signaturePositions) => handleAdmin2Action(approvingSub.id, 'approve', null, { signaturePositions })}
+          onClose={() => setApprovingSub(null)}
+        />
       )}
 
       {/* =====================================================================
@@ -674,10 +684,10 @@ export default function Admin2Approval({ onOpenSettings }) {
          ===================================================================== */}
       {rejectingSub && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
+          <div className="modal-surface max-w-md w-full p-6 space-y-4">
             <div className="flex items-center space-x-3 text-red-600">
               <XCircle className="w-6 h-6" />
-              <h3 className="font-bold text-base text-slate-900">
+              <h3 className="font-medium text-lg text-slate-900">
                 Penolakan Pengajuan Keanggotaan
               </h3>
             </div>
@@ -739,6 +749,7 @@ export default function Admin2Approval({ onOpenSettings }) {
               submission={packetDetail.submission}
               documents={packetDetail.documents}
               settings={packetDetail.settings}
+              payment={packetDetail.payment}
             />
           </div>
         </div>

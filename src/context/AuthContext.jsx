@@ -87,6 +87,9 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // Perbarui data pengguna di memori (mis. setelah menjawab pertanyaan login pertama)
+  const updateUser = (nextUser) => setUser(nextUser);
+
   // Logout
   const logout = () => {
     localStorage.removeItem('ikapi_token');
@@ -103,10 +106,12 @@ export function AuthProvider({ children }) {
         login,
         register,
         quickSwitch,
+        updateUser,
         logout,
         isAuthenticated: !!user,
-        isAdmin1: user?.role === 'Admin 1',
-        isAdmin2: user?.role === 'Admin 2',
+        isAdmin: user?.role === 'Admin',
+        isSekretaris: user?.role === 'Sekretaris',
+        isKetua: user?.role === 'Ketua',
         isAnggota: user?.role === 'Anggota'
       }}
     >

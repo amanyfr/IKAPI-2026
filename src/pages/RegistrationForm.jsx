@@ -29,7 +29,7 @@ const SPECIALIZATIONS = [
 function getRequiredDocsList(submissionType, category) {
   if (submissionType === 'Heregistrasi') {
     return [
-      { type: 'formulir_heregistrasi', title: 'Formulir Heregistrasi IKAPI 2026' },
+      { type: 'formulir_heregistrasi', title: 'Formulir Registrasi IKAPI 2026' },
       { type: 'kta_lama', title: 'KTA Lama' },
     ];
   }
@@ -49,7 +49,7 @@ function getRequiredDocsList(submissionType, category) {
   ];
 }
 
-export default function RegistrationForm({ existingSubmission, onComplete, onCancel, initialSubmissionType, initialCategory }) {
+export default function RegistrationForm({ existingSubmission, onComplete, onCancel, initialSubmissionType, initialCategory, initialOldKtaNumber, lockSubmissionType = false }) {
   const { user } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState(1);
@@ -58,7 +58,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
   const [formData, setFormData] = useState({
     submissionType: initialSubmissionType || 'Baru',
     category: initialCategory || 'Biasa',
-    oldKtaNumber: '',
+    oldKtaNumber: initialOldKtaNumber || '',
 
     // 1. Identitas Anggota
     publisherName: '',
@@ -179,7 +179,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
         return;
       }
       if (formData.submissionType === 'Heregistrasi' && !formData.oldKtaNumber.trim()) {
-        alert('Nomor KTA Lama wajib diisi untuk Heregistrasi.');
+        alert('Nomor KTA Lama wajib diisi untuk Registrasi.');
         setActiveTab(1);
         return;
       }
@@ -236,56 +236,35 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
     }
   };
 
-  const inputCls = "w-full text-sm px-4 py-3 bg-[#f8fbfe] border border-[#b8e6fc] rounded-xl focus:bg-white focus:ring-2 focus:ring-[#dff2fd] focus:border-[#0da2e7] outline-none transition text-slate-900 font-medium";
-  const labelCls = "text-sm font-bold text-[#065986] block mb-1.5";
+  const inputCls = "soft-input py-2.5";
+  const labelCls = "text-sm font-medium text-slate-700 block mb-1.5";
 
   return (
     <div className="w-full">
-      <div className="bg-white rounded-2xl shadow-lg shadow-[#0884c4]/5 border border-[#b8e6fc] overflow-hidden">
+      <div className="card-surface overflow-hidden">
 
         {/* Top Header */}
-        <div className="bg-white border-b border-[#d8effd] px-8 py-5 flex flex-wrap items-center justify-between gap-4">
+        <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-8 py-5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             {onCancel && (
               <button
                 onClick={onCancel}
-                className="p-2 bg-[#f0f9ff] hover:bg-[#dff2fd] border border-[#b8e6fc] rounded-xl text-[#0884c4] transition"
+                className="soft-pill !p-2.5"
                 title="Kembali"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
             <div>
-              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+              <h2 className="text-2xl font-light text-slate-900 tracking-tight">
                 Formulir Keanggotaan IKAPI Jawa Barat
               </h2>
             </div>
           </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => handleSubmit(true)}
-              disabled={submitting}
-              className="px-4 py-2.5 bg-[#f0f9ff] hover:bg-[#dff2fd] border border-[#b8e6fc] text-[#0884c4] text-sm font-bold rounded-xl flex items-center gap-2 transition"
-            >
-              <Save className="w-4 h-4" />
-              <span>Simpan Draf</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSubmit(false)}
-              disabled={submitting}
-              className="px-5 py-2.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-sm font-extrabold rounded-xl shadow-md shadow-[#0da2e7]/20 flex items-center gap-2 transition"
-            >
-              <Send className="w-4 h-4" />
-              <span>Submit Pengajuan</span>
-            </button>
-          </div>
         </div>
 
         {/* Step Navigation */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 border-b border-[#cdeafd] bg-[#eaf6fe] text-sm font-bold">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-4 sm:px-8 pt-4 text-sm font-medium">
           {[
             { step: 1, label: '1. Identitas Penerbit' },
             { step: 2, label: '2. Terbitan & Naskah' },
@@ -296,10 +275,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
               key={s.step}
               type="button"
               onClick={() => setActiveTab(s.step)}
-              className={`py-4 px-4 border-b-3 transition text-center ${
+              className={`py-2.5 px-4 rounded-full transition text-center ${
                 activeTab === s.step
-                  ? 'border-[#0884c4] text-[#0884c4] bg-white font-extrabold shadow-sm'
-                  : 'border-transparent text-slate-600 hover:text-[#0884c4] hover:bg-[#f4faff]'
+                  ? 'bg-[#3b82f6] text-white shadow-[0_8px_18px_-8px_rgba(59,130,246,0.7)]'
+                  : 'bg-white text-slate-600 border border-slate-200/70 shadow-sm hover:bg-slate-50'
               }`}
             >
               {s.label}
@@ -307,24 +286,28 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
           ))}
         </div>
 
-        {/* Form Body — Semua Tersusun Vertikal Ke Bawah dalam Full Container */}
-        <div className="p-8 bg-gradient-to-b from-[#f6fbff] to-white">
+        {/* Form Body — field dibagi 2 kolom di layar lebar agar tidak perlu scroll panjang */}
+        <div className="p-4 sm:p-6">
 
           {/* TAB 1: IDENTITAS */}
           {activeTab === 1 && (
             <div className="space-y-5">
-              <div className="space-y-5 p-6 bg-[#eaf6fe]/70 rounded-2xl border border-[#b8e6fc]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4 p-4 sm:p-6 panel-inner">
                 <div>
                   <label className={labelCls}>Jenis Pengajuan *</label>
                   <select
                     name="submissionType"
                     value={formData.submissionType}
                     onChange={handleChange}
-                    className={inputCls}
+                    disabled={lockSubmissionType}
+                    className={`${inputCls} disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed`}
                   >
                     <option value="Baru">Anggota Baru</option>
-                    <option value="Heregistrasi">Heregistrasi (Perpanjangan)</option>
+                    <option value="Heregistrasi">Registrasi (Perpanjangan)</option>
                   </select>
+                  {lockSubmissionType && (
+                    <p className="text-xs text-slate-500 mt-1.5">Sesuai profil keanggotaan Anda (anggota lama/baru).</p>
+                  )}
                 </div>
 
                 <div>
@@ -355,7 +338,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 )}
               </div>
 
-              <div className="space-y-5 bg-white p-6 rounded-2xl border border-[#d6eefc]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4 p-4 sm:p-6 panel-inner">
                 <div>
                   <label className={labelCls}>Nama Penerbit *</label>
                   <input
@@ -408,10 +391,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   />
                 </div>
 
-                <div>
+                <div className="md:col-span-2">
                   <label className={labelCls}>Alamat Kantor *</label>
                   <textarea
-                    rows="3"
+                    rows="2"
                     name="address"
                     value={formData.address}
                     onChange={handleChange}
@@ -547,7 +530,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 <button
                   type="button"
                   onClick={() => setActiveTab(2)}
-                  className="px-6 py-3 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white text-sm font-bold rounded-xl shadow-md shadow-[#0884c4]/20 flex items-center gap-2 transition"
+                  className="soft-pill-primary"
                 >
                   <span>Selanjutnya</span>
                   <ArrowRight className="w-4 h-4" />
@@ -559,7 +542,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
           {/* TAB 2: PROFIL, TERBITAN, PEMASARAN & NASKAH (Semua Ke Bawah) */}
           {activeTab === 2 && (
             <div className="space-y-5">
-              <div className="space-y-5 bg-white p-6 rounded-2xl border border-[#d6eefc]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4 p-4 sm:p-6 panel-inner">
                 {formData.submissionType === 'Baru' && (
                   <>
                     <div>
@@ -587,26 +570,26 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   </>
                 )}
 
-                <div>
+                <div className="md:col-span-2">
                   <label className={labelCls}>Jenis Terbitan</label>
-                  <div className="space-y-2 mt-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-1.5">
                     {SPECIALIZATIONS.map(spec => {
                       const current = Array.isArray(formData.specialization) ? formData.specialization : [formData.specialization];
                       const checked = current.includes(spec);
                       return (
                         <label
                           key={spec}
-                          className={`px-4 py-3 rounded-xl border text-sm cursor-pointer flex items-center gap-3 transition ${
+                          className={`px-4 py-2.5 rounded-xl border text-sm cursor-pointer flex items-center gap-3 transition ${
                             checked
-                              ? 'bg-[#eaf6fe] border-[#0da2e7] font-bold text-[#0884c4]'
-                              : 'border-[#d6eefc] bg-[#f8fbfe] text-slate-700 hover:bg-[#f0f9ff]'
+                              ? 'bg-blue-50 border-[#3b82f6] font-medium text-[#2f6fe0]'
+                              : 'border-slate-200/70 bg-white text-slate-700 hover:bg-slate-50'
                           }`}
                         >
                           <input
                             type="checkbox"
                             checked={checked}
                             onChange={() => handleSpecializationToggle(spec)}
-                            className="w-4 h-4 rounded text-[#0da2e7]"
+                            className="w-4 h-4 rounded text-[#3b82f6]"
                           />
                           <span>{spec}</span>
                         </label>
@@ -720,14 +703,14 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 <button
                   type="button"
                   onClick={() => setActiveTab(1)}
-                  className="px-5 py-3 bg-white border border-[#b8e6fc] text-[#0884c4] text-sm font-bold rounded-xl hover:bg-[#f0f9ff]"
+                  className="soft-pill"
                 >
                   Kembali
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab(3)}
-                  className="px-6 py-3 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white text-sm font-bold rounded-xl shadow-md shadow-[#0884c4]/20 flex items-center gap-2"
+                  className="soft-pill-primary"
                 >
                   <span>Selanjutnya</span>
                   <ArrowRight className="w-4 h-4" />
@@ -739,7 +722,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
           {/* TAB 3: ORGANISASI & PRODUKSI (Semua Ke Bawah) */}
           {activeTab === 3 && (
             <div className="space-y-5">
-              <div className="space-y-5 bg-white p-6 rounded-2xl border border-[#d6eefc]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4 p-4 sm:p-6 panel-inner">
                 <div>
                   <label className={labelCls}>Jumlah Karyawan Redaksi (Orang)</label>
                   <input
@@ -907,14 +890,14 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 <button
                   type="button"
                   onClick={() => setActiveTab(2)}
-                  className="px-5 py-3 bg-white border border-[#b8e6fc] text-[#0884c4] text-sm font-bold rounded-xl hover:bg-[#f0f9ff]"
+                  className="soft-pill"
                 >
                   Kembali
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab(4)}
-                  className="px-6 py-3 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white text-sm font-bold rounded-xl shadow-md shadow-[#0884c4]/20 flex items-center gap-2"
+                  className="soft-pill-primary"
                 >
                   <span>Selanjutnya</span>
                   <ArrowRight className="w-4 h-4" />
@@ -926,14 +909,14 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
           {/* TAB 4: UNGGAH BERKAS & SUBMIT */}
           {activeTab === 4 && (
             <div className="space-y-5">
-              <div className="divide-y divide-[#d6eefc] border border-[#b8e6fc] rounded-2xl overflow-hidden bg-white">
-                {requiredDocs.map((docItem, idx) => {
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {requiredDocs.map((docItem) => {
                   const chosenFile = selectedFiles[docItem.type];
                   return (
                     <div
                       key={docItem.type}
-                      className={`p-5 flex items-center justify-between gap-4 ${
-                        idx % 2 === 0 ? 'bg-white' : 'bg-[#f8fbfe]'
+                      className={`p-4 rounded-2xl border flex items-center justify-between gap-4 ${
+                        chosenFile ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-slate-200/70'
                       }`}
                     >
                       <div className="min-w-0">
@@ -948,8 +931,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                         )}
                       </div>
 
-                      <label className="px-4 py-2.5 bg-[#eaf6fe] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] text-xs font-extrabold rounded-xl cursor-pointer transition flex items-center gap-2 flex-shrink-0">
-                        <Upload className="w-4 h-4 text-[#0da2e7]" />
+                      <label className="soft-pill !text-xs cursor-pointer flex-shrink-0">
+                        <Upload className="w-4 h-4" />
                         <span>{chosenFile ? 'Ganti File' : 'Pilih File'}</span>
                         <input
                           type="file"
@@ -967,17 +950,17 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 <button
                   type="button"
                   onClick={() => setActiveTab(3)}
-                  className="px-5 py-3 bg-white border border-[#b8e6fc] text-[#0884c4] text-sm font-bold rounded-xl hover:bg-[#f0f9ff]"
+                  className="soft-pill"
                 >
                   Kembali
                 </button>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col-reverse sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={() => handleSubmit(true)}
                     disabled={submitting}
-                    className="px-5 py-3 bg-white border border-[#b8e6fc] hover:bg-[#f0f9ff] text-[#0884c4] text-sm font-bold rounded-xl flex items-center gap-2 transition"
+                    className="soft-pill whitespace-nowrap w-full sm:w-auto"
                   >
                     <Save className="w-4 h-4" />
                     <span>Simpan Draf</span>
@@ -987,7 +970,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                     type="button"
                     onClick={() => handleSubmit(false)}
                     disabled={submitting}
-                    className="px-7 py-3 bg-gradient-to-r from-[#0884c4] to-[#0da2e7] hover:from-[#066ba3] hover:to-[#0884c4] text-white text-sm font-extrabold rounded-xl shadow-lg shadow-[#0884c4]/25 flex items-center gap-2 transition"
+                    className="soft-pill-primary whitespace-nowrap w-full sm:w-auto"
                   >
                     <Send className="w-4 h-4" />
                     <span>{submitting ? 'Memproses...' : 'Submit Pengajuan'}</span>
