@@ -55,6 +55,18 @@ export const query = {
   }
 };
 
+// Alur pengajuan:
+// Draf -> Menunggu Verifikasi (Tahap 1: screening dokumen oleh Admin) <-> Perlu Revisi
+// -> Menunggu Pembayaran (Tahap 2: bayar & verifikasi bukti transfer oleh Admin)
+// -> Menunggu TTD Sekretaris -> Menunggu Approval (TTD Ketua)
+// -> Pengiriman Berkas (pemohon kirim berkas fisik ke IKAPI Jabar) -> Aktif (dikonfirmasi Admin)
+// 'Disetujui' & 'Dikirim ke Pusat' hanya untuk data lama.
+export const SUBMISSION_STATUSES = [
+  'Draf', 'Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris',
+  'Menunggu Approval', 'Pengiriman Berkas', 'Ditolak', 'Disetujui', 'Dikirim ke Pusat', 'Aktif'
+];
+const STATUS_SQL = SUBMISSION_STATUSES.map((st) => `'${st}'`).join(', ');
+
 // Definisi tabel users. Peran: Admin (kelola sistem & akun), Sekretaris (screening & verifikasi),
 // Ketua (approval & TTD), Anggota (penerbit). member_type/member_category/old_kta_number diisi
 // lewat pertanyaan saat login pertama anggota; onboarded_at menandai pertanyaan sudah dijawab.
@@ -115,17 +127,7 @@ export async function initDb() {
       member_id INTEGER,
       user_id INTEGER NOT NULL,
       submission_type TEXT NOT NULL CHECK(submission_type IN ('Baru', 'Heregistrasi')),
-      status TEXT NOT NULL CHECK(status IN (
-        'Draf',
-        'Menunggu Pembayaran',
-        'Menunggu Verifikasi',
-        'Perlu Revisi',
-        'Menunggu Approval',
-        'Ditolak',
-        'Disetujui',
-        'Dikirim ke Pusat',
-        'Aktif'
-      )),
+      status TEXT NOT NULL CHECK(status IN (${STATUS_SQL})),
       old_kta_number TEXT,
       form_data TEXT, -- Full JSON payload of form
       admin_notes TEXT,
@@ -209,6 +211,62 @@ export async function initDb() {
   await addColumnIfMissing('submissions', 'signature_positions', 'TEXT');
   await addColumnIfMissing('submissions', 'screened_at', 'TEXT');
   await addColumnIfMissing('submissions', 'screened_by_name', 'TEXT');
+  await migrateSubmissionStatuses();
+  // Pengiriman berkas fisik ke sekretariat IKAPI Jawa Barat
+  // Log waktu Admin membuka dokumen / bukti transfer saat screening
+  await addColumnIfMissing('documents', 'opened_at', 'TEXT');
+  await addColumnIfMissing('documents', 'opened_by_name', 'TEXT');
+  await addColumnIfMissing('payments', 'proof_opened_at', 'TEXT');
+  await addColumnIfMissing('payments', 'proof_opened_by_name', 'TEXT');
+  await addColumnIfMissing('submissions', 'physical_status', 'TEXT'); // Belum Dikirim | Dikirim | Diterima
+  await addColumnIfMissing('submissions', 'physical_sent_at', 'TEXT');
+  await addColumnIfMissing('submissions', 'physical_courier', 'TEXT');
+  await addColumnIfMissing('submissions', 'physical_tracking_no', 'TEXT');
+  await addColumnIfMissing('submissions', 'physical_notes', 'TEXT');
+  await addColumnIfMissing('submissions', 'physical_received_at', 'TEXT');
+  await addColumnIfMissing('submissions', 'physical_received_by', 'TEXT');
+  await query.exec(`
+    CREATE TABLE IF NOT EXISTS submission_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      submission_id INTEGER NOT NULL,
+      actor_id INTEGER,
+      actor_name TEXT,
+      actor_role TEXT,
+      action TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now', 'localtime')),
+      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_submission_logs_sub ON submission_logs(submission_id);
+  `);
+}
+
+// Tambah status baru ke CHECK constraint tabel submissions (SQLite perlu bangun ulang tabel).
+async function migrateSubmissionStatuses() {
+  const table = await query.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'submissions'");
+  if (!table || table.sql.includes("'Menunggu TTD Sekretaris'")) return;
+  const newSql = table.sql
+    .replace(/CREATE TABLE\s+"?submissions"?/i, 'CREATE TABLE submissions_new')
+    .replace(/status TEXT NOT NULL CHECK\(status IN \([^)]*\)\)/, `status TEXT NOT NULL CHECK(status IN (${STATUS_SQL}))`);
+  if (!newSql.includes('submissions_new') || !newSql.includes("'Pengiriman Berkas'")) {
+    throw new Error('Migrasi status pengajuan gagal: struktur tabel tidak dikenali.');
+  }
+  try {
+    await query.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      ${newSql};
+      INSERT INTO submissions_new SELECT * FROM submissions;
+      DROP TABLE submissions;
+      ALTER TABLE submissions_new RENAME TO submissions;
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `);
+    console.log('Migrasi status pengajuan selesai (alur screening dokumen -> pembayaran -> TTD -> berkas fisik).');
+  } catch (err) {
+    await query.exec('ROLLBACK; PRAGMA foreign_keys = ON;').catch(() => {});
+    throw err;
+  }
 }
 
 async function addColumnIfMissing(table, column, type) {

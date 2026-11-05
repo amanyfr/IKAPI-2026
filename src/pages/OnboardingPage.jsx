@@ -48,7 +48,8 @@ function OptionCard({ option, active, onSelect }) {
 export default function OnboardingPage({ onBack, onDone }) {
   const { user, logout, updateUser } = useAuth();
   const [memberType, setMemberType] = useState(onBack ? user?.member_type || '' : '');
-  const [category, setCategory] = useState(onBack ? user?.member_category || '' : '');
+  // Default anggota biasa; anggota luar biasa hanya opsi tambahan
+  const [category, setCategory] = useState(onBack ? user?.member_category || 'Biasa' : 'Biasa');
   const [oldKtaNumber, setOldKtaNumber] = useState(onBack ? user?.old_kta_number || '' : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -149,11 +150,19 @@ export default function OnboardingPage({ onBack, onDone }) {
 
           <fieldset className="space-y-2.5">
             <legend className="text-base sm:text-lg text-slate-800 mb-2.5">2. Kategori keanggotaan Anda</legend>
-            <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-              {CATEGORY_OPTIONS.map((o) => (
-                <OptionCard key={o.id} option={o} active={category === o.id} onSelect={setCategory} />
-              ))}
+            {/* Lebar penuh, sejajar dengan pilihan di pertanyaan 1 */}
+            <div className="grid grid-cols-1">
+              <OptionCard option={CATEGORY_OPTIONS.find((o) => o.id === category) || CATEGORY_OPTIONS[0]} active onSelect={() => {}} />
             </div>
+            <p className="text-xs text-slate-500 px-1">
+              {category === 'Luar Biasa' ? (
+                <>Bukan perguruan tinggi / lembaga?{' '}
+                  <button type="button" onClick={() => setCategory('Biasa')} className="text-[#3b82f6] hover:underline font-medium">Kembali ke anggota biasa</button></>
+              ) : (
+                <>Anda penerbit perguruan tinggi atau lembaga?{' '}
+                  <button type="button" onClick={() => setCategory('Luar Biasa')} className="text-[#3b82f6] hover:underline font-medium">Daftar sebagai anggota luar biasa</button></>
+              )}
+            </p>
           </fieldset>
 
           {error && (

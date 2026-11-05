@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import { Download, Printer } from 'lucide-react';
-import { jsPDF } from 'jspdf';
-import { KopSurat, drawKopPdf, formatLongDate } from './PengurusSignature';
+import { KopSurat, formatLongDate } from './PengurusSignature';
+import { downloadElementPdf, printElement, safeFileName } from '../utils/exportDocument';
 
 // Pengaturan invoice yang bisa diubah Admin (Pengaturan → Invoice / Kuitansi Pembayaran)
 export const INVOICE_DEFAULTS = {
@@ -38,83 +40,26 @@ export function isInvoicePaid(payment) {
 const statusText = (payment) =>
   isInvoicePaid(payment) ? 'LUNAS' : payment?.verification_status === 'Perlu Revisi' ? 'PERLU PERBAIKAN' : 'MENUNGGU VERIFIKASI';
 
-export function downloadInvoicePdf({ submission, payment, settings }) {
-  const s = { ...INVOICE_DEFAULTS, ...settings };
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-  let y = drawKopPdf(doc, settings);
-
-  doc.setFont('times', 'bold');
-  doc.setFontSize(13);
-  doc.text(s.invoice_title.toUpperCase(), 105, y + 2, { align: 'center' });
-  doc.setFont('times', 'normal');
-  doc.setFontSize(10);
-  doc.text(`No. ${invoiceNumber(submission, settings)}`, 105, y + 8, { align: 'center' });
-  y += 20;
-
-  doc.setFont('times', 'bold');
-  doc.text('Ditagihkan kepada:', 20, y);
-  doc.text('Tanggal:', 130, y);
-  doc.setFont('times', 'normal');
-  doc.text(submission.publisher_name || '-', 20, y + 5);
-  doc.text(`${submission.leader_name || '-'}`, 20, y + 10);
-  doc.text(doc.splitTextToSize(`${submission.address || ''} ${submission.city || ''}`.trim() || '-', 95), 20, y + 15);
-  doc.text(formatLongDate(payment?.verified_at || payment?.transfer_date), 130, y + 5);
-  y += 30;
-
-  doc.setFillColor(240, 249, 255);
-  doc.rect(20, y - 5, 170, 8, 'F');
-  doc.setFont('times', 'bold');
-  doc.text('Keterangan', 24, y);
-  doc.text('Jumlah', 186, y, { align: 'right' });
-  doc.setFont('times', 'normal');
-  y += 9;
-  invoiceItems(payment).forEach(([label, amount]) => {
-    doc.text(label, 24, y);
-    doc.text(rupiah(amount), 186, y, { align: 'right' });
-    y += 7;
-  });
-  doc.setLineWidth(0.3);
-  doc.line(20, y - 3, 190, y - 3);
-  doc.setFont('times', 'bold');
-  doc.text('Total', 24, y + 3);
-  doc.text(rupiah(payment?.amount), 186, y + 3, { align: 'right' });
-  y += 16;
-
-  doc.setFont('times', 'normal');
-  doc.text(`Dibayar ke   : ${settings?.bank_name || 'Bank BNI'} ${settings?.bank_account || ''} a.n. ${settings?.bank_holder || ''}`, 20, y);
-  doc.text(`Dari         : ${payment?.sender_bank || '-'} a.n. ${payment?.sender_account_name || '-'}`, 20, y + 6);
-  doc.text(`Tgl transfer : ${formatLongDate(payment?.transfer_date)}`, 20, y + 12);
-
-  // Cap status pembayaran
-  const paid = isInvoicePaid(payment);
-  doc.setDrawColor(...(paid ? [16, 150, 90] : [217, 119, 6]));
-  doc.setTextColor(...(paid ? [16, 150, 90] : [217, 119, 6]));
-  doc.setLineWidth(0.8);
-  doc.roundedRect(130, y - 6, 58, 14, 2, 2);
-  doc.setFont('times', 'bold');
-  doc.setFontSize(paid ? 16 : 10);
-  doc.text(statusText(payment), 159, y + 3, { align: 'center' });
-  doc.setTextColor(0, 0, 0);
-  doc.setDrawColor(0, 0, 0);
-  y += 30;
-
-  doc.setFont('times', 'normal');
-  doc.setFontSize(10);
-  doc.text(`Bandung, ${formatLongDate(payment?.verified_at || payment?.transfer_date)}`, 150, y, { align: 'center' });
-  doc.text(s.invoice_issuer_title, 150, y + 5, { align: 'center' });
-  doc.setFont('times', 'bold');
-  doc.text(s.invoice_issuer_name, 150, y + 25, { align: 'center' });
-  y += 38;
-
-  doc.setFont('times', 'italic');
-  doc.setFontSize(9);
-  doc.text(doc.splitTextToSize(s.invoice_notes, 170), 20, y);
-
-  doc.save(`Invoice_${(submission.publisher_name || 'IKAPI').replace(/\s+/g, '_')}.pdf`);
+// Unduh invoice tanpa membuka pratinjau: invoice dirender sementara di luar layar, lalu diambil gambarnya
+export async function downloadInvoicePdf({ submission, payment, settings }) {
+  const host = document.createElement('div');
+  Object.assign(host.style, { position: 'fixed', left: '-10000px', top: '0', width: '794px', background: '#fff' });
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() => root.render(<PaymentInvoice submission={submission} payment={payment} settings={settings} />));
+    await downloadElementPdf(host.querySelector('[data-paper]'), invoiceFileName(submission));
+  } finally {
+    root.unmount();
+    host.remove();
+  }
 }
+
+const invoiceFileName = (submission) => `Invoice_${safeFileName(submission.publisher_name)}.pdf`;
 
 // Tampilan invoice (HTML) untuk pratinjau anggota & Admin
 export default function PaymentInvoice({ submission, payment, settings }) {
+  const paperRef = useRef(null);
   if (!submission || !payment) return null;
   const s = { ...INVOICE_DEFAULTS, ...settings };
   const paid = isInvoicePaid(payment);
@@ -126,13 +71,13 @@ export default function PaymentInvoice({ submission, payment, settings }) {
         <span className="font-bold text-slate-800 text-sm">{s.invoice_title}</span>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => window.print()}
+            onClick={() => printElement(paperRef.current, invoiceFileName(submission).replace('.pdf', ''))}
             className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
           >
             <Printer className="w-3.5 h-3.5" /> Cetak
           </button>
           <button
-            onClick={() => downloadInvoicePdf({ submission, payment, settings })}
+            onClick={() => downloadElementPdf(paperRef.current, invoiceFileName(submission))}
             className="px-3.5 py-1.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-sm transition"
           >
             <Download className="w-3.5 h-3.5" /> Unduh PDF
@@ -140,7 +85,7 @@ export default function PaymentInvoice({ submission, payment, settings }) {
         </div>
       </div>
 
-      <div className="p-6 sm:p-10 max-w-3xl mx-auto font-sans text-slate-900 text-sm">
+      <div ref={paperRef} data-paper className="p-6 sm:p-10 max-w-3xl mx-auto font-sans text-slate-900 text-sm bg-white">
         <KopSurat settings={settings} />
 
         <div className="text-center mb-6">

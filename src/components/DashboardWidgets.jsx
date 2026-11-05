@@ -99,20 +99,25 @@ function smoothPath(points, minY, maxY) {
  * series: [{ key, label, color (hex garis), tipClass (warna teks tooltip) }]
  * Garis digambar dari belakang ke depan, jadi seri pertama tampil paling atas.
  */
-export function TrendChart({ data, series, ariaLabel }) {
+// fill = tinggi grafik mengikuti tinggi kartu (dashboard satu layar)
+export function TrendChart({ data, series, ariaLabel, height = 220, fill = false }) {
   const [hover, setHover] = useState(null);
   // Lebar grafik mengikuti lebar kartu agar teks sumbu tidak ikut mengecil di HP
   const wrapRef = useRef(null);
   const [W, setW] = useState(640);
+  const [fillH, setFillH] = useState(height);
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => setW(Math.max(280, Math.round(entry.contentRect.width))));
+    const ro = new ResizeObserver(([entry]) => {
+      setW(Math.max(280, Math.round(entry.contentRect.width)));
+      if (fill) setFillH(Math.max(90, Math.round(entry.contentRect.height)));
+    });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [fill]);
 
-  const H = 220, padL = 28, padR = 12, padT = 16, padB = 28;
+  const H = fill ? fillH : height, padL = 28, padR = 12, padT = 16, padB = 28;
   const max = Math.max(2, ...data.flatMap((d) => series.map((s) => d[s.key])));
   const step = (W - padL - padR) / Math.max(1, data.length - 1);
   const x = (i) => padL + i * step;
@@ -121,8 +126,8 @@ export function TrendChart({ data, series, ariaLabel }) {
   const labelEvery = Math.ceil(data.length / Math.max(3, Math.floor(W / 60)));
 
   return (
-    <div ref={wrapRef} className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={ariaLabel}>
+    <div ref={wrapRef} className={`relative ${fill ? 'h-full min-h-[90px]' : ''}`}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={ariaLabel} className={fill ? 'absolute inset-0' : ''}>
         {ticks.map((t) => (
           <g key={t}>
             <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="rgb(15 23 42 / 0.06)" />
@@ -190,16 +195,16 @@ export function TrendLegend({ series }) {
  * Gelembung persentase posisi pengajuan.
  * items: [{ label, value, cls, pos }] — urutan render = urutan tumpukan (yang pertama di belakang)
  */
-export function PositionBubbles({ items, total }) {
-  const size = (v) => 72 + 88 * Math.sqrt(pct(v, total) / 100);
+export function PositionBubbles({ items, total, compact = false }) {
+  const size = (v) => (compact ? 50 : 72) + (compact ? 54 : 88) * Math.sqrt(pct(v, total) / 100);
   return (
-    <div className="relative h-52 mt-3">
+    <div className={`relative mt-2 ${compact ? 'h-36 lg:h-auto lg:flex-1 lg:min-h-0' : 'h-52'}`}>
       {items.map((b) => (
         <div key={b.label}
           className={`absolute rounded-full flex flex-col items-center justify-center ${b.cls} ${b.pos}`}
           style={{ width: size(b.value), height: size(b.value) }}>
-          <span className="text-2xl font-light leading-none">{pct(b.value, total)}%</span>
-          <span className="text-[11px] mt-1 opacity-90">{b.label}</span>
+          <span className={`${compact ? 'text-xl' : 'text-2xl'} font-light leading-none`}>{pct(b.value, total)}%</span>
+          <span className={`${compact ? 'text-[10px] px-1 text-center leading-tight' : 'text-[11px]'} mt-1 opacity-90`}>{b.label}</span>
         </div>
       ))}
     </div>

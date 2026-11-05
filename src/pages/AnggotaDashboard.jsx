@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import StatusStepper from '../components/StatusStepper';
-import CentralPacketExporter from '../components/CentralPacketExporter';
+import CentralPacketExporter, { officeAddress, physicalChecklist } from '../components/CentralPacketExporter';
+import SubmissionTimeline from '../components/SubmissionTimeline';
 import PaymentInvoice, { downloadInvoicePdf, invoiceNumber, isInvoicePaid } from '../components/PaymentInvoice';
 import { feesFromSettings, formatRupiah } from '../utils/fees';
 import { formatLongDate } from '../components/PengurusSignature';
@@ -9,12 +10,14 @@ import {
   Building2, CreditCard, Upload, FileText, AlertCircle,
   CheckCircle, ExternalLink, RefreshCw,
   Edit3, GraduationCap, ArrowRight, UserPlus, X,
-  ShieldCheck, Landmark, Receipt, Download, XCircle, PartyPopper
+  ShieldCheck, Landmark, Receipt, Download, XCircle, PartyPopper,
+  Printer, Truck, Clock, PenLine, MapPin, Info, ArrowLeft
 } from 'lucide-react';
+import { notify } from '../components/AppDialog';
 
 // Label hasil screening berkas: hijau = diterima, merah = tidak sesuai (unggah ulang), abu = belum diperiksa
 const SCREENING_LABEL = {
-  Sesuai:         { text: 'Diterima',        cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
+  Sesuai:         { text: 'Sesuai',          cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
   'Perlu Revisi': { text: 'Tidak sesuai',    cls: 'bg-red-50 text-red-700 border-red-200',             dot: 'bg-red-500' },
   Menunggu:       { text: 'Menunggu screening', cls: 'bg-slate-50 text-slate-600 border-slate-200',    dot: 'bg-slate-400' },
 };
@@ -36,19 +39,50 @@ const REQUIRED_DOCS = {
   },
   Heregistrasi: {
     Biasa: [
-      'Formulir Registrasi IKAPI 2026',
-      'KTA Lama',
+      'Kartu Anggota Ikapi yang sudah habis masa berlakunya',
+      'Isian Formulir Heregistrasi',
     ],
     'Luar Biasa': [
-      'Formulir Registrasi IKAPI 2026',
-      'KTA Lama',
+      'Kartu Anggota Ikapi yang sudah habis masa berlakunya',
+      'Isian Formulir Heregistrasi',
     ],
   },
 };
 
 const token = () => localStorage.getItem('ikapi_token');
 
-export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditProfile, defaultType = 'Baru', defaultCategory = 'Biasa' }) {
+const STAGE_TONE = {
+  blue: 'bg-sky-50 border-sky-200 text-sky-900',
+  green: 'bg-emerald-50 border-emerald-200 text-emerald-900',
+};
+
+function StageInfo({ icon: Icon, tone = 'blue', title, children }) {
+  return (
+    <div className={`rounded-[22px] p-4 sm:p-5 border flex items-start gap-3 ${STAGE_TONE[tone]}`}>
+      <Icon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+      <div className="text-sm space-y-0.5">
+        <p className="font-semibold">{title}</p>
+        <p className="opacity-90">{children}</p>
+      </div>
+    </div>
+  );
+}
+
+// Keterangan berkas fisik yang wajib dicetak sendiri oleh pemohon
+function PrintNotice({ compact = false }) {
+  return (
+    <div className={`flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 ${compact ? 'px-3.5 py-2.5 text-xs' : 'px-4 py-3 text-sm'}`}>
+      <Printer className="w-4 h-4 flex-shrink-0 mt-0.5" />
+      <p>
+        <strong className="font-semibold">Berkas fisik wajib dicetak sendiri.</strong>{' '}
+        Setelah disetujui Sekretaris & Ketua, Anda mencetak surat pengantar, formulir, dan fotokopi berkas persyaratan,
+        lalu mengirimnya ke sekretariat IKAPI Jawa Barat. Keanggotaan aktif setelah berkas fisik diterima.
+      </p>
+    </div>
+  );
+}
+
+export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditProfile, onStatusChange, defaultType = 'Baru', defaultCategory = 'Biasa' }) {
   const { user } = useAuth();
   const [submissions,    setSubmissions]    = useState([]);
   const [selectedSub,    setSelectedSub]    = useState(null);
@@ -60,10 +94,11 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   const [refreshing,     setRefreshing]     = useState(false);
   const [appSettings,    setAppSettings]    = useState({});
   const [showWelcome,    setShowWelcome]    = useState(false);
+  const [showShipNotice, setShowShipNotice] = useState(false);
+  const [shipForm,       setShipForm]       = useState({ courier: '', trackingNo: '', notes: '' });
+  const [sendingShip,    setSendingShip]    = useState(false);
   const [lastUpdated,    setLastUpdated]    = useState(null);
 
-  const [pickType,     setPickType]     = useState(defaultType);
-  const [pickCategory, setPickCategory] = useState(defaultCategory);
 
   const [payForm, setPayForm] = useState({
     senderBank: '',
@@ -97,6 +132,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       const data = await res.json();
       setDetailData(data);
       setSelectedSub(data.submission);
+      onStatusChange?.(data.submission?.status);
       setLastUpdated(new Date());
     } catch (e) { console.error(e); }
   };
@@ -160,6 +196,37 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
     try { localStorage.setItem(welcomeKey, '1'); } catch { /* abaikan */ }
   };
 
+  // Pemberitahuan sekali saat pengajuan disetujui Ketua: cetak & kirim berkas fisik
+  const shipSubId = detailData?.submission?.status === 'Pengiriman Berkas' ? detailData.submission.id : null;
+  const shipKey = shipSubId ? `ikapi_kirim_berkas_${shipSubId}` : null;
+  useEffect(() => {
+    if (!shipKey) return;
+    try {
+      if (!localStorage.getItem(shipKey)) setShowShipNotice(true);
+    } catch { /* penyimpanan browser tidak tersedia: lewati */ }
+  }, [shipKey]);
+
+  const closeShipNotice = () => {
+    setShowShipNotice(false);
+    try { localStorage.setItem(shipKey, '1'); } catch { /* abaikan */ }
+  };
+
+  const handleShipSubmit = async (e) => {
+    e.preventDefault();
+    setSendingShip(true);
+    try {
+      const res = await fetch(`/api/submissions/${selectedSub.id}/physical-sent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(shipForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      await loadDetail(selectedSub.id);
+    } catch (err) { notify('Gagal menyimpan: ' + err.message); }
+    finally { setSendingShip(false); }
+  };
+
   const handleDocUpload = async (doc, file) => {
     if (!file) return;
     const fd = new FormData();
@@ -174,13 +241,14 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       await loadDetail(selectedSub.id);
-    } catch (e) { alert('Gagal mengunggah berkas: ' + e.message); }
+      if (data.resubmitted) notify(data.message);
+    } catch (e) { notify('Gagal mengunggah berkas: ' + e.message); }
     finally    { setUploadingDocId(null); }
   };
 
   const handlePaymentSubmit = async (e) => {
     e.preventDefault();
-    if (!payForm.proofFile) { alert('Pilih file bukti transfer terlebih dahulu.'); return; }
+    if (!payForm.proofFile) { notify('Pilih file bukti transfer terlebih dahulu.'); return; }
     const fd = new FormData();
     fd.append('proofFile', payForm.proofFile);
     fd.append('senderBank', payForm.senderBank);
@@ -196,7 +264,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       if (!res.ok) throw new Error(data.error);
       await loadDetail(selectedSub.id);
       await loadSubmissions();
-    } catch (e) { alert('Gagal mengunggah pembayaran: ' + e.message); }
+    } catch (e) { notify('Gagal mengunggah pembayaran: ' + e.message); }
     finally    { setSubmittingPay(false); }
   };
 
@@ -211,151 +279,80 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   /* ══════════════════════════════════════════════════════════
      EMPTY STATE — Pilihan Jenis & Kategori (Full Width & Blue Accent)
      ══════════════════════════════════════════════════════════ */
+  /* ══════════════════════════════════════════════════════════
+     BELUM ADA PENGAJUAN — langsung tampil persyaratan sesuai jawaban profil
+     (jenis & kategori dipilih di pertanyaan awal; bisa diubah lewat "Ubah jawaban")
+     ══════════════════════════════════════════════════════════ */
   if (submissions.length === 0) {
+    const pickType = defaultType;
+    const pickCategory = defaultCategory;
+    const reqDocs = REQUIRED_DOCS[pickType]?.[pickCategory] || [];
+    const fees = feesFromSettings(appSettings, pickType);
+    const isLB = pickCategory === 'Luar Biasa';
+    const typeText = pickType === 'Heregistrasi' ? 'anggota lama' : 'anggota baru';
+    const subText = pickType === 'Heregistrasi' ? 'registrasi perpanjangan KTA' : 'pendaftaran anggota baru';
+    const backText = (
+      <p className="text-xs sm:text-sm text-slate-500">
+        Anda terdaftar sebagai <strong className="font-medium text-slate-700">{typeText}</strong> kategori{' '}
+        <strong className="font-medium text-slate-700">{isLB ? 'Anggota Luar Biasa' : 'Anggota Biasa'}</strong>, jadi pengajuan Anda adalah {subText}.{' '}
+        {onEditProfile && (
+          <button type="button" onClick={onEditProfile} className="text-[#3b82f6] hover:underline font-medium">
+            Salah pilih? Ubah jawaban
+          </button>
+        )}
+      </p>
+    );
     return (
-      <>
-      {/* Tinggi minimal = layar dikurangi header & footer, agar widget pas di tengah layar */}
       <div className="relative w-full max-w-5xl mx-auto lg:min-h-[calc(100vh-14rem)] flex items-center">
         <div className="card-surface overflow-hidden w-full">
-
-          {/* Header */}
           <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 sm:py-5 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-2xl font-light text-slate-900 tracking-tight">Pengajuan Keanggotaan</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Pilih jenis pengajuan dan kategori keanggotaan penerbit</p>
+              <h2 className="text-2xl font-light text-slate-900 tracking-tight">
+                Persyaratan {isLB ? 'Anggota Luar Biasa' : 'Anggota Biasa'}
+              </h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {pickType === 'Heregistrasi' ? 'Registrasi (perpanjangan)' : 'Pendaftaran anggota baru'} ·{' '}
+                {isLB ? 'Penerbit perguruan tinggi / lembaga (university press)' : 'Badan usaha penerbit (PT / CV / yayasan)'}
+              </p>
             </div>
             <div className="accent-yellow px-4 py-2 rounded-2xl text-right shadow-[0_10px_24px_-14px_rgba(234,179,8,0.8)]">
               <div className="text-xs font-medium text-slate-700">Biaya pendaftaran</div>
-              <div className="text-xl font-medium text-slate-900">
-                {formatRupiah(feesFromSettings(appSettings, pickType).total)}
-              </div>
+              <div className="text-xl font-medium text-slate-900">{formatRupiah(fees.total)}</div>
             </div>
           </div>
 
-          <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5">
-
-            {/* Left Column: Choices */}
-            <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Jenis Pengajuan */}
-              <div className="flex flex-col">
-                <label className="text-sm font-medium text-slate-800 block mb-2">
-                  1. Pilih Jenis Pengajuan
-                </label>
-                <div className="flex-1 grid grid-rows-2 gap-3">
-                  {[
-                    { id: 'Baru', label: 'Anggota Baru', sub: 'Pendaftaran anggota pertama kali', icon: UserPlus },
-                    { id: 'Heregistrasi', label: 'Registrasi', sub: 'Perpanjangan masa berlaku KTA', icon: RefreshCw }
-                  ].filter((item) => item.id === defaultType).map(item => {
-                    const Icon = item.icon;
-                    const active = pickType === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setPickType(item.id)}
-                        className={`p-3.5 rounded-2xl border-2 text-left transition-all flex items-center gap-3 ${
-                          active
-                            ? 'border-[#3b82f6] bg-white shadow-[0_8px_20px_-12px_rgba(59,130,246,0.6)]'
-                            : 'border-white bg-white/70 hover:border-blue-200'
-                        }`}
-                      >
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition ${
-                          active ? 'bg-[#3b82f6] text-white' : 'bg-slate-100 text-slate-500'
-                        }`}>
-                          <Icon className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-slate-900">{item.label}</span>
-                            {active && <CheckCircle className="w-4 h-4 text-[#3b82f6]" />}
-                          </div>
-                          <div className="text-xs text-slate-500 mt-0.5 truncate">{item.sub}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {/* Jenis pengajuan dikunci sesuai jawaban profil (anggota lama/baru) */}
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 px-3.5 py-3 text-xs text-slate-500 flex items-center">
-                    <span>
-                      {defaultType === 'Heregistrasi'
-                        ? 'Anda terdaftar sebagai anggota lama, jadi pengajuan Anda adalah registrasi perpanjangan KTA.'
-                        : 'Anda terdaftar sebagai anggota baru, jadi pengajuan Anda adalah pendaftaran anggota baru.'}
-                      {onEditProfile && (
-                        <button type="button" onClick={onEditProfile} className="ml-1 text-[#3b82f6] hover:underline font-medium">
-                          Salah pilih? Ubah jawaban
-                        </button>
-                      )}
-                    </span>
+          <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="panel-inner p-4">
+              <p className="text-sm font-medium text-slate-800 mb-2">Dokumen yang diunggah ({reqDocs.length})</p>
+              <ol className="space-y-1.5">
+                {reqDocs.map((title, i) => (
+                  <li key={title} className="flex items-center gap-2.5 bg-white px-3 py-2 rounded-lg border border-slate-200/70 text-[13px] text-slate-700">
+                    <span className="w-6 h-6 flex-shrink-0 rounded-full bg-blue-50 text-[#3b82f6] text-xs font-semibold flex items-center justify-center">{i + 1}</span>
+                    <span>{title}</span>
+                  </li>
+                ))}
+              </ol>
+              <p className="text-xs text-slate-500 mt-3">Format PDF / JPG / PNG. Dokumen diperiksa Admin satu per satu sebelum pembayaran.</p>
+            </div>
+            <div className="space-y-3">
+              <div className="panel-inner p-4 text-sm">
+                <p className="font-medium text-slate-800 mb-2">Rincian biaya</p>
+                {[
+                  ['Uang Pangkal', fees.uangPangkal],
+                  [`Iuran ${fees.durasiBulan || 24} Bulan`, fees.iuran24Bulan],
+                  ['Biaya Administrasi', fees.administrasi],
+                ].filter(([, v]) => Number(v) > 0).map(([label, v]) => (
+                  <div key={label} className="flex justify-between text-slate-600 py-0.5">
+                    <span>{label}</span><span className="text-slate-900">{formatRupiah(v)}</span>
                   </div>
-                </div>
+                ))}
               </div>
-
-              {/* Kategori Keanggotaan */}
-              <div className="flex flex-col">
-                <label className="text-sm font-medium text-slate-800 block mb-2">
-                  2. Pilih Kategori Keanggotaan
-                </label>
-                <div className="flex-1 grid grid-rows-2 gap-3">
-                  {[
-                    { id: 'Biasa', label: 'Anggota Biasa', sub: 'Badan Usaha Penerbit (PT / CV)', icon: Building2 },
-                    { id: 'Luar Biasa', label: 'Anggota Luar Biasa', sub: 'Perguruan Tinggi / Lembaga', icon: GraduationCap }
-                  ].map(item => {
-                    const Icon = item.icon;
-                    const active = pickCategory === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setPickCategory(item.id)}
-                        className={`p-3.5 rounded-2xl border-2 text-left transition-all flex items-center gap-3 ${
-                          active
-                            ? 'border-[#3b82f6] bg-white shadow-[0_8px_20px_-12px_rgba(59,130,246,0.6)]'
-                            : 'border-white bg-white/70 hover:border-blue-200'
-                        }`}
-                      >
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition ${
-                          active ? 'bg-[#3b82f6] text-white' : 'bg-slate-100 text-slate-500'
-                        }`}>
-                          <Icon className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-slate-900">{item.label}</span>
-                            {active && <CheckCircle className="w-4 h-4 text-[#3b82f6]" />}
-                          </div>
-                          <div className="text-xs text-slate-500 mt-0.5 truncate">{item.sub}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Docs & Action */}
-            <div className="lg:col-span-5 panel-inner p-4">
-              <div>
-                <div className="text-sm font-medium text-slate-800 mb-2">
-                  Berkas Persyaratan
-                </div>
-                <div className="space-y-1.5">
-                  {(REQUIRED_DOCS[pickType]?.[pickCategory] || []).map((title) => (
-                    <div key={title} className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200/70 text-[13px] text-slate-700">
-                      <CheckCircle className="w-4 h-4 text-[#12c26f] flex-shrink-0" />
-                      <span>{title}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
+              <PrintNotice compact />
             </div>
           </div>
 
-          {/* Baris aksi: tombol di bawah agar kolom berkas tidak lebih tinggi dari kolom pilihan */}
           <div className="border-t border-slate-100 px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <p className="text-xs text-slate-500">
-              {(REQUIRED_DOCS[pickType]?.[pickCategory] || []).length} berkas perlu disiapkan. Formulir bisa disimpan sebagai draf.
-            </p>
+            <div className="sm:max-w-xl">{backText}</div>
             <button
               onClick={() => onNewSubmission({ submissionType: pickType, category: pickCategory })}
               className="soft-pill-primary w-full sm:w-auto px-6 py-3 whitespace-nowrap"
@@ -366,7 +363,6 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
           </div>
         </div>
       </div>
-      </>
     );
   }
 
@@ -385,10 +381,18 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   }
 
   const isDraf        = sub.status === 'Draf';
+  const isScreening   = sub.status === 'Menunggu Verifikasi';
   const isWaitPayment = sub.status === 'Menunggu Pembayaran';
   const isNeedRevision = sub.status === 'Perlu Revisi';
+  const isShipping    = sub.status === 'Pengiriman Berkas';
   const rejectedDocs   = docs.filter((d) => d.screening_status === 'Perlu Revisi');
-  const paymentRejected = payment?.verification_status === 'Perlu Revisi';
+  // Daftar dokumen hanya ditampilkan bila ada yang harus diunggah ulang atau masih kosong
+  const actionDocs = docs.filter((d) => d.screening_status === 'Perlu Revisi'
+    || ((sub.status === 'Menunggu Verifikasi' || sub.status === 'Perlu Revisi') && !d.file_path));
+  const paymentRejected = isWaitPayment && payment?.verification_status === 'Perlu Revisi';
+  const paymentPending  = isWaitPayment && payment?.proof_file && payment?.verification_status === 'Menunggu';
+  const showPayForm     = isWaitPayment && (!payment?.proof_file || paymentRejected);
+  const officialDocsReady = ['Pengiriman Berkas', 'Aktif'].includes(sub.status);
 
   // Tagihan tersimpan di server (ikut harga terbaru selama belum dibayar)
   const bill = payment?.fee_breakdown?.total != null
@@ -447,7 +451,104 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       </div>
 
       {/* ── Status Stepper ── */}
-      <StatusStepper currentStatus={sub.status} rejectionReason={sub.rejection_reason} cardClassName="card-surface" />
+      <StatusStepper currentStatus={sub.status} rejectionReason={sub.rejection_reason} paymentRejected={paymentRejected} cardClassName="card-surface" />
+
+      {/* ══ INFO TAHAP SAAT INI ══ */}
+      {isDraf && <PrintNotice />}
+      {isScreening && (
+        <StageInfo icon={Clock} tone="blue" title="Tahap 1 · Dokumen sedang diperiksa Admin">
+          Admin memeriksa setiap dokumen satu per satu. Pembayaran (Tahap 2) dibuka setelah semua dokumen dinyatakan sesuai.
+          {docs.some((d) => !d.file_path) && ' Masih ada dokumen yang belum diunggah, lengkapi di bawah.'}
+        </StageInfo>
+      )}
+      {isWaitPayment && paymentPending && (
+        <StageInfo icon={Clock} tone="blue" title="Tahap 2 · Bukti transfer sedang diverifikasi Admin">
+          Semua dokumen sudah sesuai. Setelah pembayaran dinyatakan valid, pengajuan diteruskan ke Sekretaris untuk ditandatangani.
+        </StageInfo>
+      )}
+      {isWaitPayment && !payment?.proof_file && (
+        <StageInfo icon={CheckCircle} tone="green" title="Tahap 1 selesai · Semua dokumen sesuai">
+          Silakan lakukan pembayaran dan unggah bukti transfer di bawah (Tahap 2).
+        </StageInfo>
+      )}
+      {sub.status === 'Menunggu TTD Sekretaris' && (
+        <StageInfo icon={PenLine} tone="blue" title="Dokumen & pembayaran disetujui · Menunggu tanda tangan Sekretaris">
+          Setelah Sekretaris menandatangani, pengajuan diteruskan ke Ketua.
+        </StageInfo>
+      )}
+      {sub.status === 'Menunggu Approval' && (
+        <StageInfo icon={PenLine} tone="blue" title="Ditandatangani Sekretaris · Menunggu persetujuan Ketua">
+          Setelah Ketua menyetujui, Anda akan diminta mencetak dan mengirim berkas fisik ke sekretariat IKAPI Jawa Barat.
+        </StageInfo>
+      )}
+
+      {/* ══ KIRIM BERKAS FISIK ══ */}
+      {isShipping && (
+        <div className="card-surface overflow-hidden">
+          <div className="bg-amber-50 border-b border-amber-100 px-5 sm:px-7 py-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <Truck className="w-5 h-5 text-amber-700" />
+              <h3 className="text-lg text-slate-800">Kirim Berkas Fisik ke IKAPI Jawa Barat</h3>
+            </div>
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+              sub.physical_status === 'Dikirim' ? 'bg-sky-50 text-[#0884c4] border-sky-200' : 'bg-amber-100 text-amber-800 border-amber-200'
+            }`}>
+              {sub.physical_status === 'Dikirim' ? 'Sudah dikirim · menunggu approval Admin' : 'Belum dikirim'}
+            </span>
+          </div>
+          <div className="p-5 sm:p-7 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <p className="text-sm text-slate-700">
+                Pengajuan Anda sudah disetujui Sekretaris & Ketua. <strong className="font-medium">Cetak sendiri</strong> berkas berikut lalu kirim ke sekretariat:
+              </p>
+              <ol className="space-y-1.5 text-sm text-slate-700 list-decimal pl-5">
+                {physicalChecklist(sub, docs).map((item) => <li key={item}>{item}</li>)}
+              </ol>
+              <div className="panel-inner p-3.5 flex items-start gap-2.5 text-sm">
+                <MapPin className="w-4 h-4 text-[#0884c4] flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-slate-800">Sekretariat IKAPI Jawa Barat</p>
+                  <p className="text-slate-600">{officeAddress(settings)}</p>
+                  {settings.office_phone && <p className="text-slate-500 text-xs mt-0.5">Telp. {settings.office_phone}</p>}
+                </div>
+              </div>
+              <button onClick={() => setShowPacket(true)} className="soft-pill-primary">
+                <Printer className="w-4 h-4" /> Cetak / unduh surat pengantar & formulir
+              </button>
+            </div>
+
+            {sub.physical_status === 'Dikirim' ? (
+              <div className="panel-inner p-5 space-y-2 text-sm">
+                <p className="font-medium text-slate-800 flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-600" /> Berkas fisik sudah Anda kirim</p>
+                <p className="text-slate-600">Dikirim lewat <strong className="font-medium">{sub.physical_courier}</strong>{sub.physical_tracking_no && <> · No. resi <span className="font-mono">{sub.physical_tracking_no}</span></>}{sub.physical_sent_at && <> · {formatLongDate(sub.physical_sent_at)}</>}.</p>
+                <p className="text-slate-500 text-xs">Admin akan mengecek data pengiriman Anda. Setelah di-approve Admin, Anda otomatis menjadi anggota penerbit IKAPI Jawa Barat.</p>
+              </div>
+            ) : (
+              <form onSubmit={handleShipSubmit} className="panel-inner p-5 space-y-3">
+                <p className="text-sm font-medium text-slate-800">Sudah mengirim berkas? Konfirmasi di sini</p>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">Dikirim lewat *</label>
+                  <input required value={shipForm.courier} onChange={(e) => setShipForm({ ...shipForm, courier: e.target.value })}
+                    placeholder="JNE / J&T / POS / Diantar langsung" className="soft-input" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">No. resi (jika ada)</label>
+                  <input value={shipForm.trackingNo} onChange={(e) => setShipForm({ ...shipForm, trackingNo: e.target.value })}
+                    placeholder="Nomor resi pengiriman" className="soft-input" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">Catatan</label>
+                  <input value={shipForm.notes} onChange={(e) => setShipForm({ ...shipForm, notes: e.target.value })}
+                    placeholder="Opsional" className="soft-input" />
+                </div>
+                <button type="submit" disabled={sendingShip} className="soft-pill-primary w-full py-3">
+                  <Truck className="w-4 h-4" /> {sendingShip ? 'Menyimpan...' : 'Saya sudah mengirim berkas fisik'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ══ KTA AKTIF CARD ══ */}
       {sub.status === 'Aktif' && (
@@ -455,7 +556,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
           <div className="space-y-1.5">
             <div className="soft-chip !text-emerald-700">
               <ShieldCheck className="w-4 h-4" />
-              <span>Anggota Resmi Aktif</span>
+              <span>Anggota Penerbit IKAPI</span>
             </div>
             <h3 className="text-2xl sm:text-3xl font-light">{sub.publisher_name}</h3>
             <p className="text-sm text-white/90">
@@ -484,13 +585,14 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         <div className="rounded-[22px] p-5 bg-red-50 border border-red-200 flex items-start gap-3.5">
           <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-red-900 space-y-1">
-            <p className="font-semibold">
-              {rejectedDocs.length > 0 && `${rejectedDocs.length} berkas`}
-              {rejectedDocs.length > 0 && paymentRejected && ' dan '}
-              {paymentRejected && 'bukti pembayaran'} tidak sesuai screening
-            </p>
-            <p>Cukup unggah ulang yang bertanda <strong>merah</strong>. Berkas berlabel hijau sudah diterima dan tidak perlu diubah.</p>
-            {sub.admin_notes && <p className="text-red-800/80">Catatan verifikator: {sub.admin_notes}</p>}
+            <p className="font-semibold">{rejectedDocs.length} dokumen tidak sesuai dan perlu diajukan ulang</p>
+            <ul className="list-disc pl-5 space-y-0.5">
+              {rejectedDocs.map((d) => (
+                <li key={d.id}><strong className="font-medium">{d.document_title}</strong>{d.revision_notes && <> — {d.revision_notes}</>}</li>
+              ))}
+            </ul>
+            <p>Cukup unggah ulang dokumen tersebut di daftar di bawah. Dokumen berlabel hijau sudah sesuai dan tidak perlu dikirim lagi. Setelah semua diganti, dokumen otomatis diperiksa ulang Admin.</p>
+            {sub.admin_notes && <p className="text-red-800/80">Catatan Admin: {sub.admin_notes}</p>}
           </div>
         </div>
       )}
@@ -536,7 +638,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
 
       {/* ══ PEMBAYARAN & UPLOAD BUKTI BAYAR ══ */}
       {/* Form bayar: saat menunggu pembayaran, atau bukti transfer ditolak (unggah ulang) */}
-      {(isWaitPayment || paymentRejected || (payment && !payment.proof_file && !isDraf)) && (
+      {showPayForm && (
         <div className="card-surface overflow-hidden">
           <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -549,7 +651,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               </span>
             ) : (
               <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                {payment?.proof_file ? 'Menunggu Verifikasi' : 'Belum Dibayar'}
+                Tahap 2 · Belum dibayar
               </span>
             )}
           </div>
@@ -648,9 +750,9 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               </div>
 
               {payment?.proof_file && (
-                <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
-                  <CheckCircle className="w-4 h-4" />
-                  <span>Terunggah: {payment.proof_filename || 'Bukti Transfer'}</span>
+                <p className="text-xs font-semibold text-red-700 flex items-center gap-1.5">
+                  <XCircle className="w-4 h-4" />
+                  <span>Sebelumnya: {payment.proof_filename || 'Bukti Transfer'} (tidak sesuai)</span>
                 </p>
               )}
 
@@ -667,16 +769,17 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         </div>
       )}
 
-      {/* ══ DAFTAR BERKAS PERSYARATAN ══ */}
+      {/* ══ DOKUMEN YANG PERLU DIUNGGAH ULANG (hanya tampil bila ada revisi / dokumen kosong) ══ */}
+      {actionDocs.length > 0 && (
       <div className="card-surface overflow-hidden">
         <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <FileText className="w-5 h-5 text-[#0884c4]" />
-            <h3 className="text-lg text-slate-800">Dokumen Persyaratan</h3>
+            <h3 className="text-lg text-slate-800">{rejectedDocs.length > 0 ? 'Dokumen yang perlu direvisi' : 'Dokumen yang belum diunggah'}</h3>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">
-              {docs.filter(d => d.screening_status === 'Sesuai').length} diterima
+              {docs.filter(d => d.screening_status === 'Sesuai').length}/{docs.length} sesuai
             </span>
             {rejectedDocs.length > 0 && (
               <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-red-50 text-red-700 border-red-200">
@@ -687,15 +790,15 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         </div>
 
         <div className="divide-y divide-[#e2f2fd]">
-          {docs.length === 0 && (
-            <p className="text-sm text-slate-400 text-center py-8">Tidak ada dokumen.</p>
-          )}
-          {docs.map((doc, idx) => {
+          {actionDocs.map((doc, idx) => {
             const isRevisi  = doc.screening_status === 'Perlu Revisi';
             const isSesuai  = doc.screening_status === 'Sesuai';
             const hasFile   = Boolean(doc.file_path && doc.file_name && doc.file_name !== 'Belum diunggah');
-            const canUpload = isNeedRevision ? isRevisi : (isDraf || isWaitPayment);
-            const label     = SCREENING_LABEL[doc.screening_status] || SCREENING_LABEL.Menunggu;
+            // Setelah dikirim, hanya dokumen yang tidak sesuai (atau belum diunggah) yang bisa diganti
+            const canUpload = isDraf || (isNeedRevision && (isRevisi || !hasFile)) || (isScreening && !hasFile);
+            const label     = !hasFile && !isRevisi
+              ? { text: 'Belum diunggah', cls: 'bg-slate-50 text-slate-500 border-slate-200', dot: 'bg-slate-300' }
+              : SCREENING_LABEL[doc.screening_status] || SCREENING_LABEL.Menunggu;
 
             return (
               <div
@@ -763,6 +866,48 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
           })}
         </div>
       </div>
+      )}
+
+      {/* ══ RIWAYAT ALUR BERKAS ══ */}
+      <SubmissionTimeline timeline={detailData?.timeline || []} cardClassName="card-surface" />
+
+      {/* ══ POP UP: KIRIM BERKAS FISIK ══ */}
+      {showShipNotice && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeShipNotice}>
+          <div role="dialog" aria-modal="true" aria-labelledby="ship-title" onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-md bg-white rounded-[28px] shadow-2xl overflow-hidden">
+            <div className="bg-amber-400 px-6 pt-7 pb-9 text-center">
+              <div className="mx-auto w-14 h-14 rounded-full bg-white/40 flex items-center justify-center">
+                <Truck className="w-7 h-7 text-amber-900" />
+              </div>
+            </div>
+            <div className="-mt-6 mx-4 mb-4 bg-white rounded-3xl px-5 pt-6 pb-5">
+              <h3 id="ship-title" className="text-xl font-medium text-slate-900 text-center">Pengajuan disetujui! Kirim berkas fisik</h3>
+              <p className="text-sm text-slate-600 mt-2 leading-relaxed text-center">
+                Sekretaris & Ketua sudah menandatangani. <strong className="font-medium text-slate-800">Cetak sendiri</strong> surat pengantar,
+                formulir, dan fotokopi berkas persyaratan, lalu kirim ke sekretariat IKAPI Jawa Barat:
+              </p>
+              <p className="text-xs text-slate-700 bg-slate-50 rounded-xl px-3 py-2 mt-3 flex gap-2">
+                <MapPin className="w-4 h-4 text-[#0884c4] flex-shrink-0" /> {officeAddress(settings)}
+              </p>
+              <p className="text-xs text-slate-500 mt-3 flex gap-2">
+                <Info className="w-4 h-4 flex-shrink-0" />
+                Setelah berkas dikirim, Admin akan mengecek dan meng-approve. Anda lalu otomatis menjadi anggota penerbit IKAPI.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2 mt-5">
+                <button onClick={() => { closeShipNotice(); setShowPacket(true); }}
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-[#3b82f6] hover:bg-[#2f6fe0] text-white text-sm font-medium transition">
+                  <Printer className="w-4 h-4" /> Cetak dokumen
+                </button>
+                <button onClick={closeShipNotice}
+                  className="flex-1 px-4 py-2.5 rounded-2xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-medium transition">
+                  Nanti
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ══ UCAPAN SELAMAT: BARU SAJA AKTIF ══ */}
       {showWelcome && (
@@ -780,10 +925,10 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               </div>
             </div>
             <div className="-mt-6 mx-4 mb-4 bg-white rounded-3xl px-5 pt-6 pb-5">
-              <h3 id="welcome-title" className="text-xl font-medium text-slate-900">Selamat, Anda resmi menjadi anggota!</h3>
+              <h3 id="welcome-title" className="text-xl font-medium text-slate-900">Selamat, tahap pendaftaran sudah selesai!</h3>
               <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-                Pengajuan <strong className="font-medium text-slate-800">{sub.publisher_name}</strong> telah disetujui dan
-                ditandatangani Sekretaris serta Ketua. Anda kini terdaftar sebagai <strong className="font-medium text-emerald-700">anggota aktif IKAPI Jawa Barat</strong>
+                Berkas fisik <strong className="font-medium text-slate-800">{sub.publisher_name}</strong> sudah diterima sekretariat.
+                Anda kini <strong className="font-medium text-emerald-700">resmi menjadi anggota IKAPI Jawa Barat</strong>
                 {sub.activated_at && <> sejak {formatLongDate(sub.activated_at)}</>}.
               </p>
               <p className="text-xs text-slate-500 mt-3">

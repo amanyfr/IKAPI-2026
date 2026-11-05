@@ -7,30 +7,49 @@ import {
   Award,
   XCircle,
   Check,
-  BadgeCheck
+  BadgeCheck,
+  PenLine,
+  Truck
 } from 'lucide-react';
 
-const STEPS = [
-  { key: 'Draf',                label: 'Draf',                     hint: 'Isi formulir & berkas', icon: FileEdit },
-  { key: 'Menunggu Pembayaran', label: 'Pembayaran',               hint: 'Unggah bukti transfer', icon: CreditCard },
-  { key: 'Menunggu Verifikasi', label: 'Screening & TTD Sekretaris', hint: 'Diperiksa Admin & Sekretaris', icon: Search },
-  { key: 'Menunggu Approval',   label: 'TTD Ketua',                hint: 'Persetujuan Ketua', icon: Award },
-  { key: 'Aktif',               label: 'Anggota Aktif',            hint: 'Resmi terdaftar', icon: BadgeCheck },
+// Alur: dokumen dulu (Tahap 1), baru pembayaran (Tahap 2), lalu TTD pengurus dan berkas fisik
+export const STEPS = [
+  { key: 'Draf',                    label: 'Isi Formulir',       hint: 'Formulir & unggah dokumen', icon: FileEdit },
+  { key: 'Menunggu Verifikasi',     label: 'Screening Dokumen',  hint: 'Tahap 1 · diperiksa Admin', icon: Search },
+  { key: 'Menunggu Pembayaran',     label: 'Pembayaran',         hint: 'Tahap 2 · transfer & verifikasi', icon: CreditCard },
+  { key: 'Menunggu TTD Sekretaris', label: 'TTD Sekretaris',     hint: 'Ditandatangani Sekretaris', icon: PenLine },
+  { key: 'Menunggu Approval',       label: 'TTD Ketua',          hint: 'Persetujuan Ketua', icon: Award },
+  { key: 'Aktif',                   label: 'Anggota Aktif',      hint: 'Disetujui Admin', icon: BadgeCheck },
 ];
 
-const STEP_INDEX = {
+export const STEP_INDEX = {
   'Draf': 0,
-  'Menunggu Pembayaran': 1,
-  'Menunggu Verifikasi': 2,
-  'Perlu Revisi': 2,
-  'Menunggu Approval': 3,
-  'Ditolak': 3,
-  'Aktif': 4,
+  'Menunggu Verifikasi': 1,
+  'Perlu Revisi': 1,
+  'Menunggu Pembayaran': 2,
+  'Menunggu TTD Sekretaris': 3,
+  'Menunggu Approval': 4,
+  'Ditolak': 4,
+  'Pengiriman Berkas': 5, // setelah TTD Ketua: menunggu approval Admin
+  'Aktif': 5,
 };
 
-export default function StatusStepper({ currentStatus, rejectionReason, cardClassName = 'card-surface' }) {
+// Nama tahap yang mudah dipahami untuk setiap status (dipakai di semua peran)
+export const STATUS_LABEL = {
+  'Draf': 'Draf',
+  'Menunggu Verifikasi': 'Screening Dokumen',
+  'Perlu Revisi': 'Revisi Dokumen',
+  'Menunggu Pembayaran': 'Pembayaran',
+  'Menunggu TTD Sekretaris': 'Menunggu TTD Sekretaris',
+  'Menunggu Approval': 'Menunggu TTD Ketua',
+  'Pengiriman Berkas': 'Menunggu Approval Admin',
+  'Aktif': 'Anggota Aktif',
+  'Ditolak': 'Ditolak',
+};
+
+export default function StatusStepper({ currentStatus, rejectionReason, paymentRejected = false, cardClassName = 'card-surface' }) {
   const isRejected = currentStatus === 'Ditolak';
-  const isNeedRevision = currentStatus === 'Perlu Revisi';
+  const isNeedRevision = currentStatus === 'Perlu Revisi' || (currentStatus === 'Menunggu Pembayaran' && paymentRejected);
   const isActive = currentStatus === 'Aktif';
   const currentIndex = STEP_INDEX[currentStatus] ?? 0;
 
@@ -69,7 +88,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, cardClas
     );
   };
 
-  const statusText = isActive ? 'Anggota Aktif' : currentStatus;
+  const statusText = STATUS_LABEL[currentStatus] || currentStatus;
 
   return (
     <div className={`${cardClassName} overflow-hidden`}>
@@ -87,7 +106,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, cardClas
           </span>
         </div>
         <span className="text-xs text-slate-500">
-          Tahap <strong className="text-slate-700">{currentIndex + 1}</strong> dari {STEPS.length}
+          Langkah <strong className="text-slate-700">{currentIndex + 1}</strong> dari {STEPS.length}
         </span>
       </div>
 
@@ -96,18 +115,22 @@ export default function StatusStepper({ currentStatus, rejectionReason, cardClas
           isRejected ? 'bg-red-50 border-red-200 text-red-700' : 'bg-amber-50 border-amber-200 text-amber-800'
         }`}>
           {isRejected ? <XCircle className="w-4 h-4 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
-          <span>{isRejected ? `Ditolak: ${rejectionReason || 'Tidak memenuhi syarat'}` : 'Ada berkas yang perlu diperbaiki sebelum dilanjutkan.'}</span>
+          <span>{isRejected
+            ? `Ditolak: ${rejectionReason || 'Tidak memenuhi syarat'}`
+            : currentStatus === 'Perlu Revisi'
+            ? 'Ada dokumen yang tidak sesuai. Unggah ulang dokumen yang ditandai saja.'
+            : 'Bukti transfer tidak sesuai. Unggah ulang bukti transfer.'}</span>
         </div>
       )}
 
       {/* Layar lebar: horizontal, garis tepat dari titik ke titik */}
-      <ol className="hidden md:grid grid-cols-5 px-4 lg:px-6 pt-7 pb-6">
+      <ol className="hidden md:grid grid-cols-6 px-3 lg:px-5 pt-7 pb-6">
         {STEPS.map((step, idx) => {
           const state = stepState(idx);
           const leftDone = isActive || idx <= currentIndex;
           const rightDone = isActive || idx < currentIndex;
           return (
-            <li key={step.key} className="relative flex flex-col items-center text-center px-2">
+            <li key={step.key} className="relative flex flex-col items-center text-center px-1">
               {idx > 0 && (
                 <span className={`absolute top-[21px] left-0 right-1/2 h-[3px] ${leftDone ? doneLine : 'bg-slate-200'}`} />
               )}
@@ -115,9 +138,9 @@ export default function StatusStepper({ currentStatus, rejectionReason, cardClas
                 <span className={`absolute top-[21px] left-1/2 right-0 h-[3px] ${rightDone ? doneLine : 'bg-slate-200'}`} />
               )}
               {renderDot(step, state)}
-              <span className={`mt-3 text-sm font-semibold leading-snug ${labelClass[state]}`}>{step.label}</span>
-              <span className={`mt-1 text-xs leading-snug max-w-[11rem] ${state === 'todo' ? 'text-slate-300' : 'text-slate-500'}`}>
-                {step.hint}
+              <span className={`mt-3 text-[13px] font-semibold leading-snug ${labelClass[state]}`}>{step.label}</span>
+              <span className={`mt-1 text-[11px] leading-snug max-w-[9rem] ${state === 'todo' ? 'text-slate-300' : 'text-slate-500'}`}>
+                {state === 'current' && step.key === 'Aktif' ? 'Menunggu approval Admin' : step.hint}
               </span>
             </li>
           );
@@ -137,7 +160,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, cardClas
               {renderDot(step, state)}
               <div className="pt-1.5 min-w-0">
                 <p className={`text-sm font-semibold ${labelClass[state]}`}>{idx + 1}. {step.label}</p>
-                <p className={`text-xs mt-0.5 ${state === 'todo' ? 'text-slate-300' : 'text-slate-500'}`}>{step.hint}</p>
+                <p className={`text-xs mt-0.5 ${state === 'todo' ? 'text-slate-300' : 'text-slate-500'}`}>{state === 'current' && step.key === 'Aktif' ? 'Menunggu approval Admin' : step.hint}</p>
               </div>
             </li>
           );

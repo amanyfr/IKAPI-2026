@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Printer, Download, CheckCircle, FileText } from 'lucide-react';
-import { jsPDF } from 'jspdf';
-import { PengurusSignatureBlock, drawPengurusSignaturesPdf, KopSurat, drawKopPdf } from './PengurusSignature';
+import { PengurusSignatureBlock, KopSurat } from './PengurusSignature';
+import { downloadElementPdf, printElement, safeFileName } from '../utils/exportDocument';
 
 // `signing` (opsional) = { role: 'chairman' | 'secretary', img, pos, onChange }: mode pembubuhan
 // TTD seperti e-meterai pada blok tanda tangan surat.
 export default function OfficialLetterGenerator({ submission, settings, signing = null }) {
+  const paperRef = useRef(null);
   if (!submission) return null;
 
   const isHeregistrasi = submission.submission_type === 'Heregistrasi';
@@ -31,105 +32,11 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
 
   const isSigned =
     Boolean(submission.signed_by_chairman) ||
-    submission.status === 'Aktif';
+    ['Pengiriman Berkas', 'Aktif'].includes(submission.status);
 
-  const handlePrint = () => {
-    window.print();
-  };
-
-  // Export PDF with jsPDF
-  const handleDownloadPdf = () => {
-    const doc = new jsPDF({
-      unit: 'mm',
-      format: 'a4',
-      orientation: 'portrait'
-    });
-
-    drawKopPdf(doc, settings);
-
-    // Letter meta
-    doc.setFont('times', 'normal');
-    doc.setFontSize(10);
-    doc.text(`Nomor    : ${refNumber}`, 20, 52);
-    doc.text(`Lampiran : 1 (Satu) Berkas Lengkap`, 20, 57);
-    doc.text(
-      `Perihal  : ${isHeregistrasi ? 'Rekomendasi Perpanjangan KTA IKAPI' : 'Rekomendasi Penerimaan Anggota Baru IKAPI'}`,
-      20,
-      62
-    );
-
-    doc.text(`Bandung, ${letterDateStr}`, 145, 52);
-
-    // Recipient
-    doc.text('Kepada Yth.', 20, 72);
-    doc.setFont('times', 'bold');
-    doc.text('Pengurus Pusat IKAPI (Dewan Pertimbangan / Sekretariat)', 20, 77);
-    doc.setFont('times', 'normal');
-    doc.text('Jl. Kalipasir No. 32, Cikini, Menteng', 20, 82);
-    doc.text('Jakarta Pusat 10330', 20, 87);
-
-    // Opening
-    doc.text('Dengan hormat,', 20, 96);
-    const splitOpening = doc.splitTextToSize(openingText, 170);
-    doc.text(splitOpening, 20, 102);
-
-    // Member Details Box
-    let y = 122;
-    doc.setFont('times', 'bold');
-    doc.text('1. Nama Penerbit', 25, y);
-    doc.setFont('times', 'normal');
-    doc.text(`: ${submission.publisher_name || '-'}`, 75, y);
-
-    y += 6;
-    doc.setFont('times', 'bold');
-    doc.text('2. Kategori Anggota', 25, y);
-    doc.setFont('times', 'normal');
-    doc.text(`: Anggota ${submission.member_category || submission.category || 'Biasa'} (${submission.legal_entity || 'Badan Usaha'})`, 75, y);
-
-    if (isHeregistrasi) {
-      y += 6;
-      doc.setFont('times', 'bold');
-      doc.text('3. No. KTA Lama', 25, y);
-      doc.setFont('times', 'normal');
-      doc.text(`: ${submission.old_kta_number || submission.member_kta || '-'}`, 75, y);
-    }
-
-    y += 6;
-    doc.setFont('times', 'bold');
-    doc.text(isHeregistrasi ? '4. Nama Pimpinan' : '3. Nama Pimpinan', 25, y);
-    doc.setFont('times', 'normal');
-    doc.text(`: ${submission.leader_name || '-'} (${submission.leader_title || 'Pimpinan'})`, 75, y);
-
-    y += 6;
-    doc.setFont('times', 'bold');
-    doc.text(isHeregistrasi ? '5. Alamat Kantor' : '4. Alamat Kantor', 25, y);
-    doc.setFont('times', 'normal');
-    const splitAddr = doc.splitTextToSize(`: ${submission.address || '-'}, ${submission.city || '-'}`, 115);
-    doc.text(splitAddr, 75, y);
-
-    y += 10;
-    doc.setFont('times', 'bold');
-    doc.text(isHeregistrasi ? '6. No. Telp / Email' : '5. No. Telp / Email', 25, y);
-    doc.setFont('times', 'normal');
-    doc.text(`: ${submission.publisher_phone || submission.phone || '-'} / ${submission.publisher_email || submission.email || '-'}`, 75, y);
-
-    y += 6;
-    doc.setFont('times', 'bold');
-    doc.text(isHeregistrasi ? '7. Penanggung Jawab' : '6. Penanggung Jawab Redaksi', 25, y);
-    doc.setFont('times', 'normal');
-    doc.text(`: ${submission.person_in_charge || '-'} (BNSP: ${submission.bnsp_certificate_no || 'Terverifikasi'})`, 75, y);
-
-    // Closing statement
-    y += 14;
-    const splitClosing = doc.splitTextToSize(closingText, 170);
-    doc.text(splitClosing, 20, y);
-
-    // Signatures
-    y += 24;
-    drawPengurusSignaturesPdf(doc, { submission, settings, docKey: 'surat', y });
-
-    doc.save(`Surat_Rekomendasi_IKAPI_${submission.publisher_name ? submission.publisher_name.replace(/\s+/g, '_') : 'Jabar'}.pdf`);
-  };
+  const fileName = `Surat_Pengantar_IKAPI_Jabar_${safeFileName(submission.publisher_name, 'Pemohon')}.pdf`;
+  const handlePrint = () => printElement(paperRef.current, fileName.replace('.pdf', ''));
+  const handleDownloadPdf = () => downloadElementPdf(paperRef.current, fileName);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -167,6 +74,8 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
 
       {/* Official Letter Paper View */}
       <div
+        ref={paperRef}
+        data-paper
         className="p-8 sm:p-12 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white"
         style={{ minHeight: '850px' }}
       >

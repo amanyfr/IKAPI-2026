@@ -1,8 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
-  Save, Send, CheckCircle, Upload, ArrowLeft, ArrowRight
+  Save, Send, CheckCircle, Check, Upload, ArrowLeft, ArrowRight
 } from 'lucide-react';
+import {
+  PEMASARAN_DISTRIBUTOR, PEMASARAN_SENDIRI, PENJUALAN_OPTIONS, NASKAH_OPTIONS,
+  KEPEMILIKAN_KANTOR_OPTIONS, LOKASI_KANTOR_OPTIONS, CETAK_OPTIONS, DEFAULT_KARYAWAN,
+  asList, karyawanRows
+} from '../utils/formulirIkapi';
+import { notify } from '../components/AppDialog';
 
 const CITIES_JABAR = [
   'Kota Bandung', 'Kabupaten Bandung', 'Kabupaten Bandung Barat', 'Kota Cimahi',
@@ -29,8 +35,8 @@ const SPECIALIZATIONS = [
 function getRequiredDocsList(submissionType, category) {
   if (submissionType === 'Heregistrasi') {
     return [
-      { type: 'formulir_heregistrasi', title: 'Formulir Registrasi IKAPI 2026' },
-      { type: 'kta_lama', title: 'KTA Lama' },
+      { type: 'kta_lama', title: 'Kartu Anggota Ikapi yang Sudah Habis Masa Berlakunya' },
+      { type: 'formulir_heregistrasi', title: 'Isian Formulir Heregistrasi' },
     ];
   }
   if (category === 'Biasa') {
@@ -52,6 +58,9 @@ function getRequiredDocsList(submissionType, category) {
 export default function RegistrationForm({ existingSubmission, onComplete, onCancel, initialSubmissionType, initialCategory, initialOldKtaNumber, lockSubmissionType = false }) {
   const { user } = useAuth();
   const [submitting, setSubmitting] = useState(false);
+  // Draf bisa disimpan di setiap langkah; id disimpan agar simpan berikutnya memperbarui draf yang sama
+  const [draftId, setDraftId] = useState(existingSubmission?.id || null);
+  const [draftSavedAt, setDraftSavedAt] = useState(null);
   const [activeTab, setActiveTab] = useState(1);
   const [selectedFiles, setSelectedFiles] = useState({});
 
@@ -92,31 +101,30 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
     rataRataOplah: '',
     annualBookCount: '',
 
-    // 4. Pemasaran
-    sistemPemasaran: 'Toko Buku, Penjualan Online, & Instansi',
-    rataRataDiskon: '30',
-    sistemPenjualan: 'Tunai, Kredit, dan Konsinyasi',
+    // 4. Pemasaran (pilihan sesuai formulir resmi)
+    sistemPemasaran: [],
+    rataRataDiskon: '',
+    sistemPenjualan: [],
 
     // 5. Naskah
-    sistemPengadaanNaskah: 'Royalti Penulis & Beli Putus',
-    persentaseRoyalti: '10%',
+    sistemPengadaanNaskah: [],
+    persentaseRoyalti: '',
 
     // 6. Organisasi
-    jumlahKaryawanRedaksi: '',
-    jumlahKaryawanProduksi: '',
-    jumlahKaryawanPemasaran: '',
-    jumlahKaryawanAdmin: '',
-    kepemilikanKantor: 'Milik Sendiri',
-    lokasiKantor: 'Gedung Perkantoran / Ruko',
-    kantorCabang: '-',
-    liniPenerbitan: '',
+    karyawan: DEFAULT_KARYAWAN,
+    kepemilikanKantor: '',
+    lokasiKantor: '',
+    kantorCabang1: '',
+    kantorCabang2: '',
+    liniPenerbitan1: '',
+    liniPenerbitan2: '',
 
     // 7. Produksi
-    softwareProduksi: 'Adobe InDesign, Illustrator, Photoshop',
+    softwareProduksi: '',
     contohIsbn: '',
-    jenisKertas: 'Bookpaper, HVS, Art Carton',
-    sistemCetak: 'Cetak di Luar (Percetakan Mitra)',
-    pekerjaanOutsource: 'Percetakan & Penjilidan'
+    jenisKertas: '',
+    sistemCetak: '',
+    pekerjaanOutsource: ''
   });
 
   useEffect(() => {
@@ -125,9 +133,26 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
         ? JSON.parse(existingSubmission.form_data || '{}')
         : existingSubmission.form_data || {};
 
+      // Isian lama (teks bebas) diselaraskan ke pilihan formulir resmi
+      const onlyKnown = (value, options) => asList(value).filter(v => options.includes(v));
+      const oneOf = (value, options) => (options.includes(value) ? value : '');
+      const rows = karyawanRows(parsed);
+      const keepDash = (v) => (v && v.trim() !== '-' ? v : '');
+
       setFormData(prev => ({
         ...prev,
         ...parsed,
+        sistemPemasaran: onlyKnown(parsed.sistemPemasaran, [PEMASARAN_DISTRIBUTOR, ...PEMASARAN_SENDIRI]),
+        sistemPenjualan: onlyKnown(parsed.sistemPenjualan, PENJUALAN_OPTIONS),
+        sistemPengadaanNaskah: onlyKnown(parsed.sistemPengadaanNaskah, NASKAH_OPTIONS),
+        kepemilikanKantor: oneOf(parsed.kepemilikanKantor, KEPEMILIKAN_KANTOR_OPTIONS),
+        lokasiKantor: oneOf(parsed.lokasiKantor, LOKASI_KANTOR_OPTIONS),
+        sistemCetak: oneOf(parsed.sistemCetak, CETAK_OPTIONS),
+        karyawan: rows.length
+          ? [...rows, ...Array(Math.max(0, 4 - rows.length)).fill({ bagian: '', jumlah: '' })]
+          : prev.karyawan,
+        kantorCabang1: parsed.kantorCabang1 ?? keepDash(parsed.kantorCabang),
+        liniPenerbitan1: parsed.liniPenerbitan1 ?? keepDash(parsed.liniPenerbitan),
         submissionType: existingSubmission.submission_type || prev.submissionType,
         category: existingSubmission.member_category || existingSubmission.category || prev.category,
         oldKtaNumber: existingSubmission.old_kta_number || parsed.oldKtaNumber || prev.oldKtaNumber,
@@ -154,32 +179,53 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
     });
   };
 
+  // Kotak centang (boleh lebih dari satu) sesuai formulir resmi
+  const toggleListValue = (name, value) => {
+    setFormData(prev => {
+      const current = asList(prev[name]);
+      return { ...prev, [name]: current.includes(value) ? current.filter(v => v !== value) : [...current, value] };
+    });
+  };
+
+  const setKaryawan = (idx, field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      karyawan: prev.karyawan.map((row, i) => (i === idx ? { ...row, [field]: value } : row))
+    }));
+  };
+
   const handleFileSelect = (docType, file) => {
     if (!file) return;
     setSelectedFiles(prev => ({ ...prev, [docType]: file }));
   };
 
   const requiredDocs = getRequiredDocsList(formData.submissionType, formData.category);
+  const isHereg = formData.submissionType === 'Heregistrasi';
 
-  const handleSubmit = async (isDraft = false) => {
+  const handleSubmit = async (isDraft = false, { stay = false } = {}) => {
+    if (isDraft && !formData.publisherName.trim()) {
+      notify('Isi Nama Penerbit terlebih dahulu agar draf bisa disimpan.');
+      setActiveTab(1);
+      return;
+    }
     if (!isDraft) {
       if (!formData.publisherName.trim()) {
-        alert('Nama penerbit wajib diisi.');
+        notify('Nama penerbit wajib diisi.');
         setActiveTab(1);
         return;
       }
       if (!formData.address.trim()) {
-        alert('Alamat kantor wajib diisi.');
+        notify('Alamat kantor wajib diisi.');
         setActiveTab(1);
         return;
       }
       if (!formData.leaderName.trim()) {
-        alert('Nama pimpinan wajib diisi.');
+        notify('Nama pimpinan wajib diisi.');
         setActiveTab(1);
         return;
       }
       if (formData.submissionType === 'Heregistrasi' && !formData.oldKtaNumber.trim()) {
-        alert('Nomor KTA Lama wajib diisi untuk Registrasi.');
+        notify('Nomor KTA Lama wajib diisi untuk Registrasi.');
         setActiveTab(1);
         return;
       }
@@ -188,28 +234,24 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
     setSubmitting(true);
     try {
       const token = localStorage.getItem('ikapi_token');
-      const endpoint = existingSubmission?.id
-        ? `/api/submissions/${existingSubmission.id}`
-        : '/api/submissions';
-      const method = existingSubmission?.id ? 'PUT' : 'POST';
+      const endpoint = draftId ? `/api/submissions/${draftId}` : '/api/submissions';
+      const method = draftId ? 'PUT' : 'POST';
 
+      // 1) Simpan sebagai draf, 2) unggah dokumen, 3) baru dikirim untuk screening Admin
       const res = await fetch(endpoint, {
         method,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({
-          ...formData,
-          isDraft,
-          isSubmit: !isDraft
-        })
+        body: JSON.stringify({ ...formData, isDraft: true, isSubmit: false })
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      const subId = data.submissionId || existingSubmission?.id;
+      const subId = data.submissionId || draftId;
+      if (subId) setDraftId(subId);
 
       if (subId && Object.keys(selectedFiles).length > 0) {
         for (const docItem of requiredDocs) {
@@ -219,18 +261,40 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
             fd.append('file', file);
             fd.append('documentType', docItem.type);
             fd.append('documentTitle', docItem.title);
-            await fetch(`/api/submissions/${subId}/documents`, {
+            const up = await fetch(`/api/submissions/${subId}/documents`, {
               method: 'POST',
               headers: { Authorization: `Bearer ${token}` },
               body: fd
             });
+            if (!up.ok) {
+              const upData = await up.json().catch(() => ({}));
+              throw new Error(`${docItem.title}: ${upData.error || 'gagal diunggah'}`);
+            }
           }
         }
       }
 
+      if (!isDraft) {
+        const submitRes = await fetch(`/api/submissions/${subId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ ...formData, isSubmit: true })
+        });
+        const submitData = await submitRes.json();
+        if (!submitRes.ok) {
+          // Draf & dokumen sudah tersimpan; pemohon bisa melengkapi lalu kirim lagi
+          if (onComplete) onComplete(subId);
+          throw new Error(submitData.error);
+        }
+      }
+
+      if (isDraft && stay) {
+        setDraftSavedAt(new Date());
+        return;
+      }
       if (onComplete) onComplete(subId);
     } catch (err) {
-      alert('Gagal menyimpan formulir: ' + err.message);
+      notify('Gagal menyimpan formulir: ' + err.message);
     } finally {
       setSubmitting(false);
     }
@@ -312,20 +376,26 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
 
                 <div>
                   <label className={labelCls}>Kategori Keanggotaan *</label>
-                  <select
-                    name="category"
-                    value={formData.category}
-                    onChange={handleChange}
-                    className={inputCls}
-                  >
-                    <option value="Biasa">Anggota Biasa (Badan Usaha)</option>
-                    <option value="Luar Biasa">Anggota Luar Biasa (Institusi)</option>
-                  </select>
+                  {/* Default anggota biasa; anggota luar biasa hanya opsi tambahan */}
+                  <div className={`${inputCls} flex items-center justify-between bg-slate-50`}>
+                    <span>{formData.category === 'Luar Biasa' ? 'Anggota Luar Biasa (Perguruan Tinggi / Lembaga)' : 'Anggota Biasa (Badan Usaha)'}</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1.5">
+                    {formData.category === 'Luar Biasa' ? 'Bukan perguruan tinggi / lembaga? ' : 'Penerbit perguruan tinggi atau lembaga? '}
+                    <button
+                      type="button"
+                      onClick={() => handleChange({ target: { name: 'category', value: formData.category === 'Luar Biasa' ? 'Biasa' : 'Luar Biasa' } })}
+                      className="text-[#3b82f6] hover:underline font-medium"
+                    >
+                      {formData.category === 'Luar Biasa' ? 'Kembali ke Anggota Biasa' : 'Daftar sebagai Anggota Luar Biasa'}
+                    </button>
+                    {' '}— dokumen persyaratan di tab terakhir menyesuaikan.
+                  </p>
                 </div>
 
                 {formData.submissionType === 'Heregistrasi' && (
                   <div>
-                    <label className={labelCls}>Nomor KTA Lama *</label>
+                    <label className={labelCls}>No. Anggota Ikapi (KTA Lama) *</label>
                     <input
                       type="text"
                       name="oldKtaNumber"
@@ -351,6 +421,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   />
                 </div>
 
+                {!isHereg && (
                 <div>
                   <label className={labelCls}>Bentuk Badan Hukum *</label>
                   <select
@@ -366,7 +437,9 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                     <option value="Koperasi / Badan Hukum Lainnya">Koperasi / Badan Hukum Lainnya</option>
                   </select>
                 </div>
+                )}
 
+                {!isHereg && (<>
                 <div>
                   <label className={labelCls}>Nomor Induk Berusaha (NIB)</label>
                   <input
@@ -390,6 +463,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                     className={inputCls}
                   />
                 </div>
+                </>)}
 
                 <div className="md:col-span-2">
                   <label className={labelCls}>Alamat Kantor *</label>
@@ -513,6 +587,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   />
                 </div>
 
+                {!isHereg && (
                 <div>
                   <label className={labelCls}>No. Sertifikat BNSP *</label>
                   <input
@@ -524,9 +599,21 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                     className={inputCls}
                   />
                 </div>
+                )}
               </div>
 
               <div className="flex justify-end pt-4">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                {draftSavedAt && <span className="text-xs text-emerald-700">Draf tersimpan {draftSavedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>}
+                <button
+                  type="button"
+                  onClick={() => handleSubmit(true, { stay: true })}
+                  disabled={submitting}
+                  className="soft-pill whitespace-nowrap"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{submitting ? 'Menyimpan...' : 'Simpan Draf'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab(2)}
@@ -535,6 +622,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   <span>Selanjutnya</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
+                </div>
               </div>
             </div>
           )}
@@ -570,6 +658,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   </>
                 )}
 
+                {!isHereg && (
                 <div className="md:col-span-2">
                   <label className={labelCls}>Jenis Terbitan</label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-1.5">
@@ -597,9 +686,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                     })}
                   </div>
                 </div>
+                )}
 
                 <div>
-                  <label className={labelCls}>Jumlah Judul Terbit</label>
+                  <label className={labelCls}>Jumlah Judul yang Telah Diterbitkan</label>
                   <input
                     type="number"
                     name="jumlahJudulTerbit"
@@ -611,7 +701,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 </div>
 
                 <div>
-                  <label className={labelCls}>Rata-rata Oplah Cetakan Pertama (Eksemplar)</label>
+                  <label className={labelCls}>Rata-rata Oplag Cetakan Pertama (eks)</label>
                   <input
                     type="number"
                     name="rataRataOplah"
@@ -623,7 +713,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 </div>
 
                 <div>
-                  <label className={labelCls}>Rencana Produksi (Judul / Tahun)</label>
+                  <label className={labelCls}>Rencana Produksi/Penerbitan (judul/tahun)</label>
                   <input
                     type="number"
                     name="annualBookCount"
@@ -635,67 +725,66 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 </div>
 
                 <div>
-                  <label className={labelCls}>Sistem Pemasaran Buku</label>
+                  <label className={labelCls}>Rata-rata Diskon yang Lepas (%)</label>
                   <input
-                    type="text"
-                    name="sistemPemasaran"
-                    value={formData.sistemPemasaran}
-                    onChange={handleChange}
-                    className={inputCls}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelCls}>Rata-rata Diskon (%)</label>
-                  <input
-                    type="text"
+                    type="number"
                     name="rataRataDiskon"
                     value={formData.rataRataDiskon}
                     onChange={handleChange}
+                    placeholder="30"
                     className={inputCls}
                   />
                 </div>
 
-                <div>
+                <div className="md:col-span-2">
+                  <label className={labelCls}>Sistem Pemasaran</label>
+                  <div className="space-y-2">
+                    <ChoiceGroup
+                      options={[PEMASARAN_DISTRIBUTOR]}
+                      selected={asList(formData.sistemPemasaran)}
+                      onToggle={(v) => toggleListValue('sistemPemasaran', v)}
+                    />
+                    <p className="text-xs text-slate-500">Melalui penjualan sendiri:</p>
+                    <ChoiceGroup
+                      options={PEMASARAN_SENDIRI}
+                      selected={asList(formData.sistemPemasaran)}
+                      onToggle={(v) => toggleListValue('sistemPemasaran', v)}
+                    />
+                  </div>
+                </div>
+
+                <div className="md:col-span-2">
                   <label className={labelCls}>Sistem Penjualan</label>
-                  <select
-                    name="sistemPenjualan"
-                    value={formData.sistemPenjualan}
-                    onChange={handleChange}
-                    className={inputCls}
-                  >
-                    <option value="Tunai, Kredit, dan Konsinyasi">Tunai, Kredit & Konsinyasi</option>
-                    <option value="Tunai dan Konsinyasi">Tunai & Konsinyasi</option>
-                    <option value="Tunai (Cash)">Tunai</option>
-                    <option value="Konsinyasi">Konsinyasi</option>
-                    <option value="Kredit">Kredit</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className={labelCls}>Sistem Pengadaan Naskah</label>
-                  <select
-                    name="sistemPengadaanNaskah"
-                    value={formData.sistemPengadaanNaskah}
-                    onChange={handleChange}
-                    className={inputCls}
-                  >
-                    <option value="Royalti Penulis & Beli Putus">Royalti & Beli Putus</option>
-                    <option value="Sistem Royalti Penulis">Royalti Penulis</option>
-                    <option value="Beli Putus (Flat Fee)">Beli Putus</option>
-                    <option value="Ditulis Sendiri oleh Tim Internal / Dosen">Ditulis Internal</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className={labelCls}>Besaran Royalti Rata-rata (%)</label>
-                  <input
-                    type="text"
-                    name="persentaseRoyalti"
-                    value={formData.persentaseRoyalti}
-                    onChange={handleChange}
-                    className={inputCls}
+                  <ChoiceGroup
+                    options={PENJUALAN_OPTIONS}
+                    selected={asList(formData.sistemPenjualan)}
+                    onToggle={(v) => toggleListValue('sistemPenjualan', v)}
                   />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className={labelCls}>Sistem Pengadaan Naskah</label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ChoiceGroup
+                      options={NASKAH_OPTIONS}
+                      selected={asList(formData.sistemPengadaanNaskah)}
+                      onToggle={(v) => toggleListValue('sistemPengadaanNaskah', v)}
+                    />
+                    {asList(formData.sistemPengadaanNaskah).includes('Royalti') && (
+                      <label className="flex items-center gap-2 text-sm text-slate-600">
+                        Royalti =
+                        <input
+                          type="number"
+                          name="persentaseRoyalti"
+                          value={String(formData.persentaseRoyalti || '').replace('%', '')}
+                          onChange={handleChange}
+                          placeholder="10"
+                          className="soft-input !w-20 py-2"
+                        />
+                        %
+                      </label>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -707,6 +796,17 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 >
                   Kembali
                 </button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                {draftSavedAt && <span className="text-xs text-emerald-700">Draf tersimpan {draftSavedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>}
+                <button
+                  type="button"
+                  onClick={() => handleSubmit(true, { stay: true })}
+                  disabled={submitting}
+                  className="soft-pill whitespace-nowrap"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{submitting ? 'Menyimpan...' : 'Simpan Draf'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab(3)}
@@ -715,6 +815,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   <span>Selanjutnya</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
+                </div>
               </div>
             </div>
           )}
@@ -723,164 +824,134 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
           {activeTab === 3 && (
             <div className="space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4 p-4 sm:p-6 panel-inner">
-                <div>
-                  <label className={labelCls}>Jumlah Karyawan Redaksi (Orang)</label>
-                  <input
-                    type="number"
-                    name="jumlahKaryawanRedaksi"
-                    value={formData.jumlahKaryawanRedaksi}
-                    onChange={handleChange}
-                    placeholder="0"
-                    className={inputCls}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelCls}>Jumlah Karyawan Produksi (Orang)</label>
-                  <input
-                    type="number"
-                    name="jumlahKaryawanProduksi"
-                    value={formData.jumlahKaryawanProduksi}
-                    onChange={handleChange}
-                    placeholder="0"
-                    className={inputCls}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelCls}>Jumlah Karyawan Pemasaran (Orang)</label>
-                  <input
-                    type="number"
-                    name="jumlahKaryawanPemasaran"
-                    value={formData.jumlahKaryawanPemasaran}
-                    onChange={handleChange}
-                    placeholder="0"
-                    className={inputCls}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelCls}>Jumlah Karyawan Admin / Umum (Orang)</label>
-                  <input
-                    type="number"
-                    name="jumlahKaryawanAdmin"
-                    value={formData.jumlahKaryawanAdmin}
-                    onChange={handleChange}
-                    placeholder="0"
-                    className={inputCls}
-                  />
+                <div className="md:col-span-2">
+                  <div className="flex items-baseline justify-between gap-3 mb-1.5">
+                    <label className={`${labelCls} !mb-0`}>Jumlah Karyawan (per bagian)</label>
+                    <span className="text-xs text-slate-500">
+                      Total: <strong className="text-slate-800">
+                        {formData.karyawan.reduce((sum, k) => sum + (Number(k.jumlah) || 0), 0)} orang
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {formData.karyawan.map((row, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400 w-4">{idx + 1}.</span>
+                        <input
+                          type="text"
+                          value={row.bagian}
+                          onChange={(e) => setKaryawan(idx, 'bagian', e.target.value)}
+                          placeholder="Nama bagian"
+                          className={`${inputCls} flex-1 min-w-0`}
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          value={row.jumlah}
+                          onChange={(e) => setKaryawan(idx, 'jumlah', e.target.value)}
+                          placeholder="0"
+                          aria-label={`Jumlah orang bagian ${row.bagian || idx + 1}`}
+                          className={`${inputCls} !w-20`}
+                        />
+                        <span className="text-xs text-slate-500">orang</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div>
                   <label className={labelCls}>Kepemilikan Kantor</label>
-                  <select
-                    name="kepemilikanKantor"
-                    value={formData.kepemilikanKantor}
-                    onChange={handleChange}
-                    className={inputCls}
-                  >
-                    <option value="Milik Sendiri">Milik Sendiri</option>
-                    <option value="Sewa / Kontrak">Sewa / Kontrak</option>
-                    <option value="Gedung Kampus / Institusi Induk">Gedung Kampus / Institusi</option>
-                    <option value="Pinjam Pakai">Pinjam Pakai</option>
-                  </select>
+                  <ChoiceGroup
+                    single
+                    options={KEPEMILIKAN_KANTOR_OPTIONS}
+                    selected={[formData.kepemilikanKantor]}
+                    onToggle={(v) => setFormData(prev => ({ ...prev, kepemilikanKantor: v }))}
+                  />
                 </div>
 
                 <div>
-                  <label className={labelCls}>Lokasi Kantor</label>
-                  <select
-                    name="lokasiKantor"
-                    value={formData.lokasiKantor}
-                    onChange={handleChange}
-                    className={inputCls}
-                  >
-                    <option value="Gedung Perkantoran / Ruko">Gedung Perkantoran / Ruko</option>
-                    <option value="Lingkungan Kampus / Lembaga">Lingkungan Kampus / Lembaga</option>
-                    <option value="Kawasan Bisnis / Komersial">Kawasan Bisnis</option>
-                    <option value="Rumah Tinggal / Perumahan">Rumah Tinggal</option>
-                  </select>
+                  <label className={labelCls}>Lokasi</label>
+                  <ChoiceGroup
+                    single
+                    options={LOKASI_KANTOR_OPTIONS}
+                    selected={[formData.lokasiKantor]}
+                    onToggle={(v) => setFormData(prev => ({ ...prev, lokasiKantor: v }))}
+                  />
                 </div>
 
-                {formData.submissionType === 'Heregistrasi' && (
+                {isHereg && (
                   <>
                     <div>
-                      <label className={labelCls}>Kantor Cabang</label>
-                      <input
-                        type="text"
-                        name="kantorCabang"
-                        value={formData.kantorCabang}
-                        onChange={handleChange}
-                        className={inputCls}
-                      />
+                      <label className={labelCls}>Kantor Cabang / Perwakilan</label>
+                      <div className="space-y-2">
+                        <input type="text" name="kantorCabang1" value={formData.kantorCabang1} onChange={handleChange} placeholder="1. Kosongkan bila tidak ada" className={inputCls} />
+                        <input type="text" name="kantorCabang2" value={formData.kantorCabang2} onChange={handleChange} placeholder="2." className={inputCls} />
+                      </div>
                     </div>
                     <div>
-                      <label className={labelCls}>Lini Penerbitan / Imprint</label>
-                      <input
-                        type="text"
-                        name="liniPenerbitan"
-                        value={formData.liniPenerbitan}
-                        onChange={handleChange}
-                        className={inputCls}
-                      />
+                      <label className={labelCls}>Lini Penerbitan</label>
+                      <div className="space-y-2">
+                        <input type="text" name="liniPenerbitan1" value={formData.liniPenerbitan1} onChange={handleChange} placeholder="1. Kosongkan bila tidak ada" className={inputCls} />
+                        <input type="text" name="liniPenerbitan2" value={formData.liniPenerbitan2} onChange={handleChange} placeholder="2." className={inputCls} />
+                      </div>
                     </div>
                   </>
                 )}
 
                 <div>
-                  <label className={labelCls}>Software Produksi</label>
+                  <label className={labelCls}>Program Komputer (Software) yang Digunakan</label>
                   <input
                     type="text"
                     name="softwareProduksi"
                     value={formData.softwareProduksi}
                     onChange={handleChange}
+                    placeholder="Contoh: Adobe InDesign, Photoshop"
                     className={inputCls}
                   />
                 </div>
 
                 <div>
-                  <label className={labelCls}>Contoh ISBN</label>
+                  <label className={labelCls}>Nomor ISBN yang Sudah Digunakan</label>
                   <input
                     type="text"
                     name="contohIsbn"
                     value={formData.contohIsbn}
                     onChange={handleChange}
-                    placeholder="978-623-..."
+                    placeholder="Salah satu buku saja, mis. 978-623-..."
                     className={inputCls}
                   />
                 </div>
 
                 <div>
-                  <label className={labelCls}>Jenis Kertas</label>
+                  <label className={labelCls}>Jenis Kertas yang Digunakan</label>
                   <input
                     type="text"
                     name="jenisKertas"
                     value={formData.jenisKertas}
                     onChange={handleChange}
+                    placeholder="Contoh: Bookpaper, HVS"
                     className={inputCls}
                   />
                 </div>
 
                 <div>
-                  <label className={labelCls}>Pelaksanaan Cetak</label>
-                  <select
-                    name="sistemCetak"
-                    value={formData.sistemCetak}
-                    onChange={handleChange}
-                    className={inputCls}
-                  >
-                    <option value="Cetak di Luar (Percetakan Mitra)">Cetak di Luar</option>
-                    <option value="Cetak Sendiri (Memiliki Mesin Percetakan)">Cetak Sendiri</option>
-                    <option value="Kombinasi (Cetak Sendiri & Cetak di Luar)">Kombinasi</option>
-                  </select>
+                  <label className={labelCls}>Mencetak Buku</label>
+                  <ChoiceGroup
+                    single
+                    options={CETAK_OPTIONS}
+                    selected={[formData.sistemCetak]}
+                    onToggle={(v) => setFormData(prev => ({ ...prev, sistemCetak: v }))}
+                  />
                 </div>
 
-                <div>
-                  <label className={labelCls}>Pekerjaan Outsource</label>
+                <div className="md:col-span-2">
+                  <label className={labelCls}>Pekerjaan yang Dioutsourcing</label>
                   <input
                     type="text"
                     name="pekerjaanOutsource"
                     value={formData.pekerjaanOutsource}
                     onChange={handleChange}
+                    placeholder="Contoh: Percetakan & penjilidan"
                     className={inputCls}
                   />
                 </div>
@@ -894,6 +965,17 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 >
                   Kembali
                 </button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                {draftSavedAt && <span className="text-xs text-emerald-700">Draf tersimpan {draftSavedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>}
+                <button
+                  type="button"
+                  onClick={() => handleSubmit(true, { stay: true })}
+                  disabled={submitting}
+                  className="soft-pill whitespace-nowrap"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{submitting ? 'Menyimpan...' : 'Simpan Draf'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab(4)}
@@ -902,6 +984,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   <span>Selanjutnya</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
+                </div>
               </div>
             </div>
           )}
@@ -956,9 +1039,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 </button>
 
                 <div className="flex flex-col-reverse sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
+                  {draftSavedAt && <span className="text-xs text-emerald-700 text-center">Draf tersimpan {draftSavedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>}
                   <button
                     type="button"
-                    onClick={() => handleSubmit(true)}
+                    onClick={() => handleSubmit(true, { stay: true })}
                     disabled={submitting}
                     className="soft-pill whitespace-nowrap w-full sm:w-auto"
                   >
@@ -982,6 +1066,38 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
 
         </div>
       </div>
+    </div>
+  );
+}
+
+// Pilihan bergaya kotak centang (single = pilih salah satu) seperti pada formulir resmi
+function ChoiceGroup({ options, selected, onToggle, single = false }) {
+  return (
+    <div className="flex flex-wrap gap-2" role={single ? 'radiogroup' : 'group'}>
+      {options.map((opt) => {
+        const active = selected.includes(opt);
+        return (
+          <button
+            key={opt}
+            type="button"
+            role={single ? 'radio' : 'checkbox'}
+            aria-checked={active}
+            onClick={() => onToggle(opt)}
+            className={`px-3.5 py-2 rounded-xl border text-sm flex items-center gap-2 transition ${
+              active
+                ? 'bg-blue-50 border-[#3b82f6] text-[#2f6fe0] font-medium'
+                : 'bg-white border-slate-200/70 text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            <span className={`w-4 h-4 flex items-center justify-center border ${single ? 'rounded-full' : 'rounded'} ${
+              active ? 'bg-[#3b82f6] border-[#3b82f6] text-white' : 'border-slate-300 bg-white'
+            }`}>
+              {active && <Check className="w-3 h-3" strokeWidth={3} />}
+            </span>
+            {opt}
+          </button>
+        );
+      })}
     </div>
   );
 }

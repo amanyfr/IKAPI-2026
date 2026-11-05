@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { notify } from '../components/AppDialog';
 
 const AuthContext = createContext(null);
 
@@ -83,7 +84,7 @@ export function AuthProvider({ children }) {
       return data;
     } catch (err) {
       console.error('Quick switch error:', err);
-      alert('Gagal beralih peran: ' + err.message);
+      notify('Gagal beralih peran: ' + err.message);
     }
   };
 

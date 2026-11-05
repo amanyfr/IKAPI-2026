@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { STATUS_LABEL } from '../components/StatusStepper';
 import {
   parseDate, submittedDate, timeAgo, initials, pct, greetingName,
   buildTrend, TrendChart, TrendLegend, RangeToggle
 } from '../components/DashboardWidgets';
 import {
   ArrowUpRight, Users, UserPlus, UserCheck, RefreshCw, Lightbulb, Wallet,
-  FileSignature, Search, Sparkles, CheckCircle2, CircleDashed, KeyRound
+  FileSignature, Search, Sparkles, CheckCircle2, CircleDashed, KeyRound,
+  ShieldCheck, CreditCard, Truck, Activity
 } from 'lucide-react';
 
 const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota'];
@@ -37,7 +39,7 @@ const settingsChecklist = (s) => [
 
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` });
 
-export default function AdminDashboard({ onOpenUsers, onOpenSettings }) {
+export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScreening, onOpenMonitoring }) {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
   const [submissions, setSubmissions] = useState([]);
@@ -45,6 +47,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings }) {
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState('12m');
   const [search, setSearch] = useState('');
+  const [taskFilter, setTaskFilter] = useState('Semua');
 
   const fetchData = async () => {
     setLoading(true);
@@ -81,10 +84,20 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings }) {
     range, TREND_SERIES
   ), [users, submissions, range]);
 
-  const latest = useMemo(
-    () => [...users].sort((a, b) => (parseDate(b.created_at) || 0) - (parseDate(a.created_at) || 0)).slice(0, 8),
-    [users]
+  // Tugas Admin: screening dokumen (Tahap 1), verifikasi bayar (Tahap 2), konfirmasi berkas fisik
+  const TASKS = [
+    { key: 'screening', label: 'Screening dokumen', dot: 'bg-[#0da2e7]', icon: ShieldCheck, test: (x) => x.status === 'Menunggu Verifikasi' },
+    { key: 'bayar', label: 'Verifikasi bayar', dot: 'bg-amber-400', icon: CreditCard, test: (x) => x.status === 'Menunggu Pembayaran' && x.payment_status === 'Menunggu' && Boolean(x.payment_proof) },
+    { key: 'fisik', label: 'Approval anggota', dot: 'bg-orange-500', icon: Truck, test: (x) => x.status === 'Pengiriman Berkas' },
+  ];
+  const taskOf = (x) => TASKS.find((t) => t.test(x));
+  const tasks = useMemo(
+    () => submissions
+      .filter((x) => taskOf(x) && (taskFilter === 'Semua' || taskOf(x).key === taskFilter))
+      .sort((a, b) => (parseDate(a.updated_at) || 0) - (parseDate(b.updated_at) || 0)),
+    [submissions, taskFilter]
   );
+  const taskCount = (key) => submissions.filter((x) => taskOf(x)?.key === key).length;
 
   const { first: firstName } = greetingName(user?.name);
 
@@ -93,217 +106,194 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings }) {
     onOpenUsers({ search: search.trim() });
   };
 
-  return (
-    <div className="space-y-6">
+  const openTask = (x) => {
+    const t = taskOf(x)?.key;
+    if (t === 'fisik') onOpenMonitoring?.();
+    else onOpenScreening?.(x.status);
+  };
 
-      {/* ══ Sapaan + komposisi peran + angka utama ══ */}
-      <section className="flex flex-col xl:flex-row xl:items-end justify-between gap-8">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-3xl sm:text-4xl font-light tracking-tight text-slate-900">
+  return (
+    <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
+
+      {/* ══ Sapaan + angka utama (satu baris) ══ */}
+      <section className="flex-shrink-0 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-light tracking-tight text-slate-900 truncate">
             Selamat datang, <span className="text-blue-800">{firstName}</span>
           </h1>
-
-          <div className="grid grid-cols-2 gap-x-2 gap-y-3 sm:flex sm:gap-2 mt-6 max-w-2xl">
-            {ROLES.map((r) => (
-              <div key={r} className="min-w-0" style={{ flexGrow: Math.max(pct(byRole[r], total), 12), flexBasis: 0 }}>
-                <p className="text-xs text-slate-500 mb-2 truncate">{r}</p>
-                <div className={`h-11 rounded-full flex items-center px-4 text-sm font-medium ${ROLE_STYLE[r].bar}`}>
-                  {pct(byRole[r], total)}%
-                </div>
-              </div>
-            ))}
-          </div>
+          <p className="text-xs text-slate-500 mt-0.5">{total} akun · {newAccounts} akun baru dalam 30 hari · {notOnboarded} profil anggota belum lengkap</p>
         </div>
-
-        <div className="grid grid-cols-3 gap-2 sm:flex sm:gap-12">
-          {[
-            { value: total,        label: 'Total akun',            icon: Users,     tone: 'bg-blue-100 text-blue-800' },
-            { value: newAccounts,  label: 'Akun baru (30 hari)',   icon: UserPlus,  tone: 'bg-sky-100 text-[#0884c4]' },
-            { value: notOnboarded, label: 'Profil anggota belum lengkap', icon: UserCheck, tone: 'bg-emerald-100 text-emerald-700' },
-          ].map(({ value, label, icon: Icon, tone }) => (
-            <div key={label}>
-              <div className="flex items-center gap-2 sm:gap-3">
-                <span className={`w-7 h-7 sm:w-9 sm:h-9 flex-shrink-0 rounded-full flex items-center justify-center ring-4 ring-white/70 ${tone}`}>
-                  <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                </span>
-                <span className="text-4xl sm:text-5xl font-light text-slate-900 tabular-nums">{loading ? '–' : value}</span>
-              </div>
-              <p className="text-xs sm:text-sm text-slate-500 mt-1.5 leading-snug">{label}</p>
-            </div>
+        <div className="grid grid-cols-3 gap-3 sm:flex sm:gap-8">
+          {TASKS.map(({ key, label, icon: Icon }, i) => (
+            <button key={key} onClick={() => setTaskFilter(key)} className="flex items-center gap-2.5 text-left">
+              <span className={`w-8 h-8 flex-shrink-0 rounded-full flex items-center justify-center ring-4 ring-white/70 ${['bg-sky-100 text-[#0884c4]', 'bg-amber-100 text-amber-700', 'bg-orange-100 text-orange-700'][i]}`}>
+                <Icon className="w-4 h-4" />
+              </span>
+              <span className="leading-tight">
+                <span className="text-2xl sm:text-3xl font-light text-slate-900 tabular-nums">{loading ? '–' : taskCount(key)}</span>
+                <span className="block text-[11px] text-slate-500">{label}</span>
+              </span>
+            </button>
           ))}
         </div>
       </section>
 
-      {/* ══ Baris 2: akun per peran, grafik, kesiapan sistem ══ */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-
-        {/* Akun per peran */}
-        <div className="card-surface p-5 lg:col-span-3 flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg text-slate-800">Akun per peran</h2>
-            <button onClick={fetchData} title="Segarkan data"
-              className="p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-blue-800 transition">
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-          <div className="space-y-2.5">
-            {ROLES.map((r) => (
-              <button key={r} onClick={() => onOpenUsers({ role: r })}
-                className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-slate-50 hover:bg-white border border-slate-200/70 transition text-left">
-                <span className="flex items-center gap-2.5 text-sm text-slate-700">
-                  <span className={`w-2 h-2 rounded-full ${ROLE_STYLE[r].dot}`} /> {r}
-                </span>
-                <span className="min-w-[2rem] text-center text-sm font-semibold text-slate-800 bg-slate-900/5 rounded-full px-2.5 py-0.5">
-                  {byRole[r]}
-                </span>
+      {/* ══ Widget utama: tugas Admin + kesiapan sistem ══ */}
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-[6] lg:min-h-0">
+        <div className="card-surface p-4 sm:p-5 lg:col-span-9 flex flex-col min-h-0">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-3">
+            <h2 className="text-lg text-slate-800 whitespace-nowrap">Tugas Admin</h2>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[...TASKS, { key: 'Semua', label: 'Semua', dot: 'bg-slate-400' }].map((f) => (
+                <button key={f.key} onClick={() => setTaskFilter(f.key)}
+                  className={`flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-full text-xs border transition ${
+                    taskFilter === f.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-700 border-slate-200/70 hover:bg-white'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />
+                  {f.label}
+                  <span className={`min-w-[1.5rem] text-center rounded-full px-1.5 py-0.5 font-semibold ${taskFilter === f.key ? 'bg-white/20' : 'bg-slate-900/5'}`}>
+                    {f.key === 'Semua' ? TASKS.reduce((n, t) => n + taskCount(t.key), 0) : taskCount(f.key)}
+                  </span>
+                </button>
+              ))}
+              <button onClick={fetchData} title="Segarkan data"
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-blue-800 transition">
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
-            ))}
-          </div>
-          <p className="mt-auto pt-5 flex items-start gap-2 text-[11px] text-slate-500 leading-relaxed">
-            <Lightbulb className="w-4 h-4 flex-shrink-0 text-amber-500" />
-            <span>
-              {notOnboarded > 0
-                ? <><strong className="text-slate-700">{notOnboarded} anggota</strong> belum menjawab pertanyaan awal (lama/baru, biasa/luar biasa).</>
-                : <>Semua anggota sudah melengkapi profil keanggotaan.</>}
-            </span>
-          </p>
-        </div>
-
-        {/* Grafik akun baru vs pengajuan */}
-        <div className="card-surface p-5 lg:col-span-6">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-            <div>
-              <h2 className="text-lg text-slate-800">Akun baru & pengajuan masuk</h2>
-              <TrendLegend series={TREND_SERIES} />
             </div>
-            <RangeToggle value={range} onChange={setRange} />
           </div>
-          <TrendChart data={trend} series={TREND_SERIES} ariaLabel="Grafik akun baru dan pengajuan masuk" />
+
+          {tasks.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-sm text-slate-500 py-8">
+              {loading ? 'Memuat tugas...' : 'Tidak ada tugas di antrian ini.'}
+            </div>
+          ) : (
+            <div className="flex-1 min-h-0 flex gap-3 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 snap-x">
+              {tasks.map((x) => {
+                const t = taskOf(x);
+                return (
+                  <button key={x.id} onClick={() => openTask(x)}
+                    className="snap-start flex-shrink-0 w-60 text-left rounded-2xl bg-slate-50 hover:bg-white border border-slate-200/70 p-4 [@media(max-height:780px)]:p-3 flex flex-col transition">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[11px] font-medium px-3 py-1 rounded-full bg-slate-900 text-white flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${t.dot}`} /> {t.label}
+                      </span>
+                      <span className="text-[11px] text-slate-500">{timeAgo(x.updated_at)}</span>
+                    </div>
+                    <p className="text-sm text-slate-800 font-medium mt-3 [@media(max-height:780px)]:mt-2 truncate">{x.publisher_name || '-'}</p>
+                    <p className="text-xs text-slate-500 mt-0.5 truncate [@media(max-height:780px)]:hidden">{x.submission_type} · {x.member_category} · {STATUS_LABEL[x.status]}</p>
+                    {t.key === 'fisik' && (
+                      <p className="text-[11px] text-orange-700 mt-1 truncate">
+                        {x.physical_status === 'Dikirim' ? `Dikirim · ${x.physical_courier || '-'}` : 'Belum dikirim pemohon'}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2.5 mt-auto pt-3 [@media(max-height:780px)]:pt-2 border-t border-slate-900/5">
+                      <span className="w-8 h-8 flex-shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-blue-800 text-white text-xs font-semibold flex items-center justify-center">
+                        {initials(x.applicant_name)}
+                      </span>
+                      <span className="min-w-0 leading-tight">
+                        <span className="block text-sm text-slate-800 truncate">{x.applicant_name}</span>
+                        <span className="block text-[11px] text-slate-500 truncate">{x.applicant_email}</span>
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Kesiapan sistem (oranye) */}
-        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-blue-700 to-blue-900 shadow-xl shadow-blue-900/25 flex flex-col overflow-hidden">
+        {/* Kesiapan sistem */}
+        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-blue-700 to-blue-900 shadow-xl shadow-blue-900/25 flex flex-col min-h-0 overflow-hidden">
           <div className="flex items-start justify-between">
             <h2 className="text-lg">Kesiapan sistem</h2>
             <button onClick={onOpenSettings} title="Buka pengaturan sistem"
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition">
+              className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition">
               <ArrowUpRight className="w-5 h-5" />
             </button>
           </div>
-          <p className="text-sm text-white/90 mt-3 leading-relaxed">
-            {settingsDone} dari {checklist.length} pengaturan lengkap. Pastikan biaya, rekening, TTD, dan stempel siap sebelum surat diterbitkan.
-          </p>
-          <div className="relative mt-auto pt-8 pb-2">
+          <div className="mt-2 h-1.5 rounded-full bg-white/20 overflow-hidden">
+            <div className="h-full rounded-full bg-white" style={{ width: `${pct(settingsDone, checklist.length)}%` }} />
+          </div>
+          <p className="text-xs text-white/90 mt-2">{settingsDone} dari {checklist.length} pengaturan lengkap.</p>
+          <ul className="mt-2 space-y-1 text-[11px] text-white/90 min-h-0 overflow-hidden [@media(max-height:780px)]:hidden">
+            {checklist.filter((c) => !c.ok).slice(0, 3).map((c) => (
+              <li key={c.label} className="flex items-center gap-1.5"><CircleDashed className="w-3.5 h-3.5" /> {c.label}</li>
+            ))}
+          </ul>
+          <div className="mt-auto pt-3 space-y-2">
             <button onClick={onOpenSettings}
-              className="relative z-10 w-full flex items-center justify-between gap-3 text-left bg-white text-slate-800 rounded-2xl px-4 py-3.5 shadow-lg hover:-translate-y-0.5 transition">
+              className="w-full flex items-center justify-between gap-3 text-left bg-white text-slate-800 rounded-2xl px-4 py-3 [@media(max-height:780px)]:py-2 shadow-lg hover:-translate-y-0.5 transition">
               <span className="text-sm font-medium">Lengkapi pengaturan</span>
               <span className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center">{settingsMissing}</span>
             </button>
-            <button onClick={() => onOpenUsers({ role: 'Anggota' })}
-              className="relative w-full mt-2 flex items-center justify-between gap-3 text-left bg-blue-100/90 text-slate-800 rounded-2xl px-4 py-3.5 shadow-md hover:-translate-y-0.5 transition">
-              <span className="text-sm font-medium">Profil belum lengkap</span>
-              <span className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center">{notOnboarded}</span>
+            <button onClick={() => onOpenMonitoring?.()}
+              className="w-full flex items-center justify-between gap-3 text-left bg-blue-100/90 text-slate-800 rounded-2xl px-4 py-3 [@media(max-height:780px)]:py-2 shadow-md hover:-translate-y-0.5 transition">
+              <span className="text-sm font-medium">Monitoring pendaftaran</span>
+              <Activity className="w-4 h-4" />
             </button>
           </div>
         </div>
       </section>
 
-      {/* ══ Baris 3: akun terbaru, kelengkapan pengaturan, aksi cepat ══ */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-
-        {/* Akun terbaru */}
-        <div className="card-surface p-5 lg:col-span-5">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h2 className="text-lg text-slate-800">Akun terbaru</h2>
-            <button onClick={() => onOpenUsers({})} title="Lihat semua akun"
-              className="w-10 h-10 rounded-full bg-slate-50 hover:bg-white border border-slate-200/70 flex items-center justify-center text-slate-600 transition">
-              <ArrowUpRight className="w-5 h-5" />
-            </button>
-          </div>
-          {latest.length === 0 ? (
-            <p className="text-sm text-slate-500 text-center py-10">{loading ? 'Memuat akun...' : 'Belum ada akun.'}</p>
-          ) : (
-            <div className="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1 snap-x">
-              {latest.map((u) => (
-                <button key={u.id} onClick={() => onOpenUsers({ search: u.email })}
-                  className="snap-start flex-shrink-0 w-60 text-left rounded-2xl bg-slate-50 hover:bg-white border border-slate-200/70 p-4 flex flex-col transition">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className={`text-[11px] font-medium px-3 py-1 rounded-full ${ROLE_STYLE[u.role]?.chip}`}>{u.role}</span>
-                    <span className="text-[11px] text-slate-500">{timeAgo(u.created_at)}</span>
-                  </div>
-                  <div className="flex items-center gap-2.5 mt-4">
-                    <span className="w-9 h-9 flex-shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-blue-800 text-white text-xs font-semibold flex items-center justify-center">
-                      {initials(u.name)}
-                    </span>
-                    <span className="min-w-0 leading-tight">
-                      <span className="block text-sm text-slate-800 truncate">{u.name}</span>
-                      <span className="block text-[11px] text-slate-500 truncate">{u.email}</span>
-                    </span>
-                  </div>
-                  {u.role === 'Anggota' && (
-                    <p className={`text-[11px] mt-3 pt-3 border-t border-slate-900/5 ${u.onboarded_at ? 'text-slate-500' : 'text-blue-700'}`}>
-                      {u.onboarded_at ? `Anggota ${u.member_type?.toLowerCase()} · ${u.member_category}` : 'Belum menjawab pertanyaan awal'}
-                    </p>
-                  )}
-                </button>
-              ))}
+      {/* ══ Baris bawah: grafik, akun per peran, aksi cepat ══ */}
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-[4] lg:min-h-0">
+        <div className="card-surface p-4 sm:p-5 lg:col-span-6 flex flex-col min-h-0 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+            <div>
+              <h2 className="text-base text-slate-800">Akun baru & pengajuan masuk</h2>
+              <TrendLegend series={TREND_SERIES} />
             </div>
-          )}
+            <RangeToggle value={range} onChange={setRange} />
+          </div>
+          <div className="flex-1 min-h-0 h-44 lg:h-auto">
+            <TrendChart data={trend} series={TREND_SERIES} fill ariaLabel="Grafik akun baru dan pengajuan masuk" />
+          </div>
         </div>
 
-        {/* Kelengkapan pengaturan */}
-        <div className="card-surface p-5 lg:col-span-3 flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg text-slate-800">Pengaturan</h2>
-            <span className="text-xs font-medium text-slate-500">{settingsDone}/{checklist.length}</span>
-          </div>
-          <div className="h-2 rounded-full bg-slate-100 overflow-hidden mb-4">
-            <div className="h-full rounded-full bg-gradient-to-r from-[#0da2e7] to-blue-800 transition-all" style={{ width: `${pct(settingsDone, checklist.length)}%` }} />
-          </div>
-          <ul className="space-y-2">
-            {checklist.map((c) => (
-              <li key={c.label} className="flex items-center justify-between gap-2 text-sm">
-                <span className="flex items-center gap-2 text-slate-700 min-w-0">
-                  {c.ok
-                    ? <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-500" />
-                    : <CircleDashed className="w-4 h-4 flex-shrink-0 text-slate-400" />}
-                  <span className="truncate">{c.label}</span>
+        <div className="card-surface p-4 sm:p-5 lg:col-span-3 flex flex-col min-h-0">
+          <h2 className="text-base text-slate-800 mb-2">Akun per peran</h2>
+          <div className="grid grid-cols-2 gap-2">
+            {ROLES.map((r) => (
+              <button key={r} onClick={() => onOpenUsers({ role: r })}
+                className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 hover:bg-white border border-slate-200/70 transition text-left">
+                <span className="flex items-center gap-1.5 text-xs text-slate-700">
+                  <span className={`w-2 h-2 rounded-full ${ROLE_STYLE[r].dot}`} /> {r}
                 </span>
-                <span className={`text-[11px] flex-shrink-0 ${c.ok ? 'text-slate-400' : 'text-blue-700 font-medium'}`}>
-                  {c.note || (c.ok ? 'Siap' : 'Belum ada')}
-                </span>
-              </li>
+                <span className="text-xs font-semibold text-slate-800">{byRole[r]}</span>
+              </button>
             ))}
-          </ul>
+          </div>
+          <p className="mt-auto pt-2 flex items-start gap-1.5 text-[11px] text-slate-500 leading-snug [@media(max-height:780px)]:hidden">
+            <Lightbulb className="w-3.5 h-3.5 flex-shrink-0 text-amber-500" />
+            {notOnboarded > 0 ? `${notOnboarded} anggota belum menjawab pertanyaan awal.` : 'Semua anggota sudah melengkapi profil.'}
+          </p>
         </div>
 
-        {/* Aksi cepat */}
-        <div className="card-surface p-5 lg:col-span-4 flex flex-col">
-          <p className="text-lg text-slate-800">Halo, {firstName} 👋</p>
-          <p className="text-xl font-medium text-slate-900">Apa yang perlu dikelola hari ini?</p>
-          <div className="grid grid-cols-2 gap-3 mt-5">
+        <div className="card-surface p-4 sm:p-5 lg:col-span-3 flex flex-col min-h-0">
+          <p className="text-base text-slate-800 [@media(max-height:780px)]:hidden">Halo, {firstName} 👋</p>
+          <div className="grid grid-cols-2 gap-2 mt-3 [@media(max-height:780px)]:mt-0">
             {[
-              { label: 'Tambah akun',      icon: UserPlus,      tone: 'bg-blue-100 text-blue-800',     onClick: () => onOpenUsers({ create: true }) },
-              { label: 'Kelola akun',      icon: KeyRound,      tone: 'bg-sky-100 text-[#0884c4]',       onClick: () => onOpenUsers({}) },
-              { label: 'Biaya & rekening', icon: Wallet,        tone: 'bg-emerald-100 text-emerald-700', onClick: onOpenSettings },
-              { label: 'Template & TTD',   icon: FileSignature, tone: 'bg-indigo-100 text-indigo-700',   onClick: onOpenSettings },
+              { label: 'Tambah akun', icon: UserPlus,      tone: 'bg-blue-100 text-blue-800',       onClick: () => onOpenUsers({ create: true }) },
+              { label: 'Kelola akun', icon: KeyRound,      tone: 'bg-sky-100 text-[#0884c4]',       onClick: () => onOpenUsers({}) },
+              { label: 'Biaya',       icon: Wallet,        tone: 'bg-emerald-100 text-emerald-700', onClick: onOpenSettings },
+              { label: 'Template & TTD', icon: FileSignature, tone: 'bg-indigo-100 text-indigo-700', onClick: onOpenSettings },
             ].map(({ label, icon: Icon, tone, onClick }) => (
               <button key={label} onClick={onClick}
-                className="flex items-center gap-2.5 px-3 py-3 rounded-2xl bg-slate-50 hover:bg-white border border-slate-200/70 text-sm text-slate-700 transition text-left">
-                <span className={`w-7 h-7 flex-shrink-0 rounded-lg flex items-center justify-center ${tone}`}>
-                  <Icon className="w-4 h-4" />
+                className="flex items-center gap-2 px-2.5 py-2 rounded-xl bg-slate-50 hover:bg-white border border-slate-200/70 text-xs text-slate-700 transition text-left">
+                <span className={`w-6 h-6 flex-shrink-0 rounded-lg flex items-center justify-center ${tone}`}>
+                  <Icon className="w-3.5 h-3.5" />
                 </span>
                 {label}
               </button>
             ))}
           </div>
-          <form onSubmit={handleSearch} className="relative mt-auto pt-5">
-            <Search className="w-4 h-4 absolute left-4 bottom-3.5 text-slate-400" />
+          <form onSubmit={handleSearch} className="relative mt-auto pt-3">
+            <Search className="w-4 h-4 absolute left-3.5 bottom-3 text-slate-400" />
             <input value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Cari nama atau email akun..."
-              className="w-full pl-10 pr-11 py-3 text-sm rounded-full bg-slate-50 border border-slate-200/70 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-200 outline-none" />
-            <button type="submit" aria-label="Cari" className="absolute right-3 bottom-2.5 p-1 text-blue-800 hover:text-blue-800">
-              <Sparkles className="w-5 h-5" />
+              className="w-full pl-9 pr-10 py-2.5 text-xs rounded-full bg-slate-50 border border-slate-200/70 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-200 outline-none" />
+            <button type="submit" aria-label="Cari" className="absolute right-3 bottom-2 p-1 text-blue-800">
+              <Sparkles className="w-4 h-4" />
             </button>
           </form>
         </div>

@@ -4,6 +4,7 @@ import {
   CheckCircle, Upload, Trash2, Image, RotateCcw, PenTool, Receipt
 } from 'lucide-react';
 import { INVOICE_DEFAULTS } from '../components/PaymentInvoice';
+import { notify } from '../components/AppDialog';
 
 const DEFAULT_TEMPLATES = {
   surat_kop_alamat: 'Sekretariat: Jl. Ibu Inggit Garnasih No. 148, Regol, Kota Bandung 40252',
@@ -67,7 +68,7 @@ export default function SystemSettings() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 3 * 1024 * 1024) {
-      alert('Ukuran gambar maksimal 3 MB.');
+      notify('Ukuran gambar maksimal 3 MB.');
       return;
     }
     const reader = new FileReader();
@@ -105,7 +106,7 @@ export default function SystemSettings() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err) {
-      alert('Gagal menyimpan pengaturan: ' + err.message);
+      notify('Gagal menyimpan pengaturan: ' + err.message);
     } finally {
       setSaving(false);
     }

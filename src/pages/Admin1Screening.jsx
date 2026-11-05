@@ -4,6 +4,7 @@ import DocumentVerificationModal from '../components/DocumentVerificationModal';
 import CentralPacketExporter from '../components/CentralPacketExporter';
 import { useMySignature, MySignatureCard, SignLetterModal } from '../components/LetterSigning';
 import { exportMembersExcel } from '../utils/exportMembers';
+import { STATUS_LABEL } from '../components/StatusStepper';
 import {
   ShieldCheck,
   Search,
@@ -18,6 +19,7 @@ import {
   Users,
   PenTool
 } from 'lucide-react';
+import { notify } from '../components/AppDialog';
 
 export default function Admin1Screening({ onNavigateToMembers, initialStatus = 'Semua', initialSearch = '' }) {
   const { user } = useAuth();
@@ -86,7 +88,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
       setSelectedSubDetail(data);
       setIsVerifyModalOpen(true);
     } catch (err) {
-      alert('Gagal mengambil data pengajuan: ' + err.message);
+      notify('Gagal mengambil data pengajuan: ' + err.message);
     }
   };
 
@@ -100,7 +102,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
       setPacketSubDetail(data);
       setIsPacketModalOpen(true);
     } catch (err) {
-      alert('Gagal mengambil data pengajuan: ' + err.message);
+      notify('Gagal mengambil data pengajuan: ' + err.message);
     }
   };
 
@@ -137,10 +139,37 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
 
-    alert(`Status pembayaran berhasil diperbarui: ${status}`);
+    notify(data.message);
     if (selectedSubDetail) {
       openVerificationModal(selectedSubDetail.submission.id);
     }
+    fetchSubmissions();
+  };
+
+  // Sekretaris: keputusan akhir menolak pengajuan (bukan per dokumen)
+  const handleRejectSecretary = async (submissionId, reason) => {
+    const res = await fetch(`/api/submissions/${submissionId}/admin2-action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` },
+      body: JSON.stringify({ action: 'reject', reason })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    notify('Pengajuan ditolak. Pemohon dapat melihat alasan penolakan di dashboard.');
+    fetchSubmissions();
+  };
+
+  // Admin: berkas fisik sudah sampai di sekretariat -> pemohon resmi menjadi anggota
+  const handleReceivePhysical = async (submissionId, notes) => {
+    const res = await fetch(`/api/submissions/${submissionId}/physical-received`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` },
+      body: JSON.stringify({ notes })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    notify(data.message);
+    openVerificationModal(submissionId);
     fetchSubmissions();
   };
 
@@ -157,28 +186,13 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
 
-    alert(data.message);
+    notify(data.message);
     fetchSubmissions();
   };
 
-  // Admin: tandai berkas & pembayaran lolos screening → antre TTD Sekretaris
-  const markScreened = async (notes) => {
-    try {
-      await handleAdmin1Action(selectedSubDetail.submission.id, 'mark_screened', notes);
-      setIsVerifyModalOpen(false);
-    } catch (err) {
-      alert('Gagal: ' + err.message);
-    }
-  };
-
-  // Sekretaris: langsung tanda tangani pengajuan yang sudah lolos screening Admin
-  const startSignScreened = (sub) => {
-    setPassing({ submission: sub, settings: {}, notes: sub.admin_notes || '' });
-  };
-
-  // "Loloskan & Teruskan ke Ketua": Sekretaris membubuhkan TTD-nya pada pratinjau surat dulu
-  const startPassToKetua = (notes) => {
-    setPassing({ submission: selectedSubDetail.submission, settings: selectedSubDetail.settings, notes });
+  // Sekretaris: tanda tangani pengajuan yang dokumen & pembayarannya sudah disetujui Admin
+  const startSignScreened = (sub, settings = {}) => {
+    setPassing({ submission: sub, settings, notes: '' });
     setIsVerifyModalOpen(false);
   };
 
@@ -188,7 +202,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
       await handleAdmin1Action(passing.submission.id, 'pass_to_admin2', passing.notes, { signaturePositions });
       setPassing(null);
     } catch (err) {
-      alert('Gagal meneruskan: ' + err.message);
+      notify('Gagal meneruskan: ' + err.message);
     } finally {
       setProcessingPass(false);
     }
@@ -198,24 +212,43 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     try {
       await exportMembersExcel();
     } catch (err) {
-      alert('Ekspor Excel gagal: ' + err.message);
+      notify('Ekspor Excel gagal: ' + err.message);
     }
   };
 
   const statusChipClass = (status) =>
     status === 'Aktif'             ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-    : status === 'Menunggu Approval' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+    : status === 'Pengiriman Berkas' ? 'bg-orange-100 text-orange-800 border border-orange-200'
+    : status === 'Menunggu Approval' || status === 'Menunggu TTD Sekretaris' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
     : status === 'Perlu Revisi'      ? 'bg-amber-100 text-amber-800 border border-amber-200'
     : status === 'Ditolak'           ? 'bg-red-100 text-red-800 border border-red-200'
+    : status === 'Menunggu Verifikasi' ? 'bg-sky-100 text-[#0884c4] border border-sky-200'
     : 'bg-slate-100 text-slate-700 border border-slate-200';
+
+  // Keterangan singkat apa yang sedang ditunggu pada setiap pengajuan
+  const waitingText = (sub) => {
+    if (sub.status === 'Menunggu Pembayaran') return sub.payment_status === 'Perlu Revisi' ? 'Bukti transfer dikembalikan' : 'Menunggu pembayaran pemohon';
+    if (sub.status === 'Pengiriman Berkas') return sub.physical_status === 'Dikirim' ? `Berkas dikirim (${sub.physical_courier || '-'})` : 'Berkas fisik belum dikirim';
+    if (sub.status === 'Perlu Revisi') return 'Menunggu revisi pemohon';
+    return null;
+  };
+
+  // Tombol utama sesuai tugas peran pada tahap ini
+  const primaryLabel = (sub) => {
+    if (isAdmin && sub.status === 'Menunggu Verifikasi') return 'Screening dokumen';
+    if (isAdmin && sub.status === 'Menunggu Pembayaran' && sub.payment_status === 'Menunggu' && sub.payment_proof) return 'Verifikasi bayar';
+    if (isAdmin && sub.status === 'Pengiriman Berkas') return 'Approval anggota';
+    return null;
+  };
 
   // Tombol aksi per pengajuan — dipakai di tabel (layar lebar) dan kartu (HP)
   const renderActions = (sub) => {
-    const isApproved = sub.status === 'Aktif';
-    const readyToSign = isSekretaris && sub.status === 'Menunggu Verifikasi' && sub.screened_at;
+    const isApproved = ['Pengiriman Berkas', 'Aktif'].includes(sub.status);
+    const readyToSign = isSekretaris && sub.status === 'Menunggu TTD Sekretaris';
+    const primary = primaryLabel(sub);
     return (
       <>
-        {/* Sudah lolos screening Admin: Sekretaris cukup tanda tangan */}
+        {/* Dokumen & pembayaran disetujui Admin: Sekretaris tanda tangan */}
         {readyToSign && (
           <button
             onClick={() => startSignScreened(sub)}
@@ -227,18 +260,18 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           </button>
         )}
 
-        {/* Screening Button (opsional untuk Sekretaris bila sudah diperiksa Admin) */}
+        {/* Semua peran bisa membuka dokumen, bukti transfer & riwayat; aksi hanya untuk peran yang bertugas */}
         <button
           onClick={() => openVerificationModal(sub.id)}
           className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1 ${
-            readyToSign
-              ? 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-              : 'bg-[#0da2e7] hover:bg-[#0884c4] text-white shadow'
+            primary
+              ? 'bg-[#0da2e7] hover:bg-[#0884c4] text-white shadow'
+              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
           }`}
-          title="Screening Berkas & Verifikasi Pembayaran"
+          title="Dokumen, pembayaran & riwayat alur berkas"
         >
-          <ShieldCheck className={`w-3.5 h-3.5 ${readyToSign ? 'text-slate-400' : 'text-amber-400'}`} />
-          <span>{readyToSign ? 'Periksa' : 'Screening'}</span>
+          <ShieldCheck className={`w-3.5 h-3.5 ${primary ? 'text-amber-300' : 'text-slate-400'}`} />
+          <span>{primary || 'Lihat'}</span>
         </button>
 
         {/* Packet Button if Approved */}
@@ -249,7 +282,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
             title="Lihat Paket Dokumen"
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Paket PDF</span>
+            <span>Dokumen resmi</span>
           </button>
         )}
 
@@ -268,12 +301,12 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           </div>
           <div>
             <h2 className="text-2xl font-light tracking-tight text-slate-900">
-              {isAdmin ? 'Screening Berkas & Pembayaran' : 'Screening & Tanda Tangan (Sekretaris)'}
+              {isAdmin ? 'Screening Dokumen, Pembayaran & Berkas Fisik' : 'Pengajuan & Tanda Tangan Sekretaris'}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
               {isAdmin
-                ? 'Periksa kesesuaian berkas dan bukti transfer. Pengajuan yang lolos diteruskan ke Sekretaris untuk ditandatangani.'
-                : 'Pengajuan yang lolos screening Admin cukup ditandatangani. Screening oleh Sekretaris bersifat opsional.'}
+                ? 'Tahap 1: periksa setiap dokumen. Tahap 2: verifikasi bukti transfer. Setelah TTD Sekretaris & Ketua, konfirmasi berkas fisik yang diterima.'
+                : 'Pengajuan yang dokumen & pembayarannya sudah disetujui Admin tinggal ditandatangani. Semua dokumen & bukti transfer bisa dilihat.'}
             </p>
           </div>
         </div>
@@ -332,12 +365,9 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
               className="w-full text-xs py-2 px-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
             >
               <option value="Semua">Semua Status</option>
-              <option value="Menunggu Verifikasi">Menunggu Verifikasi</option>
-              <option value="Perlu Revisi">Perlu Revisi</option>
-              <option value="Menunggu Approval">Menunggu Approval</option>
-              <option value="Aktif">Aktif</option>
-              <option value="Menunggu Pembayaran">Menunggu Pembayaran</option>
-              <option value="Ditolak">Ditolak</option>
+              {['Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris', 'Menunggu Approval', 'Pengiriman Berkas', 'Aktif', 'Ditolak'].map((st) => (
+                <option key={st} value={st}>{STATUS_LABEL[st]}</option>
+              ))}
             </select>
           </div>
 
@@ -386,7 +416,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
             Daftar Pengajuan ({submissions.length})
           </span>
           <span className="hidden sm:inline text-[11px] text-slate-500">
-            Klik "Screening Berkas" untuk memeriksa dokumen & pembayaran
+            Klik tombol aksi untuk membuka dokumen, bukti transfer & riwayat
           </span>
         </div>
 
@@ -406,11 +436,9 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                   </div>
                   <span className="flex-shrink-0 flex flex-col items-end gap-1">
                     <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
-                      {sub.status}
+                      {STATUS_LABEL[sub.status] || sub.status}
                     </span>
-                    {sub.status === 'Menunggu Verifikasi' && sub.screened_at && (
-                      <span className="text-[10px] font-medium text-emerald-700">✓ Lolos screening</span>
-                    )}
+                    {waitingText(sub) && <span className="text-[10px] font-medium text-slate-500">{waitingText(sub)}</span>}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -425,7 +453,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                       Rp {sub.payment_amount ? sub.payment_amount.toLocaleString('id-ID') : '-'}
                     </div>
                     <div className={`font-bold ${sub.payment_status === 'Valid' ? 'text-emerald-700' : 'text-amber-700'}`}>
-                      {sub.payment_status || 'Belum Bayar'}
+                      {sub.payment_status === 'Valid' ? 'Valid' : sub.payment_status === 'Perlu Revisi' ? 'Tidak sesuai' : sub.status === 'Menunggu Pembayaran' && sub.payment_status === 'Menunggu' && sub.payment_proof ? 'Perlu dicek' : 'Belum dibayar'}
                     </div>
                   </div>
                 </div>
@@ -496,13 +524,9 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
 
                     <td className="py-3.5 px-4">
                       <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
-                        {sub.status}
+                        {STATUS_LABEL[sub.status] || sub.status}
                       </span>
-                      {sub.status === 'Menunggu Verifikasi' && sub.screened_at && (
-                        <span className="block mt-1 text-[10px] font-medium text-emerald-700" title={`Oleh ${sub.screened_by_name || 'Admin'}`}>
-                          ✓ Lolos screening · menunggu TTD Sekretaris
-                        </span>
-                      )}
+                      {waitingText(sub) && <span className="block mt-1 text-[10px] font-medium text-slate-500">{waitingText(sub)}</span>}
                     </td>
 
                     <td className="py-3.5 px-4">
@@ -511,7 +535,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                       </div>
                       <span className={`text-[10px] font-bold ${sub.payment_status === 'Valid' ? 'text-emerald-700' : 'text-amber-700'
                         }`}>
-                        {sub.payment_status || 'Belum Bayar'}
+                        {sub.payment_status === 'Valid' ? 'Valid' : sub.payment_status === 'Perlu Revisi' ? 'Tidak sesuai' : sub.status === 'Menunggu Pembayaran' && sub.payment_status === 'Menunggu' && sub.payment_proof ? 'Perlu dicek' : 'Belum dibayar'}
                       </span>
                     </td>
 
@@ -537,11 +561,14 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           submission={selectedSubDetail.submission}
           documents={selectedSubDetail.documents}
           payment={selectedSubDetail.payment}
+          timeline={selectedSubDetail.timeline}
+          role={user?.role}
           onScreenDocument={handleScreenDoc}
           onVerifyPayment={handleVerifyPayment}
           onAdmin1Action={handleAdmin1Action}
-          onPassToAdmin2={isSekretaris ? startPassToKetua : isAdmin ? markScreened : undefined}
-          passLabel={isAdmin ? 'Lolos Screening · Teruskan ke Sekretaris' : undefined}
+          onSignSecretary={() => startSignScreened(selectedSubDetail.submission, selectedSubDetail.settings)}
+          onRejectSecretary={isSekretaris ? handleRejectSecretary : undefined}
+          onReceivePhysical={handleReceivePhysical}
         />
       )}
 
@@ -563,7 +590,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
         />
       )}
 
-      {/* MODAL 2: LIHAT PAKET DOKUMEN KE PUSAT */}
+      {/* MODAL 2: DOKUMEN RESMI */}
       {isPacketModalOpen && packetSubDetail && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm p-4 flex items-center justify-center">
           <div className="w-full max-w-5xl max-h-[92vh] overflow-y-auto">

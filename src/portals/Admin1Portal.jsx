@@ -31,7 +31,8 @@ export default function Admin1Portal() {
   );
 
   return (
-    <div className="relative min-h-screen portal-bg flex flex-col font-sans">
+    // Dashboard dibuat pas satu layar (laptop/desktop): tidak perlu scroll ke bawah
+    <div className={`relative min-h-screen portal-bg flex flex-col font-sans ${activeTab === 'dashboard' ? 'lg:h-screen lg:overflow-hidden' : ''}`}>
 
 
       {/* ── Header Portal Sekretaris ── */}
@@ -87,7 +88,7 @@ export default function Admin1Portal() {
       </header>
 
       {/* Main */}
-      <main className="relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className={`relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 ${activeTab === 'dashboard' ? 'py-5 lg:py-4 lg:min-h-0' : 'py-6 sm:py-8'}`}>
         {activeTab === 'dashboard' && (
           <Admin1Dashboard
             onOpenScreening={openScreening}
@@ -106,7 +107,7 @@ export default function Admin1Portal() {
       </main>
 
       {/* Footer */}
-      <footer className="relative bar-surface border-t py-4 text-center text-xs text-slate-500">
+      <footer className={`relative bar-surface border-t py-4 text-center text-xs text-slate-500 ${activeTab === 'dashboard' ? 'lg:hidden' : ''}`}>
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>© 2026 IKAPI Pengurus Daerah Jawa Barat</span>
           <span className="text-[#0da2e7] font-medium">Portal Sekretaris — Screening & Verifikasi</span>

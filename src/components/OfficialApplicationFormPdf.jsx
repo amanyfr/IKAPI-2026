@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Printer, Download, FileSpreadsheet } from 'lucide-react';
-import { jsPDF } from 'jspdf';
-import { PengurusSignatureBlock, drawPengurusSignaturesPdf } from './PengurusSignature';
+import { PengurusSignatureBlock } from './PengurusSignature';
+import { downloadElementPdf, printElement, safeFileName } from '../utils/exportDocument';
+import { heregistrasiRows, pemasaranText, naskahText, karyawanText, listText } from '../utils/formulirIkapi';
 
 const PENGESAHAN_TEXT = 'Formulir ini telah diperiksa dan disahkan oleh Pengurus Daerah IKAPI Jawa Barat.';
 
 // `signing` (opsional): mode pembubuhan TTD pada kolom pengesahan pengurus (lihat PengurusSignature)
 export default function OfficialApplicationFormPdf({ submission, settings, signing = null }) {
+  const paperRef = useRef(null);
   if (!submission) return null;
 
   const formData = typeof submission.form_data === 'string'
@@ -18,140 +20,12 @@ export default function OfficialApplicationFormPdf({ submission, settings, signi
     ? formData.specialization.join(', ')
     : (submission.specialization || formData.specialization || 'Buku Pendidikan, Referensi, Umum');
 
-  const handlePrint = () => {
-    window.print();
-  };
+  const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  const penanggungJawab = submission.person_in_charge || formData.personInCharge || submission.leader_name || formData.leaderName || '';
 
-  const handleDownloadPdf = () => {
-    const doc = new jsPDF({
-      unit: 'mm',
-      format: 'a4',
-      orientation: 'portrait'
-    });
-
-    doc.setFont('times', 'bold');
-    doc.setFontSize(13);
-    doc.text('FORMULIR PENDAFTARAN & PENDATAAN ANGGOTA IKAPI 2026', 105, 16, { align: 'center' });
-    doc.setFontSize(10.5);
-    doc.text('IKATAN PENERBIT INDONESIA PENGURUS DAERAH JAWA BARAT', 105, 22, { align: 'center' });
-    doc.setFontSize(8.5);
-    doc.setFont('times', 'normal');
-    doc.text('Berdasarkan Standar Formulir IKAPI 2026 (Anggota Baru & Heregistrasi)', 105, 27, { align: 'center' });
-
-    doc.setLineWidth(0.5);
-    doc.line(15, 30, 195, 30);
-
-    let y = 37;
-    const writeSection = (title, rows) => {
-      if (y > 255) {
-        doc.addPage();
-        y = 20;
-      }
-      doc.setFont('times', 'bold');
-      doc.setFontSize(10);
-      doc.text(title, 15, y);
-      y += 5.5;
-      doc.setFontSize(9);
-      rows.forEach(([label, val]) => {
-        if (y > 272) {
-          doc.addPage();
-          y = 20;
-        }
-        doc.setFont('times', 'bold');
-        doc.text(label, 18, y);
-        doc.setFont('times', 'normal');
-        const splitVal = doc.splitTextToSize(`: ${val || '-'}`, 115);
-        doc.text(splitVal, 75, y);
-        y += Math.max(5, splitVal.length * 4.5);
-      });
-      y += 2.5;
-    };
-
-    const rowsIdentitas = [
-      ['Jenis Pengajuan', isHeregistrasi ? 'Heregistrasi (Anggota Lama)' : 'Anggota Baru'],
-      ['Kategori Anggota', `Anggota ${submission.member_category || submission.category || formData.category || 'Biasa'}`],
-      ...(isHeregistrasi ? [['No. Anggota IKAPI (KTA Lama)', submission.old_kta_number || formData.oldKtaNumber || '-']] : []),
-      ['Nama Penerbit / Lembaga', submission.publisher_name || formData.publisherName || '-'],
-      ['Bentuk Badan Hukum', submission.legal_entity || formData.legalEntity || '-'],
-      ['NIB / NPWP', `${submission.nib || formData.nib || '-'} / ${submission.npwp || formData.npwp || '-'}`],
-      ['Nama Pimpinan', `${submission.leader_name || formData.leaderName || '-'} (${submission.leader_title || formData.leaderTitle || 'Pimpinan'})`],
-      ['Alamat Kantor', `${submission.address || formData.address || '-'}, ${submission.city || formData.city || '-'} ${submission.postal_code || formData.postalCode || ''}`],
-      ['Telepon / Faksimili', `${submission.publisher_phone || formData.phone || '-'} / ${submission.fax || formData.fax || '-'}`],
-      ['Email / Website', `${submission.publisher_email || formData.email || '-'} / ${submission.website || formData.website || '-'}`],
-      ['Penanggung Jawab Penerbitan', `${submission.person_in_charge || formData.personInCharge || '-'} (No. BNSP: ${submission.bnsp_certificate_no || formData.bnspCertificateNo || '-'})`],
-    ];
-    writeSection('1. IDENTITAS ANGGOTA PENERBIT', rowsIdentitas);
-
-    if (!isHeregistrasi) {
-      writeSection('2. PROFIL PENERBIT (ANGGOTA BARU)', [
-        ['Tujuan Menjadi Anggota', formData.tujuanMenjadiAnggota || 'Meningkatkan profesionalisme & jejaring penerbitan buku'],
-        ['Tahun Mulai Usaha', formData.tahunMulaiUsaha || 'Berdasarkan akta / buku terbit'],
-      ]);
-    }
-
-    writeSection('3. DATA TERBITAN', [
-      ['Jenis Terbitan / Spesialisasi', specStr],
-      ['Jumlah Judul Terbit', `${formData.jumlahJudulTerbit || '20'} Judul`],
-      ['Rata-rata Oplah Cetakan Pertama', `${formData.rataRataOplah || '1000'} Eksemplar`],
-      ['Rencana Produksi', `${formData.annualBookCount || '15'} Judul / Tahun`],
-    ]);
-
-    writeSection('4. PEMASARAN & PENJUALAN', [
-      ['Sistem Pemasaran', formData.sistemPemasaran || 'Toko Buku, Online, & Instansi'],
-      ['Rata-rata Diskon (%)', `${formData.rataRataDiskon || '30'}%`],
-      ['Sistem Penjualan', formData.sistemPenjualan || 'Tunai, Kredit, dan Konsinyasi'],
-    ]);
-
-    writeSection('5. PENGADAAN NASKAH', [
-      ['Sistem Pengadaan Naskah', formData.sistemPengadaanNaskah || 'Royalti & Beli Putus'],
-      ['Besaran Royalti (%)', formData.persentaseRoyalti || '10%'],
-    ]);
-
-    const rowsOrganisasi = [
-      ['Jumlah Karyawan per Bagian', `Redaksi: ${formData.jumlahKaryawanRedaksi || 3}, Produksi: ${formData.jumlahKaryawanProduksi || 2}, Pemasaran: ${formData.jumlahKaryawanPemasaran || 2}, Admin: ${formData.jumlahKaryawanAdmin || 2}`],
-      ['Kepemilikan Kantor', formData.kepemilikanKantor || 'Milik Sendiri'],
-      ['Lokasi Kantor', formData.lokasiKantor || 'Gedung Perkantoran / Ruko'],
-      ...(isHeregistrasi ? [
-        ['Kantor Cabang / Perwakilan', formData.kantorCabang || '-'],
-        ['Lini Penerbitan', formData.liniPenerbitan || 'Penerbitan Utama'],
-      ] : [])
-    ];
-    writeSection('6. ORGANISASI & KANTOR', rowsOrganisasi);
-
-    writeSection('7. DATA TEKNIS PRODUKSI', [
-      ['Software Produksi', formData.softwareProduksi || 'Adobe InDesign, Illustrator, Photoshop'],
-      ['Contoh No. ISBN', formData.contohIsbn || '978-623-00-0000-1'],
-      ['Jenis Kertas', formData.jenisKertas || 'Bookpaper, HVS, Art Carton'],
-      ['Sistem Pencetakan', formData.sistemCetak || 'Cetak di Luar'],
-      ['Pekerjaan yang Di-outsource', formData.pekerjaanOutsource || 'Percetakan Massal'],
-    ]);
-
-    if (y > 245) {
-      doc.addPage();
-      y = 25;
-    }
-    y += 4;
-    doc.text(`Bandung, ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`, 140, y);
-    doc.text('Pimpinan Penerbit Pemohon,', 140, y + 5);
-    doc.setFont('times', 'bold');
-    doc.text(submission.leader_name || formData.leaderName || 'Pimpinan Penerbit', 140, y + 22);
-
-    // Pengesahan Pengurus Daerah (TTD Ketua & Sekretaris)
-    y += 34;
-    if (y > 225) {
-      doc.addPage();
-      y = 25;
-    }
-    doc.setFont('times', 'italic');
-    doc.setFontSize(9);
-    doc.text(PENGESAHAN_TEXT, 105, y, { align: 'center' });
-    drawPengurusSignaturesPdf(doc, {
-      submission, settings, docKey: 'formulir', y: y + 10,
-      heading: ['PENGESAHAN PENGURUS DAERAH', 'IKAPI JAWA BARAT'],
-    });
-
-    doc.save(`Formulir_IKAPI_2026_${submission.publisher_name ? submission.publisher_name.replace(/\s+/g, '_') : 'Pemohon'}.pdf`);
-  };
+  const fileName = `${isHeregistrasi ? 'Formulir_Heregistrasi_IKAPI' : 'Formulir_Menjadi_Anggota_IKAPI'}_${safeFileName(submission.publisher_name, 'Pemohon')}.pdf`;
+  const handlePrint = () => printElement(paperRef.current, fileName.replace('.pdf', ''));
+  const handleDownloadPdf = () => downloadElementPdf(paperRef.current, fileName);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -178,7 +52,44 @@ export default function OfficialApplicationFormPdf({ submission, settings, signi
         </div>
       </div>
 
-      <div className="p-8 sm:p-10 max-w-3xl mx-auto font-sans text-slate-900 bg-white space-y-6">
+      {isHeregistrasi ? (
+        <div ref={paperRef} data-paper className="p-8 sm:p-10 max-w-3xl mx-auto font-serif text-slate-900 bg-white">
+          <h2 className="text-center text-base sm:text-lg font-bold uppercase underline underline-offset-4">
+            Formulir Heregistrasi Anggota IKAPI
+          </h2>
+          <ol className="mt-6 space-y-1.5 text-sm">
+            {heregistrasiRows(submission, formData).map(([label, value], idx) => (
+              <li key={label} className="grid grid-cols-[1.75rem_minmax(0,15rem)_0.75rem_1fr] gap-x-1 py-1 border-b border-dotted border-slate-200">
+                <span className="text-slate-500">{idx + 1}.</span>
+                <span>{label}</span>
+                <span>:</span>
+                <span className="font-medium break-words">{value}</span>
+              </li>
+            ))}
+          </ol>
+
+          <div className="flex justify-end text-sm pt-8">
+            <div className="w-60 text-center">
+              <p>Bandung, {todayStr}</p>
+              <p>Penanggung jawab penerbit</p>
+              <p className="mt-14">( {penanggungJawab || '______________________'} )</p>
+            </div>
+          </div>
+
+          <div className="border-t border-dashed border-slate-300 pt-4 mt-8 font-sans">
+            <p className="text-xs text-slate-500 italic text-center">{PENGESAHAN_TEXT}</p>
+            <PengurusSignatureBlock
+              submission={submission}
+              settings={settings}
+              docKey="formulir"
+              signing={signing}
+              heading={<>PENGESAHAN PENGURUS DAERAH<br />IKAPI JAWA BARAT</>}
+              className="mt-10 pt-2"
+            />
+          </div>
+        </div>
+      ) : (
+      <div ref={paperRef} data-paper className="p-8 sm:p-10 max-w-3xl mx-auto font-sans text-slate-900 bg-white space-y-6">
         {/* Header */}
         <div className="text-center border-b-2 border-slate-800 pb-4">
           <h2 className="text-base sm:text-lg font-black tracking-wide text-[#0884c4] uppercase">
@@ -220,32 +131,28 @@ export default function OfficialApplicationFormPdf({ submission, settings, signi
         {/* 3. Terbitan */}
         <FormSection title="3. Data Terbitan">
           <FormRow label="Jenis Terbitan" value={specStr} />
-          <FormRow label="Jumlah Judul Terbit" value={`${formData.jumlahJudulTerbit || '25'} Judul`} />
-          <FormRow label="Rata-rata Oplah Cetakan Pertama" value={`${formData.rataRataOplah || '1000'} Eksemplar`} />
-          <FormRow label="Rencana Produksi (Judul/Tahun)" value={`${formData.annualBookCount || '15'} Judul / Tahun`} />
+          <FormRow label="Jumlah Judul Terbit" value={formData.jumlahJudulTerbit ? `${formData.jumlahJudulTerbit} Judul` : '-'} />
+          <FormRow label="Rata-rata Oplah Cetakan Pertama" value={formData.rataRataOplah ? `${formData.rataRataOplah} Eksemplar` : '-'} />
+          <FormRow label="Rencana Produksi (Judul/Tahun)" value={formData.annualBookCount ? `${formData.annualBookCount} Judul / Tahun` : '-'} />
         </FormSection>
 
         {/* 4. Pemasaran */}
         <FormSection title="4. Pemasaran & Penjualan">
-          <FormRow label="Sistem Pemasaran" value={formData.sistemPemasaran || 'Toko Buku, Online, & Instansi'} />
-          <FormRow label="Rata-rata Diskon (%)" value={`${formData.rataRataDiskon || '30'}%`} />
-          <FormRow label="Sistem Penjualan" value={formData.sistemPenjualan || 'Kredit / Tunai / Konsinyasi'} />
+          <FormRow label="Sistem Pemasaran" value={pemasaranText(formData)} />
+          <FormRow label="Rata-rata Diskon (%)" value={formData.rataRataDiskon ? `${String(formData.rataRataDiskon).replace('%', '')}%` : '-'} />
+          <FormRow label="Sistem Penjualan" value={listText(formData.sistemPenjualan) || '-'} />
         </FormSection>
 
         {/* 5. Naskah */}
         <FormSection title="5. Pengadaan Naskah">
-          <FormRow label="Sistem Pengadaan Naskah" value={formData.sistemPengadaanNaskah || 'Beli / Ditulis Sendiri / Royalti'} />
-          <FormRow label="Persentase Royalti (%)" value={formData.persentaseRoyalti || '10%'} />
+          <FormRow label="Sistem Pengadaan Naskah" value={naskahText(formData)} />
         </FormSection>
 
         {/* 6. Organisasi */}
         <FormSection title="6. Organisasi & Kantor">
-          <FormRow
-            label="Jumlah Karyawan per Bagian"
-            value={`Redaksi: ${formData.jumlahKaryawanRedaksi || 4} org | Produksi: ${formData.jumlahKaryawanProduksi || 3} org | Pemasaran: ${formData.jumlahKaryawanPemasaran || 3} org | Admin: ${formData.jumlahKaryawanAdmin || 2} org`}
-          />
-          <FormRow label="Kepemilikan Kantor" value={formData.kepemilikanKantor || 'Milik Sendiri'} />
-          <FormRow label="Lokasi Kantor" value={formData.lokasiKantor || 'Gedung Perkantoran / Ruko'} />
+          <FormRow label="Jumlah Karyawan" value={karyawanText(formData)} />
+          <FormRow label="Kepemilikan Kantor" value={formData.kepemilikanKantor || '-'} />
+          <FormRow label="Lokasi Kantor" value={formData.lokasiKantor || '-'} />
           {isHeregistrasi && (
             <>
               <FormRow label="Kantor Cabang / Perwakilan" value={formData.kantorCabang || '-'} />
@@ -256,11 +163,11 @@ export default function OfficialApplicationFormPdf({ submission, settings, signi
 
         {/* 7. Produksi */}
         <FormSection title="7. Data Teknis Produksi">
-          <FormRow label="Software Produksi" value={formData.softwareProduksi || 'Adobe InDesign, Illustrator, Photoshop'} />
-          <FormRow label="Contoh No. ISBN" value={formData.contohIsbn || '978-623-00-0000-1'} />
-          <FormRow label="Jenis Kertas" value={formData.jenisKertas || 'Bookpaper, HVS, Art Carton'} />
-          <FormRow label="Cetak Sendiri / Luar" value={formData.sistemCetak || 'Cetak di Luar'} />
-          <FormRow label="Pekerjaan yang Di-outsource" value={formData.pekerjaanOutsource || 'Percetakan & Penjilidan'} />
+          <FormRow label="Software Produksi" value={formData.softwareProduksi || '-'} />
+          <FormRow label="Nomor ISBN yang Sudah Digunakan" value={formData.contohIsbn || '-'} />
+          <FormRow label="Jenis Kertas" value={formData.jenisKertas || '-'} />
+          <FormRow label="Mencetak Buku" value={formData.sistemCetak || '-'} />
+          <FormRow label="Pekerjaan yang Dioutsourcing" value={formData.pekerjaanOutsource || '-'} />
         </FormSection>
 
         {/* Signature Box */}
@@ -291,6 +198,7 @@ export default function OfficialApplicationFormPdf({ submission, settings, signi
           />
         </div>
       </div>
+      )}
     </div>
   );
 }

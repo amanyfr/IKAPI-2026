@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Printer, Download, ClipboardCheck, Gavel } from 'lucide-react';
-import { jsPDF } from 'jspdf';
-import { PengurusSignatureBlock, drawPengurusSignaturesPdf, KopSurat, drawKopPdf, formatLongDate } from './PengurusSignature';
+import { PengurusSignatureBlock, KopSurat, formatLongDate } from './PengurusSignature';
+import { downloadElementPdf, printElement } from '../utils/exportDocument';
 
 // Dokumen resmi pengurus yang ditandatangani Ketua & Sekretaris (selain Surat Pengantar):
 // Berita Acara Verifikasi dan Surat Keputusan. Prop `signing` = mode pembubuhan TTD.
@@ -11,7 +11,9 @@ const typeLabel = (submission) =>
   submission.submission_type === 'Heregistrasi' ? 'Registrasi (Perpanjangan Keanggotaan)' : 'Pendaftaran Anggota Baru';
 const formatRupiah = (n) => `Rp ${Number(n || 0).toLocaleString('id-ID')}`;
 
-function DocShell({ icon: Icon, title, number, signing, onDownload, children }) {
+// Unduh PDF & cetak diambil langsung dari kertas yang tampil di layar (kop, logo, TTD sama persis)
+function DocShell({ icon: Icon, title, number, signing, fileName, children }) {
+  const paperRef = useRef(null);
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div className={`bg-[#f0f9ff] px-6 py-3 border-b border-[#b8e6fc] flex-wrap items-center justify-between gap-3 no-print ${signing ? 'hidden' : 'flex'}`}>
@@ -22,20 +24,20 @@ function DocShell({ icon: Icon, title, number, signing, onDownload, children }) 
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => window.print()}
+            onClick={() => printElement(paperRef.current, fileName.replace('.pdf', ''))}
             className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
           >
             <Printer className="w-3.5 h-3.5" /> Cetak
           </button>
           <button
-            onClick={onDownload}
+            onClick={() => downloadElementPdf(paperRef.current, fileName)}
             className="px-3.5 py-1.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-sm transition"
           >
             <Download className="w-3.5 h-3.5" /> Unduh PDF
           </button>
         </div>
       </div>
-      <div className="p-8 sm:p-12 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white" style={{ minHeight: '850px' }}>
+      <div ref={paperRef} data-paper className="p-8 sm:p-12 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white" style={{ minHeight: '850px' }}>
         {children}
       </div>
     </div>
@@ -64,39 +66,6 @@ function InfoRows({ rows }) {
   );
 }
 
-// PDF: judul + nomor dokumen di bawah kop; mengembalikan y berikutnya
-function drawTitlePdf(doc, y, title, number) {
-  doc.setFont('times', 'bold');
-  doc.setFontSize(12);
-  doc.text(title, 105, y, { align: 'center' });
-  const w = doc.getTextWidth(title);
-  doc.setLineWidth(0.3);
-  doc.line(105 - w / 2, y + 1, 105 + w / 2, y + 1);
-  doc.setFont('times', 'normal');
-  doc.setFontSize(10);
-  doc.text(`Nomor: ${number}`, 105, y + 6, { align: 'center' });
-  return y + 16;
-}
-
-function drawRowsPdf(doc, y, rows) {
-  rows.forEach(([label, value]) => {
-    doc.setFont('times', 'bold');
-    doc.text(label, 25, y);
-    doc.setFont('times', 'normal');
-    const lines = doc.splitTextToSize(`: ${value || '-'}`, 110);
-    doc.text(lines, 75, y);
-    y += Math.max(6, lines.length * 5);
-  });
-  return y;
-}
-
-function drawParagraphPdf(doc, y, text) {
-  doc.setFont('times', 'normal');
-  const lines = doc.splitTextToSize(text, 170);
-  doc.text(lines, 20, y);
-  return y + lines.length * 5 + 3;
-}
-
 const publisherRows = (submission) => [
   ['Nama Penerbit', submission.publisher_name],
   ['Jenis Pengajuan', typeLabel(submission)],
@@ -118,38 +87,10 @@ export function BeritaAcaraVerifikasi({ submission, settings, documents = [], pa
     ? `${formatRupiah(payment.amount)} • ${payment.verification_status || 'Menunggu'}`
     : 'Terverifikasi';
 
-  const handleDownload = () => {
-    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    let y = drawKopPdf(doc, settings);
-    y = drawTitlePdf(doc, y + 2, 'BERITA ACARA VERIFIKASI BERKAS & PEMBAYARAN', number);
-    doc.setFontSize(10);
-    y = drawParagraphPdf(doc, y, opening);
-    y = drawRowsPdf(doc, y, publisherRows(submission)) + 3;
 
-    doc.setFont('times', 'bold');
-    doc.text('Hasil verifikasi berkas persyaratan:', 20, y);
-    y += 6;
-    doc.setFont('times', 'normal');
-    documents.forEach((d, i) => {
-      doc.text(`${i + 1}. ${d.document_title}`, 25, y);
-      doc.text(d.screening_status || 'Sesuai', 185, y, { align: 'right' });
-      y += 5.5;
-    });
-    doc.text(`${documents.length + 1}. Pembayaran iuran / biaya pendaftaran`, 25, y);
-    doc.text(paymentText, 185, y, { align: 'right' });
-    y += 9;
-
-    y = drawParagraphPdf(doc, y, closing);
-    if (y > 225) {
-      doc.addPage();
-      y = 25;
-    }
-    drawPengurusSignaturesPdf(doc, { submission, settings, docKey: 'berita_acara', y: y + 8 });
-    doc.save(`Berita_Acara_Verifikasi_${fileSafe(submission.publisher_name)}.pdf`);
-  };
 
   return (
-    <DocShell icon={ClipboardCheck} title="Berita Acara Verifikasi" number={number} signing={signing} onDownload={handleDownload}>
+    <DocShell icon={ClipboardCheck} title="Berita Acara Verifikasi" number={number} signing={signing} fileName={`Berita_Acara_Verifikasi_${fileSafe(submission.publisher_name)}.pdf`}>
       <KopSurat settings={settings} />
       <DocTitle title="Berita Acara Verifikasi Berkas & Pembayaran" number={number} />
 
@@ -214,55 +155,9 @@ export function SuratKeputusan({ submission, settings, signing = null }) {
     ['KETIGA', 'Keputusan ini berlaku sejak tanggal ditetapkan, dengan ketentuan apabila di kemudian hari terdapat kekeliruan akan diperbaiki sebagaimana mestinya.'],
   ];
 
-  const handleDownload = () => {
-    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    let y = drawKopPdf(doc, settings);
-    y = drawTitlePdf(doc, y + 2, 'SURAT KEPUTUSAN PENGURUS DAERAH IKAPI JAWA BARAT', number);
-    doc.setFont('times', 'bold');
-    doc.text('TENTANG', 105, y, { align: 'center' });
-    doc.text(about, 105, y + 5, { align: 'center' });
-    y += 14;
-    doc.setFontSize(10);
-
-    const drawList = (label, items) => {
-      doc.setFont('times', 'bold');
-      doc.text(label, 20, y);
-      doc.setFont('times', 'normal');
-      items.forEach((item, i) => {
-        const lines = doc.splitTextToSize(`${String.fromCharCode(97 + i)}. ${item}`, 140);
-        doc.text(lines, 50, y);
-        y += lines.length * 5 + 1;
-      });
-      y += 3;
-    };
-    drawList('Menimbang', menimbang);
-    drawList('Mengingat', mengingat);
-
-    doc.setFont('times', 'bold');
-    doc.text('MEMUTUSKAN', 105, y, { align: 'center' });
-    y += 7;
-    memutuskan.forEach(([label, text]) => {
-      doc.setFont('times', 'bold');
-      doc.text(label, 20, y);
-      doc.setFont('times', 'normal');
-      const lines = doc.splitTextToSize(`: ${text}`, 140);
-      doc.text(lines, 50, y);
-      y += lines.length * 5 + 2;
-    });
-
-    y += 4;
-    doc.text(`Ditetapkan di : Bandung`, 125, y);
-    doc.text(`Pada tanggal  : ${dateStr}`, 125, y + 5);
-    if (y > 215) {
-      doc.addPage();
-      y = 15;
-    }
-    drawPengurusSignaturesPdf(doc, { submission, settings, docKey: 'sk', y: y + 16 });
-    doc.save(`Surat_Keputusan_${fileSafe(submission.publisher_name)}.pdf`);
-  };
 
   return (
-    <DocShell icon={Gavel} title="Surat Keputusan Pengurus Daerah" number={number} signing={signing} onDownload={handleDownload}>
+    <DocShell icon={Gavel} title="Surat Keputusan Pengurus Daerah" number={number} signing={signing} fileName={`Surat_Keputusan_${fileSafe(submission.publisher_name)}.pdf`}>
       <KopSurat settings={settings} />
       <DocTitle title="Surat Keputusan Pengurus Daerah IKAPI Jawa Barat" number={number} />
       <p className="text-center text-xs sm:text-sm font-bold -mt-3 mb-6">TENTANG<br />{about}</p>

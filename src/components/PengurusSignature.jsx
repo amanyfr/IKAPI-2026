@@ -183,79 +183,6 @@ export function PengurusSignatureBlock({ submission, settings, docKey, signing =
   );
 }
 
-// Versi PDF (jsPDF, satuan mm) dari blok tanda tangan pengurus. `y` = baris judul pertama.
-// Mengembalikan posisi y setelah blok.
-export function drawPengurusSignaturesPdf(doc, { submission, settings, docKey, y, heading }) {
-  const placed = placedSignatures(submission, docKey);
-  const { chairmanName, secretaryName } = signerNames(submission, settings);
-  const areaTop = y - 5;
-
-  doc.setFont('times', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(0, 0, 0);
-  const headingLines = heading || ['PENGURUS DAERAH IKATAN PENERBIT INDONESIA', 'DAERAH JAWA BARAT'];
-  headingLines.forEach((line, i) => doc.text(line, 105, y + i * 5, { align: 'center' }));
-
-  const sigY = y + 14;
-  const nameY = sigY + 26;
-  doc.setFont('times', 'bold');
-  doc.text('Ketua,', 50, sigY, { align: 'center' });
-  doc.text('Sekretaris,', 155, sigY, { align: 'center' });
-
-  try {
-    // Slot TTD bawaan hanya dipakai bila penandatangan belum membubuhkan TTD-nya sendiri
-    if (!placed.chairman) {
-      if (settings?.ketua_signature_img) {
-        doc.addImage(settings.ketua_signature_img, 32, sigY + 2, 36, 18);
-      } else {
-        doc.setFont('times', 'italic');
-        doc.setTextColor(8, 132, 196);
-        doc.text('[ TTD Digital Ketua ]', 50, sigY + 12, { align: 'center' });
-      }
-    }
-    if (settings?.stempel_img) {
-      doc.addImage(settings.stempel_img, 88, sigY + 1, 28, 28);
-    } else {
-      doc.setFontSize(8);
-      doc.setTextColor(8, 132, 196);
-      doc.text('[ STEMPEL RESMI IKAPI PD JABAR ]', 102, sigY + 14, { align: 'center' });
-    }
-    if (!placed.secretary) {
-      if (settings?.sekretaris_signature_img) {
-        doc.addImage(settings.sekretaris_signature_img, 137, sigY + 2, 36, 18);
-      } else {
-        doc.setFont('times', 'italic');
-        doc.setFontSize(10);
-        doc.setTextColor(8, 132, 196);
-        doc.text('[ TTD Digital Sekretaris ]', 155, sigY + 12, { align: 'center' });
-      }
-    }
-
-    // TTD yang dibubuhkan bebas digambar terakhir agar berada di atas stempel (sama dengan pratinjau).
-    // Area: x 20–190 mm, dari judul pengurus sampai garis nama.
-    const areaH = (nameY + 7) - areaTop;
-    [placed.chairman, placed.secretary].filter(Boolean).forEach(({ img, pos }) => {
-      const props = doc.getImageProperties(img);
-      const w = pos.w * 170;
-      const h = w * (props.height / props.width);
-      doc.addImage(img, 20 + pos.x * 170 - w / 2, areaTop + pos.y * areaH - h / 2, w, h);
-    });
-  } catch (e) {
-    console.warn('Could not embed image into PDF:', e);
-  }
-
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(10);
-  doc.setFont('times', 'bold');
-  doc.text(chairmanName, 50, nameY, { align: 'center' });
-  doc.setLineWidth(0.3);
-  doc.line(25, nameY + 1, 75, nameY + 1);
-  doc.text(secretaryName, 155, nameY, { align: 'center' });
-  doc.line(130, nameY + 1, 180, nameY + 1);
-
-  return nameY + 8;
-}
-
 // Kop surat resmi (HTML) yang dipakai bersama dokumen pengurus
 export function KopSurat({ settings }) {
   const kopAlamat = settings?.surat_kop_alamat || 'Sekretariat: Jl. Ibu Inggit Garnasih No. 148, Regol, Kota Bandung 40252';
@@ -276,26 +203,6 @@ export function KopSurat({ settings }) {
       </div>
     </div>
   );
-}
-
-// Kop surat versi PDF; mengembalikan y setelah garis kop
-export function drawKopPdf(doc, settings) {
-  const kopAlamat = settings?.surat_kop_alamat || 'Sekretariat: Jl. Ibu Inggit Garnasih No. 148, Regol, Kota Bandung 40252';
-  const kopKontak = settings?.surat_kop_kontak || 'Telp: (022) 5202684 | Email: sekretariat@ikapi-jabar.or.id | Web: https://ikapi-jabar.or.id';
-  doc.setFont('times', 'bold');
-  doc.setFontSize(14);
-  doc.text('IKATAN PENERBIT INDONESIA (IKAPI)', 105, 22, { align: 'center' });
-  doc.setFontSize(12);
-  doc.text('PENGURUS DAERAH JAWA BARAT', 105, 28, { align: 'center' });
-  doc.setFont('times', 'normal');
-  doc.setFontSize(9);
-  doc.text(kopAlamat, 105, 34, { align: 'center' });
-  doc.text(kopKontak, 105, 38, { align: 'center' });
-  doc.setLineWidth(0.8);
-  doc.line(20, 42, 190, 42);
-  doc.setLineWidth(0.2);
-  doc.line(20, 43.5, 190, 43.5);
-  return 52;
 }
 
 export const formatLongDate = (raw) =>

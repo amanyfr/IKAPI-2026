@@ -5,6 +5,7 @@ import OfficialLetterGenerator from './OfficialLetterGenerator';
 import OfficialApplicationFormPdf from './OfficialApplicationFormPdf';
 import { BeritaAcaraVerifikasi, SuratKeputusan } from './PengurusDocuments';
 import { DEFAULT_SIGNATURE_POS, SIGNABLE_DOCS } from './PengurusSignature';
+import { notify } from './AppDialog';
 
 const DOC_COMPONENTS = {
   surat: OfficialLetterGenerator,
@@ -48,7 +49,7 @@ export function useMySignature(enabled = true) {
       setSignature(data.signature);
       return true;
     } catch (err) {
-      alert('Gagal menyimpan tanda tangan: ' + err.message);
+      notify('Gagal menyimpan tanda tangan: ' + err.message);
       return false;
     } finally {
       setSaving(false);

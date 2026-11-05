@@ -2,31 +2,37 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import CentralPacketExporter from '../components/CentralPacketExporter';
 import { useMySignature, MySignatureCard, SignLetterModal } from '../components/LetterSigning';
-import StatusStepper from '../components/StatusStepper';
+import StatusStepper, { STATUS_LABEL } from '../components/StatusStepper';
+import DocumentVerificationModal from '../components/DocumentVerificationModal';
 import {
   Award, CheckCircle, XCircle, FileText, Users,
   DollarSign, Eye, PenTool, RefreshCw, Search, Activity,
   Clock, ShieldCheck, AlertCircle, ChevronDown, ChevronUp
 } from 'lucide-react';
+import { notify } from '../components/AppDialog';
 
 const STAGE_PROGRESS = {
-  'Draf':                  { step: 1, total: 5, label: 'Tahap 1/5 · Pengisian Draf Pemohon', color: 'bg-slate-400' },
-  'Menunggu Pembayaran':   { step: 2, total: 5, label: 'Tahap 2/5 · Menunggu Bukti Transfer', color: 'bg-amber-500' },
-  'Menunggu Verifikasi':   { step: 3, total: 5, label: 'Tahap 3/5 · Screening Admin & TTD Sekretaris', color: 'bg-[#0da2e7]' },
-  'Perlu Revisi':          { step: 3, total: 5, label: 'Tahap 3/5 · Dikembalikan untuk Revisi', color: 'bg-amber-500' },
-  'Menunggu Approval':     { step: 4, total: 5, label: 'Tahap 4/5 · Menunggu Approval & TTD Ketua', color: 'bg-indigo-600' },
-  'Aktif':                 { step: 5, total: 5, label: 'Tahap 5/5 · Resmi Menjadi Anggota Aktif', color: 'bg-emerald-600' },
-  'Ditolak':               { step: 0, total: 5, label: 'Pengajuan Ditolak oleh Pengurus', color: 'bg-red-500' },
+  'Draf':                    { step: 1, total: 6, label: 'Tahap 1/6 · Pengisian Formulir', color: 'bg-slate-400' },
+  'Menunggu Verifikasi':     { step: 2, total: 6, label: 'Tahap 2/6 · Screening Dokumen oleh Admin', color: 'bg-[#0da2e7]' },
+  'Perlu Revisi':            { step: 2, total: 6, label: 'Tahap 2/6 · Revisi Dokumen oleh Pemohon', color: 'bg-amber-500' },
+  'Menunggu Pembayaran':     { step: 3, total: 6, label: 'Tahap 3/6 · Pembayaran & Verifikasi Admin', color: 'bg-amber-500' },
+  'Menunggu TTD Sekretaris': { step: 4, total: 6, label: 'Tahap 4/6 · Menunggu TTD Sekretaris', color: 'bg-indigo-500' },
+  'Menunggu Approval':       { step: 5, total: 6, label: 'Tahap 5/6 · Menunggu Approval & TTD Ketua', color: 'bg-indigo-600' },
+  'Pengiriman Berkas':       { step: 6, total: 6, label: 'Tahap 6/6 · Menunggu Approval Admin', color: 'bg-orange-500' },
+  'Aktif':                   { step: 6, total: 6, label: 'Tahap 6/6 · Resmi Menjadi Anggota', color: 'bg-emerald-600' },
+  'Ditolak':                 { step: 0, total: 6, label: 'Pengajuan Ditolak oleh Pengurus', color: 'bg-red-500' },
 };
 
 const STATUS_BADGE = {
-  'Draf':                  'bg-slate-100 text-slate-700 border-slate-200',
-  'Menunggu Pembayaran':   'bg-amber-50 text-amber-800 border-amber-200',
-  'Menunggu Verifikasi':   'bg-[#f0f9ff] text-[#0884c4] border-[#b8e6fc]',
-  'Perlu Revisi':          'bg-amber-100 text-amber-800 border-amber-300',
-  'Menunggu Approval':     'bg-indigo-50 text-indigo-800 border-indigo-200',
-  'Aktif':                 'bg-emerald-100 text-emerald-900 border-emerald-300',
-  'Ditolak':               'bg-red-50 text-red-800 border-red-200',
+  'Draf':                    'bg-slate-100 text-slate-700 border-slate-200',
+  'Menunggu Verifikasi':     'bg-[#f0f9ff] text-[#0884c4] border-[#b8e6fc]',
+  'Perlu Revisi':            'bg-amber-100 text-amber-800 border-amber-300',
+  'Menunggu Pembayaran':     'bg-amber-50 text-amber-800 border-amber-200',
+  'Menunggu TTD Sekretaris': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  'Menunggu Approval':       'bg-indigo-50 text-indigo-800 border-indigo-200',
+  'Pengiriman Berkas':       'bg-orange-50 text-orange-800 border-orange-200',
+  'Aktif':                   'bg-emerald-100 text-emerald-900 border-emerald-300',
+  'Ditolak':                 'bg-red-50 text-red-800 border-red-200',
 };
 
 export default function Admin2Approval({ initialStatus = 'Semua', initialSearch = '', scrollToMonitoring = false }) {
@@ -52,6 +58,19 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
   const [isPacketOpen, setIsPacketOpen] = useState(false);
 
   const [processing, setProcessing] = useState(false);
+  // Dokumen, bukti transfer & riwayat (mode lihat untuk Ketua)
+  const [viewDetail, setViewDetail] = useState(null);
+
+  const openView = async (subId) => {
+    try {
+      const res = await fetch(`/api/submissions/${subId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` }
+      });
+      setViewDetail(await res.json());
+    } catch (err) {
+      notify('Gagal mengambil data pengajuan: ' + err.message);
+    }
+  };
 
   // TTD tersimpan Ketua (dibuat sekali, dipakai berulang)
   const isKetua = user?.role === 'Ketua';
@@ -101,7 +120,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
       setPacketDetail(data);
       setIsPacketOpen(true);
     } catch (err) {
-      alert('Gagal mengambil data pengajuan: ' + err.message);
+      notify('Gagal mengambil data pengajuan: ' + err.message);
     }
   };
 
@@ -120,13 +139,13 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      alert(data.message);
+      notify(data.message);
       setApprovingSub(null);
       setRejectingSub(null);
       setRejectionReason('');
       fetchData();
     } catch (err) {
-      alert('Gagal memproses aksi: ' + err.message);
+      notify('Gagal memproses aksi: ' + err.message);
     } finally {
       setProcessing(false);
     }
@@ -134,7 +153,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
 
   // Filtered submissions
   const pendingApproval = submissions.filter(s => s.status === 'Menunggu Approval');
-  const signedList = submissions.filter(s => s.status === 'Aktif');
+  const signedList = submissions.filter(s => ['Pengiriman Berkas', 'Aktif'].includes(s.status));
 
   const filteredMonitoring = submissions.filter(s => {
     const matchStatus = monitorStatus === 'Semua' || s.status === monitorStatus;
@@ -296,13 +315,20 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
 
                   {sub.admin_notes && (
                     <p className="text-xs text-slate-600 bg-[#f0f9ff] border border-[#b8e6fc] px-3 py-1.5 rounded-lg mt-2 inline-block">
-                      <strong>Catatan Sekretaris:</strong> {sub.admin_notes}
+                      <strong>Catatan:</strong> {sub.admin_notes}
                     </p>
                   )}
                 </div>
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => openView(sub.id)}
+                    className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+                    title="Dokumen persyaratan, bukti transfer & riwayat"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" /> Dokumen & riwayat
+                  </button>
                   <button
                     onClick={() => openPacket(sub.id)}
                     className="px-3.5 py-2 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] text-xs font-bold rounded-xl transition flex items-center gap-1.5"
@@ -344,7 +370,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                 Dokumen Resmi Anggota yang Disetujui
               </h3>
               <p className="text-[11px] text-slate-500">
-                Daftar surat pengantar yang telah dibubuhi tanda tangan Ketua & Sekretaris beserta status pengirimannya.
+                Surat pengantar yang sudah ditandatangani Ketua & Sekretaris, beserta status pengiriman berkas fisik pemohon.
               </p>
             </div>
           </div>
@@ -368,8 +394,13 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                         {sub.publisher_name}
                       </h4>
                       <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${STATUS_BADGE[sub.status] || ''}`}>
-                        {sub.status}
+                        {STATUS_LABEL[sub.status] || sub.status}
                       </span>
+                      {sub.status === 'Pengiriman Berkas' && (
+                        <span className="text-[10px] bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full font-semibold">
+                          {sub.physical_status === 'Dikirim' ? `Berkas fisik dikirim (${sub.physical_courier || '-'})` : 'Berkas fisik belum dikirim'}
+                        </span>
+                      )}
                       <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
                         ✓ TTD Ketua & Sekretaris
                       </span>
@@ -433,22 +464,22 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                 className="text-xs py-2 px-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#0da2e7] outline-none"
               >
                 <option value="Semua">Semua Tahapan Status ({submissions.length})</option>
-                <option value="Draf">Draf</option>
-                <option value="Menunggu Verifikasi">Screening & TTD Sekretaris</option>
-                <option value="Perlu Revisi">Perlu Revisi</option>
-                <option value="Menunggu Approval">Menunggu Approval (Ketua)</option>
-                <option value="Aktif">Anggota Aktif</option>
-                <option value="Ditolak">Ditolak</option>
+                {Object.keys(STAGE_PROGRESS).map((st) => (
+                  <option key={st} value={st}>{STATUS_LABEL[st] || st}</option>
+                ))}
               </select>
             </div>
           </div>
 
           {/* Mini Stage Summary Pills */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-1">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
             {[
-              { label: 'Screening & TTD Sekretaris', status: 'Menunggu Verifikasi', color: 'text-[#0884c4] bg-[#f0f9ff] border-[#b8e6fc]' },
-              { label: 'Perlu Revisi', status: 'Perlu Revisi', color: 'text-amber-800 bg-amber-50 border-amber-200' },
-              { label: 'Menunggu Approval', status: 'Menunggu Approval', color: 'text-indigo-800 bg-indigo-50 border-indigo-200' },
+              { label: 'Screening Dokumen', status: 'Menunggu Verifikasi', color: 'text-[#0884c4] bg-[#f0f9ff] border-[#b8e6fc]' },
+              { label: 'Revisi Dokumen', status: 'Perlu Revisi', color: 'text-amber-800 bg-amber-50 border-amber-200' },
+              { label: 'Pembayaran', status: 'Menunggu Pembayaran', color: 'text-amber-800 bg-amber-50 border-amber-200' },
+              { label: 'TTD Sekretaris', status: 'Menunggu TTD Sekretaris', color: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
+              { label: 'TTD Ketua', status: 'Menunggu Approval', color: 'text-indigo-800 bg-indigo-50 border-indigo-200' },
+              { label: 'Approval Admin', status: 'Pengiriman Berkas', color: 'text-orange-800 bg-orange-50 border-orange-200' },
               { label: 'Anggota Aktif', status: 'Aktif', color: 'text-emerald-800 bg-emerald-50 border-emerald-200' },
               { label: 'Ditolak', status: 'Ditolak', color: 'text-red-800 bg-red-50 border-red-200' },
             ].map((pill) => {
@@ -490,7 +521,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                       </div>
                     </div>
                     <span className={`flex-shrink-0 inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${STATUS_BADGE[sub.status] || 'bg-slate-100 text-slate-700'}`}>
-                      {sub.status}
+                      {STATUS_LABEL[sub.status] || sub.status}
                     </span>
                   </div>
                   {sub.rejection_reason && (
@@ -517,7 +548,13 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                       onClick={() => openPacket(sub.id)}
                       className="px-2.5 py-1.5 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] rounded-lg font-semibold text-[11px] flex items-center gap-1 transition"
                     >
-                      <Eye className="w-3.5 h-3.5" /> Detail & Surat
+                      <Eye className="w-3.5 h-3.5" /> Surat
+                    </button>
+                    <button
+                      onClick={() => openView(sub.id)}
+                      className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-semibold text-[11px] flex items-center gap-1 transition"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" /> Dokumen
                     </button>
                   </div>
                   {isExpanded && (
@@ -579,7 +616,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
 
                         <td className="py-3.5 px-4">
                           <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${STATUS_BADGE[sub.status] || 'bg-slate-100 text-slate-700'}`}>
-                            {sub.status}
+                            {STATUS_LABEL[sub.status] || sub.status}
                           </span>
                           {sub.rejection_reason && (
                             <div className="text-[10px] text-red-600 mt-1 max-w-xs truncate" title={sub.rejection_reason}>
@@ -616,7 +653,13 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                               onClick={() => openPacket(sub.id)}
                               className="px-2.5 py-1.5 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] rounded-lg font-semibold text-[11px] flex items-center gap-1 transition"
                             >
-                              <Eye className="w-3.5 h-3.5" /> Detail & Surat
+                              <Eye className="w-3.5 h-3.5" /> Surat
+                            </button>
+                            <button
+                              onClick={() => openView(sub.id)}
+                              className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-semibold text-[11px] flex items-center gap-1 transition"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" /> Dokumen & riwayat
                             </button>
                           </div>
                         </td>
@@ -713,6 +756,18 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
       {/* =====================================================================
           MODAL 3: PRATINJAU & CETAK SURAT PENGANTAR + PAKET DOKUMEN
          ===================================================================== */}
+      {viewDetail && (
+        <DocumentVerificationModal
+          isOpen
+          onClose={() => setViewDetail(null)}
+          submission={viewDetail.submission}
+          documents={viewDetail.documents}
+          payment={viewDetail.payment}
+          timeline={viewDetail.timeline}
+          role={user?.role}
+        />
+      )}
+
       {isPacketOpen && packetDetail && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm p-4 flex items-center justify-center">
           <div className="w-full max-w-5xl max-h-[92vh] overflow-y-auto">

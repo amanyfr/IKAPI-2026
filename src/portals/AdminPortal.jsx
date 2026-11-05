@@ -4,13 +4,20 @@ import AdminDashboard from '../pages/AdminDashboard';
 import UserManagement from '../pages/UserManagement';
 import SystemSettings from '../pages/SystemSettings';
 import Admin1Screening from '../pages/Admin1Screening';
-import { Users, Settings, LogOut, KeyRound, LayoutDashboard, ShieldCheck } from 'lucide-react';
+import PhysicalMonitoring from '../pages/PhysicalMonitoring';
+import { Users, Settings, LogOut, KeyRound, LayoutDashboard, ShieldCheck, Activity } from 'lucide-react';
 
 export default function AdminPortal() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   // Filter awal Kelola Akun saat dibuka dari Dashboard; key memaksa remount agar filter terpakai
   const [userFilters, setUserFilters] = useState({ key: 0 });
+  const [screeningFilter, setScreeningFilter] = useState({ key: 0, status: 'Semua' });
+
+  const openScreening = (status = 'Semua') => {
+    setScreeningFilter({ key: Date.now(), status });
+    setActiveTab('screening');
+  };
 
   const openUsers = (filters = {}) => {
     setUserFilters({ ...filters, key: Date.now() });
@@ -32,7 +39,8 @@ export default function AdminPortal() {
   );
 
   return (
-    <div className="relative min-h-screen portal-bg flex flex-col font-sans">
+    // Dashboard dibuat pas satu layar (laptop/desktop): tidak perlu scroll ke bawah
+    <div className={`relative min-h-screen portal-bg flex flex-col font-sans ${activeTab === 'dashboard' ? 'lg:h-screen lg:overflow-hidden' : ''}`}>
 
       {/* ── Header Portal Admin ── */}
       <header className="brand-header sticky top-0 z-40">
@@ -80,6 +88,7 @@ export default function AdminPortal() {
             <div className="inline-flex gap-1 p-1 rounded-full bg-white/10 border border-white/15">
               {navBtn('dashboard', <LayoutDashboard className="w-4 h-4" />, 'Dashboard')}
               {navBtn('screening', <ShieldCheck className="w-4 h-4" />, 'Screening Berkas', 'Screening')}
+              {navBtn('monitoring', <Activity className="w-4 h-4" />, 'Monitoring & Berkas Fisik', 'Monitoring')}
               {navBtn('users', <Users className="w-4 h-4" />, 'Kelola Akun', 'Akun')}
               {navBtn('settings', <Settings className="w-4 h-4" />, 'Pengaturan Biaya, Rekening, Surat & TTD', 'Pengaturan')}
             </div>
@@ -88,11 +97,13 @@ export default function AdminPortal() {
       </header>
 
       {/* Main */}
-      <main className="relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className={`relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 ${activeTab === 'dashboard' ? 'py-5 lg:py-4 lg:min-h-0' : 'py-6 sm:py-8'}`}>
         {activeTab === 'dashboard' && (
           <AdminDashboard
             onOpenUsers={openUsers}
             onOpenSettings={() => setActiveTab('settings')}
+            onOpenScreening={openScreening}
+            onOpenMonitoring={() => setActiveTab('monitoring')}
           />
         )}
         {activeTab === 'users' && (
@@ -103,12 +114,13 @@ export default function AdminPortal() {
             startWithCreate={userFilters.create}
           />
         )}
-        {activeTab === 'screening' && <Admin1Screening />}
+        {activeTab === 'screening' && <Admin1Screening key={screeningFilter.key} initialStatus={screeningFilter.status} />}
+        {activeTab === 'monitoring' && <PhysicalMonitoring onOpenScreening={openScreening} />}
         {activeTab === 'settings' && <SystemSettings />}
       </main>
 
       {/* Footer */}
-      <footer className="relative bar-surface py-4 text-center text-xs text-slate-500">
+      <footer className={`relative bar-surface py-4 text-center text-xs text-slate-500 ${activeTab === 'dashboard' ? 'lg:hidden' : ''}`}>
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>© 2026 IKAPI Pengurus Daerah Jawa Barat</span>
           <span className="text-[#0da2e7] font-medium">Portal Admin — Akun & Pengaturan Sistem</span>

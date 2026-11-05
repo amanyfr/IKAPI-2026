@@ -10,6 +10,10 @@ export default function AnggotaPortal() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [editingDraft, setEditingDraft] = useState(null);
   const [editingProfile, setEditingProfile] = useState(false);
+  const [subStatus, setSubStatus] = useState(null);
+  // Label akun: belum terverifikasi sampai Admin mengonfirmasi berkas fisik (status Aktif)
+  const verified = subStatus ? subStatus === 'Aktif' : user?.member?.membership_status === 'Aktif';
+  const roleLabel = verified ? 'Anggota penerbit' : 'Penerbit belum terverifikasi';
 
   // Nilai awal formulir dari jawaban pertanyaan login pertama
   const profileType     = user?.member_type === 'Lama' ? 'Heregistrasi' : 'Baru';
@@ -59,11 +63,11 @@ export default function AnggotaPortal() {
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-base sm:text-lg text-slate-900 whitespace-nowrap">IKAPI Jawa Barat</span>
                   <span className="hidden sm:inline-flex soft-chip">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#12c26f]" />
-                    Anggota penerbit
+                    <span className={`w-1.5 h-1.5 rounded-full ${verified ? 'bg-[#12c26f]' : 'bg-amber-400'}`} />
+                    {roleLabel}
                   </span>
                 </div>
-                <p className="sm:hidden text-[11px] text-emerald-600 font-medium">Anggota penerbit</p>
+                <p className={`sm:hidden text-[11px] font-medium ${verified ? 'text-emerald-600' : 'text-amber-600'}`}>{roleLabel}</p>
                 <p className="hidden md:block text-xs text-slate-500">Pendaftaran & Registrasi Keanggotaan IKAPI Jawa Barat</p>
               </div>
             </div>
@@ -76,7 +80,7 @@ export default function AnggotaPortal() {
                 </div>
                 <div className="leading-tight">
                   <div className="text-xs font-medium text-slate-800">{user?.name}</div>
-                  <div className="text-[10px] text-slate-500">Anggota penerbit</div>
+                  <div className="text-[10px] text-slate-500">{roleLabel}</div>
                 </div>
               </div>
               <button
@@ -99,6 +103,7 @@ export default function AnggotaPortal() {
             onNewSubmission={handleNewSubmission}
             onEditDraft={handleEditDraft}
             onEditProfile={() => setEditingProfile(true)}
+            onStatusChange={setSubStatus}
             defaultType={profileType}
             defaultCategory={profileCategory}
           />

@@ -3,6 +3,7 @@ import {
   Users, Search, Download, Building2, Phone, Mail, MapPin, RefreshCw, KeyRound,
   X, Edit2, CheckCircle, ChevronRight
 } from 'lucide-react';
+import { notify } from '../components/AppDialog';
 
 const token = () => localStorage.getItem('ikapi_token');
 
@@ -82,7 +83,7 @@ export default function MembersManagement({ canEditKta = true }) {
 
   /* ── Save KTA ── */
   const handleSaveKta = async (memberId) => {
-    if (!ktaInput.trim()) { alert('Nomor KTA wajib diisi.'); return; }
+    if (!ktaInput.trim()) { notify('Nomor KTA wajib diisi.'); return; }
     setSavingKta(true);
     try {
       const res = await fetch(`/api/members/${memberId}/kta`, {
@@ -92,12 +93,12 @@ export default function MembersManagement({ canEditKta = true }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      alert('Nomor KTA berhasil disimpan.');
+      notify('Nomor KTA berhasil disimpan.');
       setEditingKtaId(null);
       setKtaInput('');
       fetchMembers();
     } catch (err) {
-      alert('Gagal simpan KTA: ' + err.message);
+      notify('Gagal simpan KTA: ' + err.message);
     } finally {
       setSavingKta(false);
     }
@@ -119,7 +120,7 @@ export default function MembersManagement({ canEditKta = true }) {
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      alert('Ekspor Excel gagal: ' + err.message);
+      notify('Ekspor Excel gagal: ' + err.message);
     }
   };
 

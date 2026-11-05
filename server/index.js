@@ -367,6 +367,56 @@ async function activateApprovedSubmissions() {
   return rows.length;
 }
 
+// Riwayat alur berkas (terlihat oleh semua peran)
+async function logEvent(submissionId, user, action, notes = null) {
+  try {
+    await query.run(
+      `INSERT INTO submission_logs (submission_id, actor_id, actor_name, actor_role, action, notes) VALUES (?, ?, ?, ?, ?, ?)`,
+      [submissionId, user?.id || null, user?.name || 'Sistem', user?.role || 'Sistem', action, notes]
+    );
+  } catch (err) {
+    console.error('Log event error:', err);
+  }
+}
+
+// Riwayat untuk pengajuan lama yang dibuat sebelum ada log
+function legacyTimeline(sub) {
+  const items = [];
+  const push = (at, actor_role, action, actor_name = null) => at && items.push({ created_at: at, actor_role, actor_name, action, legacy: true });
+  push(sub.submitted_at, 'Anggota', 'Pengajuan dikirim', sub.applicant_name);
+  push(sub.screened_at, 'Admin', 'Dokumen lolos screening', sub.screened_by_name);
+  push(sub.secretary_signature_date, 'Sekretaris', 'Ditandatangani Sekretaris', sub.signed_by_secretary);
+  push(sub.chairman_signature_date, 'Ketua', 'Disetujui & ditandatangani Ketua', sub.signed_by_chairman);
+  push(sub.physical_sent_at, 'Anggota', 'Berkas fisik dikirim', sub.applicant_name);
+  push(sub.activated_at, 'Admin', 'Resmi menjadi anggota IKAPI Jawa Barat', sub.physical_received_by);
+  return items;
+}
+
+// Sekali jalan: sesuaikan data lama ke alur baru (dokumen dulu, baru pembayaran)
+async function migrateFlowV2() {
+  const done = await query.get(`SELECT value FROM settings WHERE key = 'flow_version'`);
+  if (done && Number(done.value) >= 2) return;
+  // Dulu: submit -> bayar. Sekarang dokumen harus lolos screening dulu.
+  await query.run(
+    `UPDATE submissions SET status = 'Menunggu Verifikasi' WHERE status = 'Menunggu Pembayaran'
+       AND EXISTS (SELECT 1 FROM documents d WHERE d.submission_id = submissions.id AND d.screening_status != 'Sesuai')`
+  );
+  // Sudah lolos screening dokumen & pembayaran -> tinggal TTD Sekretaris
+  await query.run(
+    `UPDATE submissions SET status = 'Menunggu TTD Sekretaris' WHERE status = 'Menunggu Verifikasi' AND screened_at IS NOT NULL
+       AND EXISTS (SELECT 1 FROM payments p WHERE p.submission_id = submissions.id AND p.verification_status = 'Valid')`
+  );
+  // Sudah lolos screening dokumen, pembayaran belum valid -> tahap pembayaran
+  await query.run(
+    `UPDATE submissions SET status = 'Menunggu Pembayaran' WHERE status = 'Menunggu Verifikasi' AND screened_at IS NOT NULL`
+  );
+  await query.run(`UPDATE submissions SET physical_status = 'Diterima' WHERE status = 'Aktif' AND physical_status IS NULL`);
+  await query.run(
+    `INSERT INTO settings (key, value, description) VALUES ('flow_version', '2', 'Versi alur pengajuan')
+     ON CONFLICT(key) DO UPDATE SET value = '2'`
+  );
+}
+
 async function syncUnpaidBills() {
   const unpaid = await query.all(
     `SELECT p.id, s.submission_type FROM payments p
@@ -524,7 +574,7 @@ app.get('/api/submissions', authenticate, async (req, res) => {
       SELECT s.*, 
              m.publisher_name, m.category as member_category, m.leader_name, m.city, m.kta_number as member_kta,
              u.name as applicant_name, u.email as applicant_email,
-             p.amount as payment_amount, p.verification_status as payment_status
+             p.amount as payment_amount, p.verification_status as payment_status, p.proof_file as payment_proof
       FROM submissions s
       LEFT JOIN members m ON s.member_id = m.id
       LEFT JOIN users u ON s.user_id = u.id
@@ -599,13 +649,17 @@ app.get('/api/submissions/:id', authenticate, async (req, res) => {
 
     // Documents
     const documents = await query.all(
-      'SELECT * FROM documents WHERE submission_id = ? ORDER BY id ASC',
+      `SELECT d.*, u.name AS verified_by_name FROM documents d
+       LEFT JOIN users u ON u.id = d.verified_by
+       WHERE d.submission_id = ? ORDER BY d.id ASC`,
       [subId]
     );
 
     // Payment
     const payment = await query.get(
-      'SELECT * FROM payments WHERE submission_id = ?',
+      `SELECT p.*, u.name AS verified_by_name FROM payments p
+       LEFT JOIN users u ON u.id = p.verified_by
+       WHERE p.submission_id = ?`,
       [subId]
     );
 
@@ -614,11 +668,19 @@ app.get('/api/submissions/:id', authenticate, async (req, res) => {
     const settings = {};
     settingsList.forEach(item => { settings[item.key] = item.value; });
 
+    const logs = await query.all(
+      'SELECT id, actor_name, actor_role, action, notes, created_at FROM submission_logs WHERE submission_id = ? ORDER BY created_at ASC, id ASC',
+      [subId]
+    );
+    // Pengajuan lama tanpa log: susun dari tanggal-tanggal yang tercatat
+    const timeline = logs.length ? logs : legacyTimeline(sub);
+
     res.json({
       submission: sub,
       documents,
       payment: payment ? { ...payment, fee_breakdown: JSON.parse(payment.fee_breakdown || '{}') } : null,
-      settings
+      settings,
+      timeline
     });
   } catch (err) {
     console.error('Get submission detail error:', err);
@@ -727,7 +789,7 @@ app.post('/api/submissions', authenticate, async (req, res) => {
     }
 
     const formData = JSON.stringify(req.body);
-    const initialStatus = isDraft ? 'Draf' : 'Menunggu Pembayaran';
+    const initialStatus = isDraft ? 'Draf' : 'Menunggu Verifikasi';
     const submittedAt = isDraft ? null : new Date().toISOString();
 
     const subRes = await query.run(
@@ -743,8 +805,8 @@ app.post('/api/submissions', authenticate, async (req, res) => {
     const requiredDocs = [];
     if (submissionType === 'Heregistrasi') {
       requiredDocs.push(
-        { type: 'formulir_heregistrasi', title: 'Formulir Registrasi IKAPI 2026' },
-        { type: 'kta_lama', title: 'KTA Lama yang Habis Masa Berlakunya' }
+        { type: 'kta_lama', title: 'Kartu Anggota Ikapi yang Sudah Habis Masa Berlakunya' },
+        { type: 'formulir_heregistrasi', title: 'Isian Formulir Heregistrasi' }
       );
     } else if (category === 'Biasa') {
       requiredDocs.push(
@@ -779,8 +841,10 @@ app.post('/api/submissions', authenticate, async (req, res) => {
       [submissionId, fees.total, JSON.stringify(fees)]
     );
 
+    await logEvent(submissionId, req.user, isDraft ? 'Draf formulir dibuat' : 'Pengajuan dikirim untuk screening dokumen');
+
     res.json({
-      message: isDraft ? 'Draf formulir berhasil disimpan.' : 'Formulir berhasil disubmit. Silakan lakukan pembayaran tagihan.',
+      message: isDraft ? 'Draf formulir berhasil disimpan.' : 'Formulir berhasil dikirim. Dokumen Anda akan diperiksa Admin terlebih dahulu.',
       submissionId,
       status: initialStatus
     });
@@ -805,7 +869,21 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Akses ditolak.' });
     }
 
-    const newStatus = isSubmit ? 'Menunggu Pembayaran' : sub.status;
+    if (req.user.role === 'Anggota' && !['Draf', 'Perlu Revisi'].includes(sub.status)) {
+      return res.status(400).json({ error: 'Formulir tidak dapat diubah karena pengajuan sedang diproses.' });
+    }
+    if (isSubmit && sub.status === 'Draf') {
+      const missing = await query.all(
+        `SELECT document_title FROM documents WHERE submission_id = ? AND (file_path IS NULL OR file_path = '')`,
+        [subId]
+      );
+      if (missing.length) {
+        return res.status(400).json({
+          error: `Lengkapi dokumen persyaratan terlebih dahulu: ${missing.map((d) => d.document_title).join(', ')}. Formulir tersimpan sebagai draf.`
+        });
+      }
+    }
+    const newStatus = isSubmit && sub.status === 'Draf' ? 'Menunggu Verifikasi' : sub.status;
     const submittedAt = isSubmit ? new Date().toISOString() : sub.submitted_at;
     const subType = formData.submissionType || sub.submission_type;
     if (req.user.role === 'Anggota') {
@@ -826,11 +904,11 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
     if (sub.member_id && formData.publisherName) {
       await query.run(
         `UPDATE members SET
-          publisher_name = ?, category = COALESCE(?, category), leader_name = ?, leader_title = COALESCE(?, leader_title),
+          publisher_name = ?, category = COALESCE(?, category), leader_name = COALESCE(NULLIF(?, ''), leader_name), leader_title = COALESCE(?, leader_title),
           leader_phone = COALESCE(?, leader_phone), legal_entity = COALESCE(?, legal_entity), nib = COALESCE(?, nib),
-          npwp = COALESCE(?, npwp), address = ?, city = ?, postal_code = COALESCE(?, postal_code),
-          phone = ?, fax = COALESCE(?, fax), email = ?, website = COALESCE(?, website),
-          person_in_charge = ?, bnsp_certificate_no = COALESCE(?, bnsp_certificate_no),
+          npwp = COALESCE(?, npwp), address = COALESCE(NULLIF(?, ''), address), city = COALESCE(NULLIF(?, ''), city), postal_code = COALESCE(?, postal_code),
+          phone = COALESCE(NULLIF(?, ''), phone), fax = COALESCE(?, fax), email = COALESCE(NULLIF(?, ''), email), website = COALESCE(?, website),
+          person_in_charge = COALESCE(NULLIF(?, ''), person_in_charge), bnsp_certificate_no = COALESCE(?, bnsp_certificate_no),
           specialization = COALESCE(?, specialization), updated_at = datetime('now', 'localtime')
          WHERE id = ?`,
         [
@@ -845,8 +923,12 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
       );
     }
 
+    if (isSubmit && sub.status === 'Draf') {
+      await logEvent(subId, req.user, 'Pengajuan dikirim untuk screening dokumen');
+    }
+
     res.json({
-      message: isSubmit ? 'Formulir berhasil disubmit. Silakan lanjut ke pembayaran.' : 'Draf berhasil diperbarui.',
+      message: isSubmit ? 'Formulir berhasil dikirim. Dokumen Anda akan diperiksa Admin terlebih dahulu.' : 'Draf berhasil diperbarui.',
       submissionId: Number(subId),
       status: newStatus
     });
@@ -875,17 +957,35 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
     const fileSize = req.file.size;
     const mimeType = req.file.mimetype;
 
+    const owner = await query.get('SELECT user_id, status FROM submissions WHERE id = ?', [subId]);
+    if (!owner) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (req.user.role === 'Anggota' && owner.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Akses ditolak.' });
+    }
+
     // Check if slot exists
     const existing = await query.get(
-      'SELECT id, screening_status FROM documents WHERE submission_id = ? AND document_type = ?',
+      'SELECT id, screening_status, file_path, document_title FROM documents WHERE submission_id = ? AND document_type = ?',
       [subId, documentType]
     );
+
+    // Setelah dikirim, pemohon hanya boleh mengganti dokumen yang dinyatakan tidak sesuai
+    if (req.user.role === 'Anggota' && owner.status !== 'Draf') {
+      const isEmptySlot = existing && !existing.file_path;
+      const allowed =
+        (owner.status === 'Perlu Revisi' && existing && (existing.screening_status === 'Perlu Revisi' || isEmptySlot)) ||
+        (owner.status === 'Menunggu Verifikasi' && existing && isEmptySlot);
+      if (!allowed) {
+        return res.status(400).json({ error: 'Dokumen ini tidak perlu diunggah ulang. Hanya dokumen yang dinyatakan tidak sesuai yang dapat diganti.' });
+      }
+    }
 
     if (existing) {
       await query.run(
         `UPDATE documents SET
           file_path = ?, file_name = ?, file_size = ?, mime_type = ?,
-          screening_status = 'Menunggu', revision_notes = NULL, updated_at = datetime('now', 'localtime')
+          screening_status = 'Menunggu', revision_notes = NULL, opened_at = NULL, opened_by_name = NULL,
+          verified_at = NULL, verified_by = NULL, updated_at = datetime('now', 'localtime')
          WHERE id = ?`,
         [filePath, fileName, fileSize, mimeType, existing.id]
       );
@@ -898,26 +998,33 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
       );
     }
 
-    // Check if submission was in "Perlu Revisi" and if all previously rejected items are re-uploaded
-    const sub = await query.get('SELECT status FROM submissions WHERE id = ?', [subId]);
-    if (sub && sub.status === 'Perlu Revisi') {
+    const docTitle = existing?.document_title || documentTitle || documentType;
+    let resubmitted = false;
+    if (owner.status !== 'Draf') {
+      await logEvent(subId, req.user, owner.status === 'Perlu Revisi' ? `Revisi dokumen diunggah: ${docTitle}` : `Dokumen diunggah: ${docTitle}`);
+    }
+
+    // Semua dokumen yang tidak sesuai sudah diganti -> kembali ke screening Admin
+    if (owner.status === 'Perlu Revisi') {
       const stillNeedsRevision = await query.get(
-        `SELECT COUNT(*) as count FROM documents WHERE submission_id = ? AND screening_status = 'Perlu Revisi'`,
+        `SELECT COUNT(*) as count FROM documents WHERE submission_id = ? AND (screening_status = 'Perlu Revisi' OR file_path = '')`,
         [subId]
       );
       if (stillNeedsRevision.count === 0) {
-        // Automatically put back into 'Menunggu Verifikasi' so Sekretaris re-screens
         await query.run(
-          `UPDATE submissions SET status = 'Menunggu Verifikasi', admin_notes = 'Berkas revisi telah diunggah kembali oleh pemohon.',
+          `UPDATE submissions SET status = 'Menunggu Verifikasi', admin_notes = 'Dokumen revisi telah diunggah kembali oleh pemohon.',
              screened_at = NULL, screened_by_name = NULL, updated_at = datetime('now', 'localtime')
            WHERE id = ?`,
           [subId]
         );
+        await logEvent(subId, req.user, 'Semua revisi dokumen dikirim, menunggu screening ulang Admin');
+        resubmitted = true;
       }
     }
 
     res.json({
-      message: 'Berkas berhasil diunggah.',
+      resubmitted,
+      message: resubmitted ? 'Semua revisi terkirim. Dokumen akan diperiksa ulang oleh Admin.' : 'Berkas berhasil diunggah.',
       filePath,
       fileName
     });
@@ -927,24 +1034,84 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
   }
 });
 
+// Admin membuka dokumen saat screening: waktu pertama dibuka dicatat (log waktu)
+app.post('/api/documents/:docId/opened', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const doc = await query.get('SELECT id, submission_id, document_title, opened_at, file_path FROM documents WHERE id = ?', [req.params.docId]);
+    if (!doc || !doc.file_path) return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
+    if (!doc.opened_at) {
+      await query.run(
+        `UPDATE documents SET opened_at = datetime('now', 'localtime'), opened_by_name = ? WHERE id = ?`,
+        [req.user.name, doc.id]
+      );
+      await logEvent(doc.submission_id, req.user, `Dokumen dibuka: ${doc.document_title}`);
+    }
+    const row = await query.get('SELECT opened_at, opened_by_name FROM documents WHERE id = ?', [doc.id]);
+    res.json(row);
+  } catch (err) {
+    console.error('Open document error:', err);
+    res.status(500).json({ error: 'Gagal mencatat waktu dokumen dibuka.' });
+  }
+});
+
+app.post('/api/submissions/:id/payment/opened', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const pay = await query.get('SELECT id, proof_file, proof_opened_at FROM payments WHERE submission_id = ?', [req.params.id]);
+    if (!pay || !pay.proof_file) return res.status(404).json({ error: 'Bukti transfer tidak ditemukan.' });
+    if (!pay.proof_opened_at) {
+      await query.run(
+        `UPDATE payments SET proof_opened_at = datetime('now', 'localtime'), proof_opened_by_name = ? WHERE id = ?`,
+        [req.user.name, pay.id]
+      );
+      await logEvent(req.params.id, req.user, 'Bukti transfer dibuka');
+    }
+    res.json(await query.get('SELECT proof_opened_at, proof_opened_by_name FROM payments WHERE id = ?', [pay.id]));
+  } catch (err) {
+    console.error('Open payment error:', err);
+    res.status(500).json({ error: 'Gagal mencatat waktu bukti transfer dibuka.' });
+  }
+});
+
 // Sekretaris: Screen single document
-app.put('/api/documents/:docId/screen', authenticate, authorize('Admin', 'Sekretaris', 'Ketua'), async (req, res) => {
+app.put('/api/documents/:docId/screen', authenticate, authorize('Admin'), async (req, res) => {
   try {
     const docId = req.params.docId;
     const { status, revisionNotes } = req.body;
 
     if (!['Sesuai', 'Perlu Revisi'].includes(status)) {
-      return res.status(400).json({ error: 'Status screening harus "Sesuai" atau "Perlu Revisi".' });
+      return res.status(400).json({ error: 'Status screening harus "Sesuai" atau "Tidak sesuai".' });
+    }
+    const doc = await query.get(
+      `SELECT d.*, s.status AS sub_status FROM documents d JOIN submissions s ON s.id = d.submission_id WHERE d.id = ?`,
+      [docId]
+    );
+    if (!doc) return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
+    if (doc.sub_status !== 'Menunggu Verifikasi') {
+      return res.status(400).json({ error: 'Dokumen hanya bisa diperiksa saat pengajuan berada di tahap screening dokumen.' });
+    }
+    if (!doc.file_path) {
+      return res.status(400).json({ error: 'Dokumen belum diunggah pemohon.' });
+    }
+    if (!doc.opened_at) {
+      return res.status(400).json({ error: 'Buka dokumen terlebih dahulu sebelum menilai.' });
+    }
+    if (status === 'Perlu Revisi' && !String(revisionNotes || '').trim()) {
+      return res.status(400).json({ error: 'Tulis komentar alasan dokumen tidak sesuai agar pemohon tahu apa yang harus diperbaiki.' });
     }
 
     await query.run(
       `UPDATE documents SET
         screening_status = ?, revision_notes = ?, verified_by = ?, verified_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime')
        WHERE id = ?`,
-      [status, revisionNotes || null, req.user.id, docId]
+      [status, status === 'Sesuai' ? null : revisionNotes, req.user.id, docId]
+    );
+    await logEvent(
+      doc.submission_id, req.user,
+      status === 'Sesuai' ? `Dokumen sesuai: ${doc.document_title}` : `Dokumen tidak sesuai: ${doc.document_title}`,
+      status === 'Sesuai' ? null : revisionNotes
     );
 
-    res.json({ message: `Status berkas berhasil diubah menjadi "${status}".` });
+    res.json({ message: status === 'Sesuai' ? 'Dokumen ditandai sesuai.' : 'Dokumen ditandai tidak sesuai.' });
   } catch (err) {
     console.error('Screen document error:', err);
     res.status(500).json({ error: 'Gagal memperbarui status berkas.' });
@@ -965,6 +1132,15 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
       return res.status(400).json({ error: 'Bukti transfer wajib diunggah.' });
     }
 
+    const sub = await query.get('SELECT user_id, status FROM submissions WHERE id = ?', [subId]);
+    if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (req.user.role === 'Anggota' && sub.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Akses ditolak.' });
+    }
+    if (sub.status !== 'Menunggu Pembayaran') {
+      return res.status(400).json({ error: 'Pembayaran baru dapat dilakukan setelah semua dokumen disetujui Admin (Tahap 1).' });
+    }
+
     const filePath = `/uploads/${req.file.filename}`;
     const fileName = req.file.originalname;
 
@@ -972,21 +1148,17 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
       `UPDATE payments SET
         proof_file = ?, proof_filename = ?, sender_bank = ?, sender_account_name = ?,
         sender_account_number = ?, transfer_date = ?, verification_status = 'Menunggu',
-        verification_notes = NULL, updated_at = datetime('now', 'localtime')
+        verification_notes = NULL, proof_opened_at = NULL, proof_opened_by_name = NULL, updated_at = datetime('now', 'localtime')
        WHERE submission_id = ?`,
       [filePath, fileName, senderBank, senderAccountName, senderAccountNumber, transferDate || new Date().toISOString().split('T')[0], subId]
     );
 
-    // Update submission status to "Menunggu Verifikasi"
-    await query.run(
-      `UPDATE submissions SET status = 'Menunggu Verifikasi', updated_at = datetime('now', 'localtime')
-       WHERE id = ?`,
-      [subId]
-    );
+    await query.run(`UPDATE submissions SET updated_at = datetime('now', 'localtime') WHERE id = ?`, [subId]);
+    await logEvent(subId, req.user, 'Bukti transfer diunggah', [senderBank, senderAccountName].filter(Boolean).join(' · ') || null);
 
     res.json({
-      message: 'Bukti pembayaran berhasil diunggah. Menunggu verifikasi Sekretaris.',
-      status: 'Menunggu Verifikasi'
+      message: 'Bukti pembayaran berhasil diunggah. Menunggu verifikasi Admin.',
+      status: 'Menunggu Pembayaran'
     });
   } catch (err) {
     console.error('Upload payment error:', err);
@@ -995,13 +1167,25 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
 });
 
 // Sekretaris verify payment
-app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin', 'Sekretaris', 'Ketua'), async (req, res) => {
+app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin'), async (req, res) => {
   try {
     const subId = req.params.id;
     const { status, notes } = req.body; // 'Valid' or 'Perlu Revisi'
 
     if (!['Valid', 'Perlu Revisi'].includes(status)) {
-      return res.status(400).json({ error: 'Status pembayaran harus "Valid" atau "Perlu Revisi".' });
+      return res.status(400).json({ error: 'Status pembayaran harus "Valid" atau "Tidak sesuai".' });
+    }
+    const sub = await query.get('SELECT status FROM submissions WHERE id = ?', [subId]);
+    const pay = await query.get('SELECT proof_file, proof_opened_at FROM payments WHERE submission_id = ?', [subId]);
+    if (!sub || !pay) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (sub.status !== 'Menunggu Pembayaran' || !pay.proof_file) {
+      return res.status(400).json({ error: 'Belum ada bukti transfer yang menunggu verifikasi.' });
+    }
+    if (!pay.proof_opened_at) {
+      return res.status(400).json({ error: 'Buka bukti transfer terlebih dahulu sebelum memverifikasi.' });
+    }
+    if (status === 'Perlu Revisi' && !String(notes || '').trim()) {
+      return res.status(400).json({ error: 'Tulis komentar alasan bukti transfer tidak sesuai.' });
     }
 
     await query.run(
@@ -1012,16 +1196,26 @@ app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin', 
       [status, notes || null, req.user.id, subId]
     );
 
-    if (status === 'Perlu Revisi') {
+    if (status === 'Valid') {
+      // Tahap 1 & 2 selesai -> diteruskan ke Sekretaris untuk TTD
       await query.run(
-        `UPDATE submissions SET status = 'Perlu Revisi', admin_notes = ?, screened_at = NULL, screened_by_name = NULL,
-           updated_at = datetime('now', 'localtime')
-         WHERE id = ?`,
-        [`Verifikasi Pembayaran Bermasalah: ${notes || 'Bukti transfer tidak valid/sesuai nominal.'}`, subId]
+        `UPDATE submissions SET status = 'Menunggu TTD Sekretaris', updated_at = datetime('now', 'localtime') WHERE id = ?`,
+        [subId]
       );
+      await logEvent(subId, req.user, 'Pembayaran diverifikasi valid, diteruskan ke Sekretaris untuk TTD');
+    } else {
+      // Pemohon cukup mengunggah ulang bukti transfer, dokumen tidak perlu dikirim ulang
+      await query.run(
+        `UPDATE submissions SET admin_notes = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`,
+        [`Bukti transfer tidak sesuai: ${notes}`, subId]
+      );
+      await logEvent(subId, req.user, 'Bukti transfer tidak sesuai', notes);
     }
 
-    res.json({ message: `Status pembayaran berhasil diubah menjadi "${status}".` });
+    res.json({
+      message: status === 'Valid' ? 'Pembayaran valid. Pengajuan diteruskan ke Sekretaris.' : 'Bukti transfer dikembalikan ke pemohon untuk diunggah ulang.',
+      status: status === 'Valid' ? 'Menunggu TTD Sekretaris' : 'Menunggu Pembayaran'
+    });
   } catch (err) {
     console.error('Verify payment error:', err);
     res.status(500).json({ error: 'Gagal memperbarui verifikasi pembayaran.' });
@@ -1032,59 +1226,81 @@ app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin', 
 // 5. WORKFLOW ACTIONS (ADMIN 1 & ADMIN 2)
 // ==========================================
 
-// Sekretaris Action: Request Revision or Pass to Ketua
-// Screening dilakukan Admin (Sekretaris opsional): 'mark_screened' menandai berkas & pembayaran lolos,
-// lalu Sekretaris cukup membubuhkan TTD ('pass_to_admin2') sebelum diteruskan ke Ketua.
-app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin', 'Sekretaris', 'Ketua'), async (req, res) => {
+// Tahap 1 (Admin): screening dokumen satu per satu.
+//   'approve_documents' -> semua dokumen sesuai, lanjut ke Tahap 2 (pembayaran)
+//   'request_revision'  -> dokumen tidak sesuai dikembalikan ke pemohon (hanya dokumen itu yang diunggah ulang)
+// Sekretaris: 'pass_to_admin2' membubuhkan TTD setelah dokumen & pembayaran disetujui Admin.
+app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin', 'Sekretaris'), async (req, res) => {
   try {
     const subId = req.params.id;
-    const { action, notes, signaturePositions } = req.body; // 'request_revision' | 'mark_screened' | 'pass_to_admin2' | 'update_kta'
+    const { notes, signaturePositions } = req.body;
+    const action = req.body.action === 'mark_screened' ? 'approve_documents' : req.body.action;
 
     const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
     if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
 
-    if (req.user.role === 'Admin' && !['request_revision', 'mark_screened'].includes(action)) {
-      return res.status(403).json({ error: 'Admin hanya dapat melakukan screening berkas & pembayaran.' });
+    const adminOnly = ['request_revision', 'approve_documents'];
+    if (adminOnly.includes(action) && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Screening dokumen dilakukan oleh Admin.' });
+    }
+    if (action === 'pass_to_admin2' && req.user.role !== 'Sekretaris') {
+      return res.status(403).json({ error: 'Tanda tangan tahap ini dilakukan oleh Sekretaris.' });
     }
 
-    if (action === 'mark_screened') {
+    const docStats = await query.get(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN screening_status = 'Sesuai' AND file_path != '' THEN 1 ELSE 0 END) AS ok,
+              SUM(CASE WHEN screening_status = 'Perlu Revisi' THEN 1 ELSE 0 END) AS bad
+       FROM documents WHERE submission_id = ?`,
+      [subId]
+    );
+
+    if (action === 'approve_documents') {
       if (sub.status !== 'Menunggu Verifikasi') {
-        return res.status(400).json({ error: 'Pengajuan ini tidak sedang menunggu verifikasi.' });
+        return res.status(400).json({ error: 'Pengajuan ini tidak sedang di tahap screening dokumen.' });
       }
-      const pending = await query.get(
-        `SELECT COUNT(*) as count FROM documents WHERE submission_id = ? AND screening_status != 'Sesuai'`,
-        [subId]
-      );
+      if (!docStats.total || docStats.ok !== docStats.total) {
+        return res.status(400).json({ error: 'Semua dokumen harus dibuka dan dinyatakan "Sesuai" sebelum lanjut ke pembayaran.' });
+      }
       const payment = await query.get('SELECT verification_status FROM payments WHERE submission_id = ?', [subId]);
-      if (pending.count > 0 || !payment || payment.verification_status !== 'Valid') {
-        return res.status(400).json({ error: 'Semua berkas harus "Sesuai" dan pembayaran "Valid" sebelum dinyatakan lolos screening.' });
-      }
+      const nextStatus = payment?.verification_status === 'Valid' ? 'Menunggu TTD Sekretaris' : 'Menunggu Pembayaran';
       await query.run(
-        `UPDATE submissions SET screened_at = datetime('now', 'localtime'), screened_by_name = ?,
+        `UPDATE submissions SET status = ?, screened_at = datetime('now', 'localtime'), screened_by_name = ?,
            admin_notes = ?, updated_at = datetime('now', 'localtime')
          WHERE id = ?`,
-        [req.user.name, notes || 'Berkas dan pembayaran lolos screening.', subId]
+        [nextStatus, req.user.name, notes || 'Semua dokumen persyaratan sesuai.', subId]
       );
-      return res.json({ message: 'Pengajuan lolos screening dan menunggu tanda tangan Sekretaris.' });
+      await logEvent(subId, req.user, 'Tahap 1 selesai: semua dokumen disetujui Admin', notes || null);
+      return res.json({
+        message: nextStatus === 'Menunggu Pembayaran'
+          ? 'Semua dokumen disetujui. Pemohon kini dapat melakukan pembayaran (Tahap 2).'
+          : 'Semua dokumen disetujui. Pembayaran sudah valid, diteruskan ke Sekretaris.',
+        status: nextStatus
+      });
     }
 
     if (action === 'request_revision') {
+      if (sub.status !== 'Menunggu Verifikasi') {
+        return res.status(400).json({ error: 'Pengajuan ini tidak sedang di tahap screening dokumen.' });
+      }
+      if (!docStats.bad) {
+        return res.status(400).json({ error: 'Tandai minimal satu dokumen "Tidak sesuai" beserta komentarnya.' });
+      }
       await query.run(
         `UPDATE submissions SET status = 'Perlu Revisi', admin_notes = ?, screened_at = NULL, screened_by_name = NULL,
            updated_at = datetime('now', 'localtime')
          WHERE id = ?`,
-        [notes || 'Terdapat berkas yang perlu diperbaiki sesuai catatan verifikasi.', subId]
+        [notes || 'Terdapat dokumen yang tidak sesuai. Unggah ulang dokumen yang ditandai.', subId]
       );
-      return res.json({ message: 'Pengajuan berhasil dikembalikan ke pemohon untuk revisi.', status: 'Perlu Revisi' });
+      await logEvent(subId, req.user, `Dikembalikan ke pemohon: ${docStats.bad} dokumen perlu direvisi`, notes || null);
+      return res.json({ message: 'Pemohon diminta merevisi dokumen yang tidak sesuai.', status: 'Perlu Revisi' });
     }
 
     if (action === 'pass_to_admin2') {
-      // Check if all docs are 'Sesuai'
-      const unverifiedDocs = await query.get(
-        `SELECT COUNT(*) as count FROM documents WHERE submission_id = ? AND screening_status != 'Sesuai'`,
-        [subId]
-      );
-      if (unverifiedDocs.count > 0) {
+      if (sub.status !== 'Menunggu TTD Sekretaris') {
+        return res.status(400).json({ error: 'Pengajuan belum siap ditandatangani: dokumen dan pembayaran harus disetujui Admin terlebih dahulu.' });
+      }
+      if (docStats.ok !== docStats.total) {
         return res.status(400).json({ error: 'Semua berkas persyaratan wajib bertatus "Sesuai" sebelum diteruskan ke Ketua.' });
       }
 
@@ -1150,6 +1366,7 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin', 
         ]
       );
 
+      await logEvent(subId, req.user, 'Ditandatangani Sekretaris, diteruskan ke Ketua', notes || null);
       return res.json({
         message: 'Pengajuan berhasil diteruskan ke Ketua untuk proses persetujuan dan tanda tangan surat.',
         status: 'Menunggu Approval',
@@ -1202,9 +1419,9 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
 
       await query.run(
         `UPDATE submissions SET
-          status = 'Aktif',
+          status = 'Pengiriman Berkas',
+          physical_status = 'Belum Dikirim',
           approved_at = datetime('now', 'localtime'),
-          activated_at = datetime('now', 'localtime'),
           signed_by_chairman = ?,
           signed_by_secretary = COALESCE(signed_by_secretary, ?),
           chairman_signature_date = datetime('now', 'localtime'),
@@ -1222,24 +1439,24 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
         ]
       );
 
-      // Setelah TTD Ketua, pemohon langsung resmi menjadi anggota aktif
-      await query.run(
-        `UPDATE members SET membership_status = 'Aktif', updated_at = datetime('now', 'localtime') WHERE id = ?`,
-        [sub.member_id]
-      );
+      // Setelah TTD Ketua pemohon mencetak & mengirim berkas fisik ke sekretariat IKAPI Jawa Barat.
+      // Status anggota aktif diberikan Admin setelah berkas fisik diterima.
+      await logEvent(subId, req.user, 'Disetujui & ditandatangani Ketua. Surat pengantar terbit, pemohon diminta mengirim berkas fisik');
 
       return res.json({
-        message: 'Pengajuan disetujui. Pemohon kini resmi menjadi anggota aktif IKAPI Jawa Barat.',
-        status: 'Aktif'
+        message: 'Pengajuan disetujui. Pemohon diminta mengirim berkas fisik ke sekretariat IKAPI Jawa Barat.',
+        status: 'Pengiriman Berkas'
       });
     }
 
     if (action === 'reject') {
-      if (req.user.role !== 'Ketua') {
-        return res.status(403).json({ error: 'Hanya Ketua yang dapat menolak pengajuan.' });
-      }
-      if (!reason) {
+      // Keputusan akhir: Sekretaris di tahapnya (setelah Admin), Ketua di tahap approval
+      const stageOf = { Sekretaris: 'Menunggu TTD Sekretaris', Ketua: 'Menunggu Approval' };
+      if (!reason || !String(reason).trim()) {
         return res.status(400).json({ error: 'Alasan penolakan wajib disertakan.' });
+      }
+      if (sub.status !== stageOf[req.user.role]) {
+        return res.status(400).json({ error: 'Pengajuan ini tidak sedang menunggu keputusan Anda.' });
       }
 
       await query.run(
@@ -1251,6 +1468,7 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
         [reason, subId]
       );
 
+      await logEvent(subId, req.user, `Pengajuan ditolak ${req.user.role}`, reason);
       return res.json({
         message: 'Pengajuan telah ditolak.',
         status: 'Ditolak'
@@ -1264,6 +1482,63 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
   }
 });
 
+// Pemohon: konfirmasi berkas fisik sudah dikirim ke sekretariat IKAPI Jawa Barat
+app.post('/api/submissions/:id/physical-sent', authenticate, authorize('Anggota'), async (req, res) => {
+  try {
+    const subId = req.params.id;
+    const { courier, trackingNo, notes } = req.body;
+    const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
+    if (!sub || sub.user_id !== req.user.id) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (sub.status !== 'Pengiriman Berkas') {
+      return res.status(400).json({ error: 'Berkas fisik dikirim setelah pengajuan disetujui Ketua.' });
+    }
+    if (!String(courier || '').trim()) {
+      return res.status(400).json({ error: 'Isi cara pengiriman (mis. JNE, POS, atau diantar langsung).' });
+    }
+    await query.run(
+      `UPDATE submissions SET physical_status = 'Dikirim', physical_sent_at = datetime('now', 'localtime'),
+         physical_courier = ?, physical_tracking_no = ?, physical_notes = ?, updated_at = datetime('now', 'localtime')
+       WHERE id = ?`,
+      [courier.trim(), trackingNo || null, notes || null, subId]
+    );
+    await logEvent(subId, req.user, 'Berkas fisik dikirim ke sekretariat IKAPI Jawa Barat',
+      [courier.trim(), trackingNo ? `No. resi ${trackingNo}` : null, notes].filter(Boolean).join(' · '));
+    res.json({ message: 'Terima kasih. Admin akan mengonfirmasi setelah berkas fisik diterima.' });
+  } catch (err) {
+    console.error('Physical sent error:', err);
+    res.status(500).json({ error: 'Gagal menyimpan konfirmasi pengiriman.' });
+  }
+});
+
+// Admin: berkas fisik sudah sampai di sekretariat -> pemohon resmi menjadi anggota
+app.post('/api/submissions/:id/physical-received', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const subId = req.params.id;
+    const { notes } = req.body;
+    const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
+    if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (sub.status !== 'Pengiriman Berkas') {
+      return res.status(400).json({ error: 'Pengajuan ini tidak sedang menunggu berkas fisik.' });
+    }
+    await query.run(
+      `UPDATE submissions SET status = 'Aktif', physical_status = 'Diterima',
+         physical_received_at = datetime('now', 'localtime'), physical_received_by = ?,
+         activated_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime')
+       WHERE id = ?`,
+      [req.user.name, subId]
+    );
+    await query.run(
+      `UPDATE members SET membership_status = 'Aktif', updated_at = datetime('now', 'localtime') WHERE id = ?`,
+      [sub.member_id]
+    );
+    await logEvent(subId, req.user, 'Disetujui Admin. Pemohon resmi menjadi anggota penerbit IKAPI Jawa Barat', notes || null);
+    res.json({ message: 'Pengajuan di-approve. Pemohon kini resmi menjadi anggota penerbit IKAPI Jawa Barat.', status: 'Aktif' });
+  } catch (err) {
+    console.error('Physical received error:', err);
+    res.status(500).json({ error: 'Gagal mengonfirmasi berkas fisik.' });
+  }
+});
+
 // ==========================================
 // 6. DASHBOARD & STATS (ADMIN 2 MONITORING)
 // ==========================================
@@ -1272,6 +1547,9 @@ app.get('/api/admin/dashboard-stats', authenticate, authorize('Admin', 'Sekretar
   try {
     const totalSubmissions = await query.get('SELECT COUNT(*) as count FROM submissions');
     const pendingScreening = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu Verifikasi'`);
+    const pendingPayment = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu Pembayaran'`);
+    const pendingSecretary = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu TTD Sekretaris'`);
+    const pendingPhysical = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Pengiriman Berkas'`);
     const pendingApproval = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu Approval'`);
     const activeMembers = await query.get(`SELECT COUNT(*) as count FROM members WHERE membership_status = 'Aktif'`);
     const rejectedSubmissions = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Ditolak'`);
@@ -1310,6 +1588,9 @@ app.get('/api/admin/dashboard-stats', authenticate, authorize('Admin', 'Sekretar
         totalSubmissions: totalSubmissions.count,
         pendingScreening: pendingScreening.count,
         pendingApproval: pendingApproval.count,
+        pendingPayment: pendingPayment.count,
+        pendingSecretary: pendingSecretary.count,
+        pendingPhysical: pendingPhysical.count,
         activeMembers: activeMembers.count,
         rejectedSubmissions: rejectedSubmissions.count,
         needRevision: needRevision.count,
@@ -1482,6 +1763,7 @@ if (fs.existsSync(distDir)) {
 async function startServer() {
   await initDb();
   await runSeed();
+  await migrateFlowV2();
   await syncUnpaidBills();
   await activateApprovedSubmissions();
   app.listen(PORT, () => {

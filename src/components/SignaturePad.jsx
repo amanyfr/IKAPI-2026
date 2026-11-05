@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Eraser, Upload, Save, PenLine } from 'lucide-react';
+import { notify } from './AppDialog';
 
 // Potong kanvas ke batas coretan agar TTD tidak membawa ruang kosong saat dibubuhkan
 function trimCanvas(canvas) {
@@ -95,11 +96,11 @@ export default function SignaturePad({ onSave, saving = false, initialImage = nu
     e.target.value = '';
     if (!file) return;
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
-      alert('Gunakan gambar PNG atau JPG.');
+      notify('Gunakan gambar PNG atau JPG.');
       return;
     }
     if (file.size > 1024 * 1024) {
-      alert('Ukuran gambar maksimal 1 MB.');
+      notify('Ukuran gambar maksimal 1 MB.');
       return;
     }
     const reader = new FileReader();
