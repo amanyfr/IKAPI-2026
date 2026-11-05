@@ -263,6 +263,12 @@ app.put('/api/auth/onboarding', authenticate, authorize('Anggota'), async (req, 
     }
     const kta = memberType === 'Lama' && oldKtaNumber ? String(oldKtaNumber).trim() : null;
 
+    // Jawaban profil masih bisa diubah selama belum ada pengajuan (jenis pengajuan mengikuti profil)
+    const existing = await query.get('SELECT id FROM submissions WHERE user_id = ? LIMIT 1', [req.user.id]);
+    if (existing) {
+      return res.status(400).json({ error: 'Profil keanggotaan tidak dapat diubah karena pengajuan sudah dibuat.' });
+    }
+
     await query.run(
       `UPDATE users SET member_type = ?, member_category = ?, old_kta_number = ?,
          onboarded_at = datetime('now', 'localtime')
@@ -314,6 +320,70 @@ app.put('/api/auth/signature', authenticate, authorize('Ketua', 'Sekretaris'), a
     res.status(500).json({ error: 'Gagal menyimpan tanda tangan.' });
   }
 });
+
+// ==========================================
+// BIAYA KEANGGOTAAN (diatur Admin di Pengaturan)
+// ==========================================
+const FEE_KEYS = ['fee_uang_pangkal', 'fee_iuran_bulanan', 'fee_iuran_durasi_bulan', 'fee_administrasi', 'fee_heregistrasi_iuran'];
+
+// Rincian tagihan dari pengaturan biaya terbaru
+async function computeFees(submissionType) {
+  const rows = await query.all(`SELECT key, value FROM settings WHERE key LIKE 'fee_%'`);
+  const map = Object.fromEntries(rows.map((r) => [r.key, Number(r.value)]));
+  const fee = (key, fallback) => (Number.isFinite(map[key]) && map[key] >= 0 ? map[key] : fallback);
+  const durasiBulan = fee('fee_iuran_durasi_bulan', 24);
+
+  if (submissionType === 'Baru') {
+    const uangPangkal = fee('fee_uang_pangkal', 250000);
+    const iuran = fee('fee_iuran_bulanan', 50000) * durasiBulan;
+    const administrasi = fee('fee_administrasi', 250000);
+    return {
+      uangPangkal, iuran24Bulan: iuran, administrasi, durasiBulan,
+      total: uangPangkal + iuran + administrasi,
+      keterangan: `Pendaftaran Anggota Baru IKAPI (Uang Pangkal + Iuran ${durasiBulan} Bulan + Administrasi)`
+    };
+  }
+  const iuran = fee('fee_heregistrasi_iuran', 1200000);
+  return {
+    uangPangkal: 0, iuran24Bulan: iuran, administrasi: 0, durasiBulan,
+    total: iuran,
+    keterangan: `Registrasi (Perpanjangan) Anggota IKAPI (Iuran ${durasiBulan} Bulan)`
+  };
+}
+
+// Tagihan yang belum dibayar (bukti transfer belum diunggah) ikut harga terbaru;
+// tagihan yang sudah dibayar tetap memakai harga saat dibayar.
+// Alur tanpa tahap "Dikirim ke Pusat": pengajuan yang sudah di-TTD Ketua langsung Aktif
+async function activateApprovedSubmissions() {
+  const rows = await query.all(`SELECT id, member_id FROM submissions WHERE status IN ('Disetujui', 'Dikirim ke Pusat')`);
+  for (const row of rows) {
+    await query.run(
+      `UPDATE submissions SET status = 'Aktif', activated_at = COALESCE(activated_at, approved_at, datetime('now', 'localtime')),
+       updated_at = datetime('now', 'localtime') WHERE id = ?`,
+      [row.id]
+    );
+    await query.run(`UPDATE members SET membership_status = 'Aktif', updated_at = datetime('now', 'localtime') WHERE id = ?`, [row.member_id]);
+  }
+  return rows.length;
+}
+
+async function syncUnpaidBills() {
+  const unpaid = await query.all(
+    `SELECT p.id, s.submission_type FROM payments p
+     JOIN submissions s ON s.id = p.submission_id
+     WHERE (p.proof_file IS NULL OR p.proof_file = '') AND p.verification_status != 'Valid'`
+  );
+  const feesByType = {};
+  for (const bill of unpaid) {
+    feesByType[bill.submission_type] ||= await computeFees(bill.submission_type);
+    const fees = feesByType[bill.submission_type];
+    await query.run(
+      `UPDATE payments SET amount = ?, fee_breakdown = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`,
+      [fees.total, JSON.stringify(fees), bill.id]
+    );
+  }
+  return unpaid.length;
+}
 
 // Dokumen yang ditandatangani Ketua & Sekretaris sekaligus (lihat SIGNABLE_DOCS di frontend)
 const SIGNABLE_DOC_KEYS = ['surat', 'formulir', 'berita_acara', 'sk'];
@@ -701,31 +771,12 @@ app.post('/api/submissions', authenticate, async (req, res) => {
       );
     }
 
-    // Create payment entry
-    const isNew = submissionType === 'Baru';
-    const amount = isNew ? 1700000 : 1200000;
-    const feeBreakdown = JSON.stringify(
-      isNew
-        ? {
-            uangPangkal: 250000,
-            iuran24Bulan: 1200000,
-            administrasi: 250000,
-            total: 1700000,
-            keterangan: 'Pendaftaran Anggota Baru IKAPI (Uang Pangkal + Iuran 24 Bulan + Verifikasi)'
-          }
-        : {
-            uangPangkal: 0,
-            iuran24Bulan: 1200000,
-            administrasi: 0,
-            total: 1200000,
-            keterangan: 'Heregistrasi Anggota Lama IKAPI (Perpanjangan Iuran 24 Bulan)'
-          }
-    );
-
+    // Create payment entry (biaya mengikuti pengaturan Admin saat ini)
+    const fees = await computeFees(submissionType);
     await query.run(
       `INSERT INTO payments (submission_id, amount, fee_breakdown, verification_status)
        VALUES (?, ?, ?, 'Menunggu')`,
-      [submissionId, amount, feeBreakdown]
+      [submissionId, fees.total, JSON.stringify(fees)]
     );
 
     res.json({
@@ -857,7 +908,8 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
       if (stillNeedsRevision.count === 0) {
         // Automatically put back into 'Menunggu Verifikasi' so Sekretaris re-screens
         await query.run(
-          `UPDATE submissions SET status = 'Menunggu Verifikasi', admin_notes = 'Berkas revisi telah diunggah kembali oleh pemohon.', updated_at = datetime('now', 'localtime')
+          `UPDATE submissions SET status = 'Menunggu Verifikasi', admin_notes = 'Berkas revisi telah diunggah kembali oleh pemohon.',
+             screened_at = NULL, screened_by_name = NULL, updated_at = datetime('now', 'localtime')
            WHERE id = ?`,
           [subId]
         );
@@ -876,7 +928,7 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
 });
 
 // Sekretaris: Screen single document
-app.put('/api/documents/:docId/screen', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
+app.put('/api/documents/:docId/screen', authenticate, authorize('Admin', 'Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const docId = req.params.docId;
     const { status, revisionNotes } = req.body;
@@ -943,7 +995,7 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
 });
 
 // Sekretaris verify payment
-app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
+app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin', 'Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const subId = req.params.id;
     const { status, notes } = req.body; // 'Valid' or 'Perlu Revisi'
@@ -962,7 +1014,8 @@ app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Sekretar
 
     if (status === 'Perlu Revisi') {
       await query.run(
-        `UPDATE submissions SET status = 'Perlu Revisi', admin_notes = ?, updated_at = datetime('now', 'localtime')
+        `UPDATE submissions SET status = 'Perlu Revisi', admin_notes = ?, screened_at = NULL, screened_by_name = NULL,
+           updated_at = datetime('now', 'localtime')
          WHERE id = ?`,
         [`Verifikasi Pembayaran Bermasalah: ${notes || 'Bukti transfer tidak valid/sesuai nominal.'}`, subId]
       );
@@ -980,17 +1033,45 @@ app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Sekretar
 // ==========================================
 
 // Sekretaris Action: Request Revision or Pass to Ketua
-app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
+// Screening dilakukan Admin (Sekretaris opsional): 'mark_screened' menandai berkas & pembayaran lolos,
+// lalu Sekretaris cukup membubuhkan TTD ('pass_to_admin2') sebelum diteruskan ke Ketua.
+app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin', 'Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const subId = req.params.id;
-    const { action, notes, signaturePositions } = req.body; // 'request_revision' | 'pass_to_admin2' | 'update_kta'
+    const { action, notes, signaturePositions } = req.body; // 'request_revision' | 'mark_screened' | 'pass_to_admin2' | 'update_kta'
 
     const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
     if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
 
+    if (req.user.role === 'Admin' && !['request_revision', 'mark_screened'].includes(action)) {
+      return res.status(403).json({ error: 'Admin hanya dapat melakukan screening berkas & pembayaran.' });
+    }
+
+    if (action === 'mark_screened') {
+      if (sub.status !== 'Menunggu Verifikasi') {
+        return res.status(400).json({ error: 'Pengajuan ini tidak sedang menunggu verifikasi.' });
+      }
+      const pending = await query.get(
+        `SELECT COUNT(*) as count FROM documents WHERE submission_id = ? AND screening_status != 'Sesuai'`,
+        [subId]
+      );
+      const payment = await query.get('SELECT verification_status FROM payments WHERE submission_id = ?', [subId]);
+      if (pending.count > 0 || !payment || payment.verification_status !== 'Valid') {
+        return res.status(400).json({ error: 'Semua berkas harus "Sesuai" dan pembayaran "Valid" sebelum dinyatakan lolos screening.' });
+      }
+      await query.run(
+        `UPDATE submissions SET screened_at = datetime('now', 'localtime'), screened_by_name = ?,
+           admin_notes = ?, updated_at = datetime('now', 'localtime')
+         WHERE id = ?`,
+        [req.user.name, notes || 'Berkas dan pembayaran lolos screening.', subId]
+      );
+      return res.json({ message: 'Pengajuan lolos screening dan menunggu tanda tangan Sekretaris.' });
+    }
+
     if (action === 'request_revision') {
       await query.run(
-        `UPDATE submissions SET status = 'Perlu Revisi', admin_notes = ?, updated_at = datetime('now', 'localtime')
+        `UPDATE submissions SET status = 'Perlu Revisi', admin_notes = ?, screened_at = NULL, screened_by_name = NULL,
+           updated_at = datetime('now', 'localtime')
          WHERE id = ?`,
         [notes || 'Terdapat berkas yang perlu diperbaiki sesuai catatan verifikasi.', subId]
       );
@@ -1050,6 +1131,8 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Sekretar
           secretary_signature_img = COALESCE(?, secretary_signature_img),
           secretary_signature_pos = COALESCE(?, secretary_signature_pos),
           signature_positions = ?,
+          screened_at = COALESCE(screened_at, datetime('now', 'localtime')),
+          screened_by_name = COALESCE(screened_by_name, ?),
           signed_by_secretary = CASE WHEN ? IS NOT NULL THEN ? ELSE signed_by_secretary END,
           secretary_signature_date = CASE WHEN ? IS NOT NULL THEN datetime('now', 'localtime') ELSE secretary_signature_date END,
           updated_at = datetime('now', 'localtime')
@@ -1060,6 +1143,7 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Sekretar
           secretarySig,
           secretaryPos,
           positionsJson,
+          req.user.name,
           secretarySig, secretaryNameRow?.value || 'Drs. H. Anwar Rosyid, M.Si.',
           secretarySig,
           subId
@@ -1073,30 +1157,6 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Sekretar
       });
     }
 
-    if (action === 'update_kta') {
-      const { ktaNumber } = req.body;
-      if (!ktaNumber) {
-        return res.status(400).json({ error: 'Nomor KTA dari Pusat wajib diisi.' });
-      }
-
-      await query.run(
-        `UPDATE submissions SET status = 'Aktif', activated_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime')
-         WHERE id = ?`,
-        [subId]
-      );
-
-      await query.run(
-        `UPDATE members SET kta_number = ?, membership_status = 'Aktif', updated_at = datetime('now', 'localtime')
-         WHERE id = ?`,
-        [ktaNumber, sub.member_id]
-      );
-
-      return res.json({
-        message: `Keanggotaan resmi diaktifkan dengan No. KTA: ${ktaNumber}.`,
-        status: 'Aktif'
-      });
-    }
-
     res.status(400).json({ error: 'Tindakan tidak dikenal.' });
   } catch (err) {
     console.error('Sekretaris action error:', err);
@@ -1104,7 +1164,7 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Sekretar
   }
 });
 
-// Ketua Action: Approve, Reject, or Send to Central
+// Ketua Action: Approve (langsung Aktif) or Reject
 app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 'Sekretaris'), async (req, res) => {
   try {
     const subId = req.params.id;
@@ -1142,8 +1202,9 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
 
       await query.run(
         `UPDATE submissions SET
-          status = 'Disetujui',
+          status = 'Aktif',
           approved_at = datetime('now', 'localtime'),
+          activated_at = datetime('now', 'localtime'),
           signed_by_chairman = ?,
           signed_by_secretary = COALESCE(signed_by_secretary, ?),
           chairman_signature_date = datetime('now', 'localtime'),
@@ -1161,9 +1222,15 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
         ]
       );
 
+      // Setelah TTD Ketua, pemohon langsung resmi menjadi anggota aktif
+      await query.run(
+        `UPDATE members SET membership_status = 'Aktif', updated_at = datetime('now', 'localtime') WHERE id = ?`,
+        [sub.member_id]
+      );
+
       return res.json({
-        message: 'Pengajuan berhasil disetujui. Surat rekomendasi resmi dan paket berkas siap dicetak.',
-        status: 'Disetujui'
+        message: 'Pengajuan disetujui. Pemohon kini resmi menjadi anggota aktif IKAPI Jawa Barat.',
+        status: 'Aktif'
       });
     }
 
@@ -1190,22 +1257,6 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
       });
     }
 
-    if (action === 'send_to_central') {
-      await query.run(
-        `UPDATE submissions SET
-          status = 'Dikirim ke Pusat',
-          sent_to_central_at = datetime('now', 'localtime'),
-          updated_at = datetime('now', 'localtime')
-         WHERE id = ?`,
-        [subId]
-      );
-
-      return res.json({
-        message: 'Paket dokumen telah ditandai dikirim ke IKAPI Pusat. Menunggu penerbitan No. KTA.',
-        status: 'Dikirim ke Pusat'
-      });
-    }
-
     res.status(400).json({ error: 'Tindakan tidak dikenal.' });
   } catch (err) {
     console.error('Ketua action error:', err);
@@ -1217,12 +1268,11 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
 // 6. DASHBOARD & STATS (ADMIN 2 MONITORING)
 // ==========================================
 
-app.get('/api/admin/dashboard-stats', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
+app.get('/api/admin/dashboard-stats', authenticate, authorize('Admin', 'Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const totalSubmissions = await query.get('SELECT COUNT(*) as count FROM submissions');
     const pendingScreening = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu Verifikasi'`);
     const pendingApproval = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu Approval'`);
-    const sentToCentral = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Dikirim ke Pusat'`);
     const activeMembers = await query.get(`SELECT COUNT(*) as count FROM members WHERE membership_status = 'Aktif'`);
     const rejectedSubmissions = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Ditolak'`);
     const needRevision = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Perlu Revisi'`);
@@ -1260,7 +1310,6 @@ app.get('/api/admin/dashboard-stats', authenticate, authorize('Sekretaris', 'Ket
         totalSubmissions: totalSubmissions.count,
         pendingScreening: pendingScreening.count,
         pendingApproval: pendingApproval.count,
-        sentToCentral: sentToCentral.count,
         activeMembers: activeMembers.count,
         rejectedSubmissions: rejectedSubmissions.count,
         needRevision: needRevision.count,
@@ -1393,6 +1442,11 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
     if (!settings || typeof settings !== 'object') {
       return res.status(400).json({ error: 'Format pengaturan tidak valid.' });
     }
+    for (const key of FEE_KEYS) {
+      if (key in settings && !(Number.isFinite(Number(settings[key])) && Number(settings[key]) >= 0)) {
+        return res.status(400).json({ error: 'Nilai biaya harus berupa angka 0 atau lebih.' });
+      }
+    }
 
     for (const [key, value] of Object.entries(settings)) {
       await query.run(
@@ -1402,7 +1456,10 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
       );
     }
 
-    res.json({ message: 'Pengaturan sistem berhasil disimpan.' });
+    // Harga baru langsung berlaku untuk tagihan yang belum dibayar
+    const updatedBills = await syncUnpaidBills();
+
+    res.json({ message: 'Pengaturan sistem berhasil disimpan.', updatedBills });
   } catch (err) {
     console.error('Save settings error:', err);
     res.status(500).json({ error: 'Gagal menyimpan pengaturan.' });
@@ -1425,6 +1482,8 @@ if (fs.existsSync(distDir)) {
 async function startServer() {
   await initDb();
   await runSeed();
+  await syncUnpaidBills();
+  await activateApprovedSubmissions();
   app.listen(PORT, () => {
     console.log(`IKAPI Jabar Server running on port ${PORT}`);
   });

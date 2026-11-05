@@ -12,13 +12,11 @@ import {
   CreditCard,
   CheckCircle,
   AlertCircle,
-  Send,
-  BadgeCheck,
   Eye,
   RefreshCw,
-  KeyRound,
   Download,
-  Users
+  Users,
+  PenTool
 } from 'lucide-react';
 
 export default function Admin1Screening({ onNavigateToMembers, initialStatus = 'Semua', initialSearch = '' }) {
@@ -40,13 +38,10 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
   const [packetSubDetail, setPacketSubDetail] = useState(null);
   const [isPacketModalOpen, setIsPacketModalOpen] = useState(false);
 
-  // Modal for Input No KTA (Aktifkan Anggota)
-  const [ktaModalSub, setKtaModalSub] = useState(null);
-  const [ktaInput, setKtaInput] = useState('');
-  const [submittingKta, setSubmittingKta] = useState(false);
-
   // TTD tersimpan Sekretaris, dibubuhkan saat meneruskan pengajuan ke Ketua
   const isSekretaris = user?.role === 'Sekretaris';
+  // Screening utama dilakukan Admin; Sekretaris boleh ikut screening (opsional) lalu cukup membubuhkan TTD
+  const isAdmin = user?.role === 'Admin';
   const mySignature = useMySignature(isSekretaris);
   const [passing, setPassing] = useState(null); // { submission, settings, notes }
   const [processingPass, setProcessingPass] = useState(false);
@@ -166,6 +161,21 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     fetchSubmissions();
   };
 
+  // Admin: tandai berkas & pembayaran lolos screening → antre TTD Sekretaris
+  const markScreened = async (notes) => {
+    try {
+      await handleAdmin1Action(selectedSubDetail.submission.id, 'mark_screened', notes);
+      setIsVerifyModalOpen(false);
+    } catch (err) {
+      alert('Gagal: ' + err.message);
+    }
+  };
+
+  // Sekretaris: langsung tanda tangani pengajuan yang sudah lolos screening Admin
+  const startSignScreened = (sub) => {
+    setPassing({ submission: sub, settings: {}, notes: sub.admin_notes || '' });
+  };
+
   // "Loloskan & Teruskan ke Ketua": Sekretaris membubuhkan TTD-nya pada pratinjau surat dulu
   const startPassToKetua = (notes) => {
     setPassing({ submission: selectedSubDetail.submission, settings: selectedSubDetail.settings, notes });
@@ -184,58 +194,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     }
   };
 
-  // Handle Send Packet to IKAPI Pusat (PRD Section 3 & 4: Status Disetujui -> Aksi oleh Sekretaris: kirim)
-  const handleSendToCentral = async (submissionId) => {
-    try {
-      const res = await fetch(`/api/submissions/${submissionId}/admin2-action`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('ikapi_token')}`
-        },
-        body: JSON.stringify({ action: 'send_to_central' })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      alert(data.message);
-      fetchSubmissions();
-    } catch (err) {
-      alert('Gagal menandai dikirim ke Pusat: ' + err.message);
-    }
-  };
-
-  // Handle Input No. KTA from Pusat
-  const handleSaveKta = async () => {
-    if (!ktaInput.trim()) {
-      alert('Nomor KTA dari Pusat wajib diisi.');
-      return;
-    }
-    setSubmittingKta(true);
-    try {
-      const res = await fetch(`/api/submissions/${ktaModalSub.id}/admin1-action`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('ikapi_token')}`
-        },
-        body: JSON.stringify({
-          action: 'update_kta',
-          ktaNumber: ktaInput.trim()
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      alert(data.message);
-      setKtaModalSub(null);
-      setKtaInput('');
-      fetchSubmissions();
-    } catch (err) {
-      alert('Gagal mengaktifkan KTA: ' + err.message);
-    } finally {
-      setSubmittingKta(false);
-    }
-  };
-
   const handleExportExcel = async () => {
     try {
       await exportMembersExcel();
@@ -246,27 +204,41 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
 
   const statusChipClass = (status) =>
     status === 'Aktif'             ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-    : status === 'Disetujui'         ? 'bg-blue-100 text-blue-800 border border-blue-200'
     : status === 'Menunggu Approval' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-    : status === 'Dikirim ke Pusat'  ? 'bg-purple-100 text-purple-800 border border-purple-200'
     : status === 'Perlu Revisi'      ? 'bg-amber-100 text-amber-800 border border-amber-200'
     : status === 'Ditolak'           ? 'bg-red-100 text-red-800 border border-red-200'
     : 'bg-slate-100 text-slate-700 border border-slate-200';
 
   // Tombol aksi per pengajuan — dipakai di tabel (layar lebar) dan kartu (HP)
   const renderActions = (sub) => {
-    const isReadyForKta = sub.status === 'Dikirim ke Pusat';
-    const isApproved = ['Disetujui', 'Dikirim ke Pusat', 'Aktif'].includes(sub.status);
+    const isApproved = sub.status === 'Aktif';
+    const readyToSign = isSekretaris && sub.status === 'Menunggu Verifikasi' && sub.screened_at;
     return (
       <>
-        {/* Screening Button */}
+        {/* Sudah lolos screening Admin: Sekretaris cukup tanda tangan */}
+        {readyToSign && (
+          <button
+            onClick={() => startSignScreened(sub)}
+            className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow transition flex items-center gap-1"
+            title="Bubuhkan TTD Sekretaris & teruskan ke Ketua"
+          >
+            <PenTool className="w-3.5 h-3.5" />
+            <span>Tanda tangani</span>
+          </button>
+        )}
+
+        {/* Screening Button (opsional untuk Sekretaris bila sudah diperiksa Admin) */}
         <button
           onClick={() => openVerificationModal(sub.id)}
-          className="px-2.5 py-1.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white rounded-lg text-xs font-semibold shadow transition flex items-center gap-1"
+          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1 ${
+            readyToSign
+              ? 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+              : 'bg-[#0da2e7] hover:bg-[#0884c4] text-white shadow'
+          }`}
           title="Screening Berkas & Verifikasi Pembayaran"
         >
-          <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-          <span>Screening</span>
+          <ShieldCheck className={`w-3.5 h-3.5 ${readyToSign ? 'text-slate-400' : 'text-amber-400'}`} />
+          <span>{readyToSign ? 'Periksa' : 'Screening'}</span>
         </button>
 
         {/* Packet Button if Approved */}
@@ -274,36 +246,13 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           <button
             onClick={() => openPacketModal(sub.id)}
             className="px-2.5 py-1.5 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] rounded-lg text-xs font-bold transition flex items-center gap-1"
-            title="Lihat Paket 3 Dokumen ke Pusat"
+            title="Lihat Paket Dokumen"
           >
             <FileText className="w-3.5 h-3.5" />
             <span>Paket PDF</span>
           </button>
         )}
 
-        {/* Send to Central Button if Disetujui (PRD Hal. 4: Disetujui -> Aksi oleh Sekretaris: kirim) */}
-        {sub.status === 'Disetujui' && (
-          <button
-            onClick={() => handleSendToCentral(sub.id)}
-            className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold shadow transition flex items-center gap-1"
-            title="Tandai Paket Telah Dikirim ke IKAPI Pusat"
-          >
-            <Send className="w-3.5 h-3.5" />
-            <span>Kirim ke Pusat</span>
-          </button>
-        )}
-
-        {/* Input KTA Button if sent to central */}
-        {isReadyForKta && (
-          <button
-            onClick={() => { setKtaModalSub(sub); setKtaInput(''); }}
-            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow transition flex items-center gap-1"
-            title="Input No. KTA dari Pusat & Aktifkan"
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span>Input KTA</span>
-          </button>
-        )}
       </>
     );
   };
@@ -319,10 +268,12 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           </div>
           <div>
             <h2 className="text-2xl font-light tracking-tight text-slate-900">
-              Screening & Verifikasi Berkas (Sekretaris)
+              {isAdmin ? 'Screening Berkas & Pembayaran' : 'Screening & Tanda Tangan (Sekretaris)'}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Pemeriksaan kesesuaian berkas hukum, verifikasi bukti transfer, dan penerusan pengajuan ke Ketua.
+              {isAdmin
+                ? 'Periksa kesesuaian berkas dan bukti transfer. Pengajuan yang lolos diteruskan ke Sekretaris untuk ditandatangani.'
+                : 'Pengajuan yang lolos screening Admin cukup ditandatangani. Screening oleh Sekretaris bersifat opsional.'}
             </p>
           </div>
         </div>
@@ -337,13 +288,13 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
             </button>
           )}
 
-          <button
+          {!isAdmin && <button
             type="button"
             onClick={handleExportExcel}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition flex items-center gap-1.5"
           >
             <Download className="w-4 h-4" /> Ekspor Excel
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -384,8 +335,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
               <option value="Menunggu Verifikasi">Menunggu Verifikasi</option>
               <option value="Perlu Revisi">Perlu Revisi</option>
               <option value="Menunggu Approval">Menunggu Approval</option>
-              <option value="Disetujui">Disetujui</option>
-              <option value="Dikirim ke Pusat">Dikirim ke Pusat</option>
               <option value="Aktif">Aktif</option>
               <option value="Menunggu Pembayaran">Menunggu Pembayaran</option>
               <option value="Ditolak">Ditolak</option>
@@ -455,8 +404,13 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                     <div className="font-bold text-blue-950 text-sm">{sub.publisher_name}</div>
                     <div className="text-[11px] text-slate-500">Pimpinan: {sub.leader_name}</div>
                   </div>
-                  <span className={`flex-shrink-0 inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
-                    {sub.status}
+                  <span className="flex-shrink-0 flex flex-col items-end gap-1">
+                    <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
+                      {sub.status}
+                    </span>
+                    {sub.status === 'Menunggu Verifikasi' && sub.screened_at && (
+                      <span className="text-[10px] font-medium text-emerald-700">✓ Lolos screening</span>
+                    )}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -544,6 +498,11 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                       <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
                         {sub.status}
                       </span>
+                      {sub.status === 'Menunggu Verifikasi' && sub.screened_at && (
+                        <span className="block mt-1 text-[10px] font-medium text-emerald-700" title={`Oleh ${sub.screened_by_name || 'Admin'}`}>
+                          ✓ Lolos screening · menunggu TTD Sekretaris
+                        </span>
+                      )}
                     </td>
 
                     <td className="py-3.5 px-4">
@@ -581,7 +540,8 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           onScreenDocument={handleScreenDoc}
           onVerifyPayment={handleVerifyPayment}
           onAdmin1Action={handleAdmin1Action}
-          onPassToAdmin2={isSekretaris ? startPassToKetua : undefined}
+          onPassToAdmin2={isSekretaris ? startPassToKetua : isAdmin ? markScreened : undefined}
+          passLabel={isAdmin ? 'Lolos Screening · Teruskan ke Sekretaris' : undefined}
         />
       )}
 
@@ -621,56 +581,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
               settings={packetSubDetail.settings}
               payment={packetSubDetail.payment}
             />
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 3: INPUT NO KTA DARI PUSAT */}
-      {ktaModalSub && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="modal-surface max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center space-x-3 text-emerald-700">
-              <BadgeCheck className="w-6 h-6" />
-              <h3 className="font-medium text-lg text-slate-900">
-                Aktivasi Keanggotaan IKAPI (No. KTA)
-              </h3>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed">
-              IKAPI Pusat telah menyetujui pengajuan untuk <strong>{ktaModalSub.publisher_name}</strong>. Silakan masukkan Nomor KTA resmi yang diterbitkan dari Pusat:
-            </p>
-
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
-                Nomor KTA Resmi (Pusat) *
-              </label>
-              <input
-                type="text"
-                placeholder="Contoh: 014/JBR/2026"
-                value={ktaInput}
-                onChange={(e) => setKtaInput(e.target.value)}
-                className="w-full text-sm font-mono font-bold p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-600 uppercase"
-              />
-            </div>
-
-            <div className="flex items-center justify-end space-x-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setKtaModalSub(null)}
-                className="px-4 py-2 border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveKta}
-                disabled={submittingKta}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition flex items-center gap-1.5"
-              >
-                <CheckCircle className="w-4 h-4" />
-                {submittingKta ? 'Menyimpan...' : 'Aktifkan Keanggotaan'}
-              </button>
-            </div>
           </div>
         </div>
       )}

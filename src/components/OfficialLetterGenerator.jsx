@@ -31,7 +31,7 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
 
   const isSigned =
     Boolean(submission.signed_by_chairman) ||
-    ['Disetujui', 'Dikirim ke Pusat', 'Aktif'].includes(submission.status);
+    submission.status === 'Aktif';
 
   const handlePrint = () => {
     window.print();

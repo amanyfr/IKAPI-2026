@@ -12,13 +12,11 @@ import {
 /* ── Kelompok status dari sudut pandang Ketua ── */
 const AT_ADMIN1 = ['Draf', 'Menunggu Pembayaran', 'Menunggu Verifikasi', 'Perlu Revisi'];
 const PENDING   = ['Menunggu Approval'];
-const SIGNED    = ['Disetujui', 'Dikirim ke Pusat', 'Aktif'];
+const SIGNED    = ['Aktif'];
 const REJECTED  = ['Ditolak'];
 
 const STATUS_CHIP = {
   'Menunggu Approval': 'bg-indigo-600 text-white',
-  'Disetujui':         'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200',
-  'Dikirim ke Pusat':  'bg-purple-100 text-purple-800 ring-1 ring-purple-200',
   'Aktif':             'bg-emerald-600 text-white',
   'Ditolak':           'bg-red-100 text-red-800 ring-1 ring-red-200',
 };
@@ -61,7 +59,6 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
   const pending   = count(PENDING);
   const signed    = count(SIGNED);
   const rejected  = count(REJECTED);
-  const readyToSend = count(['Disetujui']);
   const iuran = submissions
     .filter((s) => s.payment_status === 'Valid')
     .reduce((sum, s) => sum + (s.payment_amount || 0), 0);
@@ -81,7 +78,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
   const distribution = [
     { label: 'Di Sekretaris',         value: atAdmin1, cls: 'bg-white text-slate-800 ring-1 ring-slate-200' },
     { label: 'Menunggu Anda',      value: pending,  cls: 'bg-indigo-600 text-white' },
-    { label: 'Disetujui',          value: signed,   cls: 'bg-emerald-500 text-white' },
+    { label: 'Anggota aktif',      value: signed,   cls: 'bg-emerald-500 text-white' },
     { label: 'Ditolak',            value: rejected, cls: 'text-slate-700 ring-1 ring-slate-300/70 bg-[repeating-linear-gradient(135deg,rgba(15,23,42,0.08)_0_2px,transparent_2px_8px)]' },
   ];
 
@@ -150,7 +147,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
           <div className="space-y-3">
             {[
               { label: 'Menunggu approval', value: pending,     dot: 'bg-indigo-600',  open: () => onOpenApproval() },
-              { label: 'Siap dikirim',      value: readyToSend, dot: 'bg-emerald-500', open: () => onOpenApproval({ status: 'Disetujui' }) },
+              { label: 'Anggota aktif',     value: signed,      dot: 'bg-emerald-500', open: () => onOpenApproval({ status: 'Aktif' }) },
               { label: 'Ditolak',           value: rejected,    dot: 'bg-red-500',     open: () => onOpenApproval({ status: 'Ditolak' }) },
             ].map((r) => (
               <button key={r.label} onClick={r.open}
@@ -167,8 +164,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
           <p className="mt-auto pt-5 flex items-start gap-2 text-[11px] text-slate-500 leading-relaxed">
             <Lightbulb className="w-4 h-4 flex-shrink-0 text-amber-500" />
             <span>
-              <strong className="text-slate-700">{signed} surat</strong> sudah ditandatangani Ketua & Sekretaris.
-              {readyToSend > 0 && <> <strong className="text-slate-700">{readyToSend}</strong> menunggu dikirim Sekretaris ke Pusat.</>}
+              <strong className="text-slate-700">{signed} pemohon</strong> sudah ditandatangani Ketua & Sekretaris dan otomatis menjadi anggota aktif.
             </span>
           </p>
         </div>
@@ -203,10 +199,10 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
               <span className="text-sm font-medium">Approval & TTD</span>
               <span className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center">{pending}</span>
             </button>
-            <button onClick={() => onOpenApproval({ status: 'Disetujui' })}
+            <button onClick={() => onOpenApproval({ status: 'Aktif' })}
               className="relative w-full mt-2 flex items-center justify-between gap-3 text-left bg-indigo-100/90 text-slate-800 rounded-2xl px-4 py-3.5 shadow-md hover:-translate-y-0.5 transition">
-              <span className="text-sm font-medium">Siap dikirim ke Pusat</span>
-              <span className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center">{readyToSend}</span>
+              <span className="text-sm font-medium">Anggota aktif</span>
+              <span className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center">{signed}</span>
             </button>
           </div>
         </div>
@@ -223,7 +219,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
               <select aria-label="Filter status" value={queueFilter} onChange={(e) => setQueueFilter(e.target.value)}
                 className="appearance-none text-xs pl-4 pr-8 py-2 rounded-full bg-slate-50 border border-slate-200/70 text-slate-700 focus:ring-2 focus:ring-indigo-300 outline-none">
                 <option value="Menunggu Approval">Menunggu approval</option>
-                <option value="Disetujui">Disetujui</option>
+                <option value="Aktif">Disetujui (aktif)</option>
                 <option value="Ditolak">Ditolak</option>
                 <option value="Semua">Semua keputusan</option>
               </select>
@@ -297,7 +293,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
               { label: 'Approval & TTD',    icon: Award,    tone: 'bg-indigo-100 text-indigo-700',   onClick: () => onOpenApproval() },
               { label: 'Monitoring',        icon: Activity, tone: 'bg-sky-100 text-[#0884c4]',       onClick: () => onOpenApproval({ scroll: true }) },
               { label: 'Direktori anggota', icon: Users,    tone: 'bg-violet-100 text-violet-700',   onClick: onOpenMembers },
-              { label: 'Surat disetujui',   icon: FileCheck2, tone: 'bg-emerald-100 text-emerald-700', onClick: () => onOpenApproval({ status: 'Disetujui', scroll: true }) },
+              { label: 'Surat disetujui',   icon: FileCheck2, tone: 'bg-emerald-100 text-emerald-700', onClick: () => onOpenApproval({ status: 'Aktif', scroll: true }) },
             ].map(({ label, icon: Icon, tone, onClick }) => (
               <button key={label} onClick={onClick}
                 className="flex items-center gap-2.5 px-3 py-3 rounded-2xl bg-slate-50 hover:bg-white border border-slate-200/70 text-sm text-slate-700 transition text-left">

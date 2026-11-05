@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import AnggotaDashboard from '../pages/AnggotaDashboard';
 import RegistrationForm from '../pages/RegistrationForm';
+import OnboardingPage from '../pages/OnboardingPage';
 import { LogOut, User } from 'lucide-react';
 
 export default function AnggotaPortal() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [editingDraft, setEditingDraft] = useState(null);
+  const [editingProfile, setEditingProfile] = useState(false);
 
   // Nilai awal formulir dari jawaban pertanyaan login pertama
   const profileType     = user?.member_type === 'Lama' ? 'Heregistrasi' : 'Baru';
@@ -32,6 +34,11 @@ export default function AnggotaPortal() {
     setEditingDraft(null);
     setActiveTab('dashboard');
   };
+
+  // Ubah jawaban anggota lama/baru & kategori (hanya selama belum ada pengajuan)
+  if (editingProfile) {
+    return <OnboardingPage onBack={() => setEditingProfile(false)} onDone={() => setEditingProfile(false)} />;
+  }
 
   return (
     <div className="theme-soft relative min-h-screen flex flex-col">
@@ -91,6 +98,7 @@ export default function AnggotaPortal() {
           <AnggotaDashboard
             onNewSubmission={handleNewSubmission}
             onEditDraft={handleEditDraft}
+            onEditProfile={() => setEditingProfile(true)}
             defaultType={profileType}
             defaultCategory={profileCategory}
           />

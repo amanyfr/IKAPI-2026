@@ -141,6 +141,8 @@ export async function initDb() {
       secretary_signature_img TEXT, -- salinan TTD Sekretaris saat diteruskan ke Ketua
       secretary_signature_pos TEXT,
       signature_positions TEXT, -- JSON { dokumen: { chairman: {x,y,w}, secretary: {x,y,w} } }
+      screened_at TEXT, -- berkas & pembayaran lolos screening (Admin / Sekretaris)
+      screened_by_name TEXT,
       submitted_at TEXT,
       approved_at TEXT,
       sent_to_central_at TEXT,
@@ -205,6 +207,8 @@ export async function initDb() {
   await addColumnIfMissing('submissions', 'secretary_signature_img', 'TEXT');
   await addColumnIfMissing('submissions', 'secretary_signature_pos', 'TEXT');
   await addColumnIfMissing('submissions', 'signature_positions', 'TEXT');
+  await addColumnIfMissing('submissions', 'screened_at', 'TEXT');
+  await addColumnIfMissing('submissions', 'screened_by_name', 'TEXT');
 }
 
 async function addColumnIfMissing(table, column, type) {

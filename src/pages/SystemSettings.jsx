@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   Settings, Save, Building, CreditCard, Award, FileText,
-  CheckCircle, Upload, Trash2, Image, RotateCcw, PenTool
+  CheckCircle, Upload, Trash2, Image, RotateCcw, PenTool, Receipt
 } from 'lucide-react';
+import { INVOICE_DEFAULTS } from '../components/PaymentInvoice';
 
 const DEFAULT_TEMPLATES = {
   surat_kop_alamat: 'Sekretariat: Jl. Ibu Inggit Garnasih No. 148, Regol, Kota Bandung 40252',
@@ -31,7 +32,8 @@ export default function SystemSettings() {
     ketua_signature_img: '',
     sekretaris_signature_img: '',
     stempel_img: '',
-    ...DEFAULT_TEMPLATES
+    ...DEFAULT_TEMPLATES,
+    ...INVOICE_DEFAULTS
   });
 
   const [loading, setLoading] = useState(true);
@@ -475,6 +477,54 @@ export default function SystemSettings() {
               className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none leading-relaxed"
             />
           </div>
+        </div>
+
+        {/* 5. INVOICE / KUITANSI PEMBAYARAN */}
+        <div className="card-surface p-6 space-y-4">
+          <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
+            <Receipt className="w-5 h-5 text-[#0da2e7]" />
+            <div>
+              <h3 className="text-lg text-slate-800">5. Invoice Pembayaran Anggota</h3>
+              <p className="text-[11px] text-slate-500">
+                Invoice muncul di dashboard anggota setelah bukti transfer diunggah, dan berstatus LUNAS setelah pembayaran diverifikasi.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[
+              ['invoice_title', 'Judul invoice'],
+              ['invoice_prefix', 'Awalan nomor invoice'],
+              ['invoice_issuer_name', 'Nama penerbit invoice (penandatangan)'],
+              ['invoice_issuer_title', 'Jabatan penandatangan'],
+            ].map(([name, label]) => (
+              <div key={name}>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">{label}</label>
+                <input
+                  type="text"
+                  name={name}
+                  value={settings[name]}
+                  onChange={handleChange}
+                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
+                />
+              </div>
+            ))}
+            <div className="md:col-span-2">
+              <label className="text-xs font-semibold text-slate-700 block mb-1">Catatan kaki invoice</label>
+              <textarea
+                rows="2"
+                name="invoice_notes"
+                value={settings.invoice_notes}
+                onChange={handleChange}
+                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
+              />
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-500 bg-[#f0f9ff] border border-[#b8e6fc] rounded-lg px-3 py-2">
+            Contoh nomor: <span className="font-mono text-[#0884c4]">{settings.invoice_prefix}/{new Date().getFullYear()}/0012</span> ·
+            rekening & rincian biaya mengikuti bagian 1 dan 2 di atas.
+          </p>
         </div>
 
         {/* Bottom Save Action */}

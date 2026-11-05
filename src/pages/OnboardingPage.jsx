@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
-  LogOut, UserPlus, RefreshCw, Building2, GraduationCap, CheckCircle2, ArrowRight, AlertCircle
+  LogOut, UserPlus, RefreshCw, Building2, GraduationCap, CheckCircle2, ArrowRight, AlertCircle, ArrowLeft
 } from 'lucide-react';
 
 // Pertanyaan login pertama untuk anggota baru terdaftar:
@@ -43,11 +43,13 @@ function OptionCard({ option, active, onSelect }) {
   );
 }
 
-export default function OnboardingPage() {
+// onBack (opsional): dibuka ulang dari dashboard untuk mengubah jawaban → "Kembali" ke dashboard.
+// Tanpa onBack (login pertama) → "Kembali" keluar ke halaman masuk.
+export default function OnboardingPage({ onBack, onDone }) {
   const { user, logout, updateUser } = useAuth();
-  const [memberType, setMemberType] = useState('');
-  const [category, setCategory] = useState('');
-  const [oldKtaNumber, setOldKtaNumber] = useState('');
+  const [memberType, setMemberType] = useState(onBack ? user?.member_type || '' : '');
+  const [category, setCategory] = useState(onBack ? user?.member_category || '' : '');
+  const [oldKtaNumber, setOldKtaNumber] = useState(onBack ? user?.old_kta_number || '' : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -70,6 +72,7 @@ export default function OnboardingPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Gagal menyimpan jawaban.');
       updateUser(data.user);
+      onDone?.();
     } catch (err) {
       setError(err.message);
       setSaving(false);
@@ -104,7 +107,17 @@ export default function OnboardingPage() {
       <main className="relative flex-1 w-full max-w-2xl mx-auto px-4 py-5 sm:py-8 flex items-center">
         <form onSubmit={handleSubmit} className="card-surface w-full p-5 sm:p-7 space-y-5 sm:space-y-6">
           <div>
-            <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />Langkah awal</span>
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={onBack || logout}
+                className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900 transition"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                {onBack ? 'Kembali ke dashboard' : 'Kembali ke halaman masuk'}
+              </button>
+              <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />{onBack ? 'Ubah jawaban' : 'Langkah awal'}</span>
+            </div>
             <h1 className="text-2xl sm:text-3xl font-light text-slate-900 mt-2.5 tracking-tight">Lengkapi profil keanggotaan</h1>
             <p className="text-sm text-slate-500 mt-1.5">
               Jawab dua pertanyaan berikut. Jawaban Anda dipakai untuk menyiapkan formulir pengajuan yang sesuai.
@@ -151,7 +164,7 @@ export default function OnboardingPage() {
           )}
 
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-slate-100">
-            <p className="text-xs text-slate-400">Jenis pengajuan mengikuti jawaban ini; kategori masih bisa diubah saat mengisi formulir.</p>
+            <p className="text-xs text-slate-400">Jenis pengajuan mengikuti jawaban ini. Jawaban masih bisa diubah selama pengajuan belum dibuat.</p>
             <button
               type="submit"
               disabled={!canSubmit}

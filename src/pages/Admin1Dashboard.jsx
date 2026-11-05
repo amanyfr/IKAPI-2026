@@ -12,8 +12,8 @@ import {
 
 /* ── Helper data ── */
 const ADMIN1_QUEUE = ['Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran'];
-const AT_ADMIN2    = ['Menunggu Approval', 'Disetujui'];
-const FINISHED     = ['Dikirim ke Pusat', 'Aktif', 'Ditolak'];
+const AT_ADMIN2    = ['Menunggu Approval'];
+const FINISHED     = ['Aktif', 'Ditolak'];
 
 const STATUS_CHIP = {
   'Menunggu Verifikasi': 'bg-[#0da2e7] text-white',
@@ -59,7 +59,8 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
   const needScreening = count(['Menunggu Verifikasi']);
   const needRevision  = count(['Perlu Revisi']);
   const needPayment   = count(['Menunggu Pembayaran']);
-  const needKta       = count(['Dikirim ke Pusat']);
+  // Anggota yang sudah aktif tapi nomor KTA-nya belum dicatat di Data Anggota
+  const needKta       = submissions.filter((s) => s.status === 'Aktif' && !s.member_kta).length;
   const atAdmin1      = count(ADMIN1_QUEUE);
   const atAdmin2      = count(AT_ADMIN2);
   const finished      = count(FINISHED);

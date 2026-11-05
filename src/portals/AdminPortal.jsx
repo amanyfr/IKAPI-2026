@@ -3,7 +3,8 @@ import { useAuth } from '../context/AuthContext';
 import AdminDashboard from '../pages/AdminDashboard';
 import UserManagement from '../pages/UserManagement';
 import SystemSettings from '../pages/SystemSettings';
-import { Users, Settings, LogOut, KeyRound, LayoutDashboard } from 'lucide-react';
+import Admin1Screening from '../pages/Admin1Screening';
+import { Users, Settings, LogOut, KeyRound, LayoutDashboard, ShieldCheck } from 'lucide-react';
 
 export default function AdminPortal() {
   const { user, logout } = useAuth();
@@ -49,7 +50,7 @@ export default function AdminPortal() {
                   </span>
                 </div>
                 <p className="sm:hidden text-[10px] text-blue-200 font-bold uppercase tracking-wide">ADMIN</p>
-                <p className="hidden md:block text-xs text-white/55 font-medium">Kelola akun pengguna & pengaturan sistem</p>
+                <p className="hidden md:block text-xs text-white/55 font-medium">Kelola akun, screening berkas & pengaturan sistem</p>
               </div>
             </div>
 
@@ -78,6 +79,7 @@ export default function AdminPortal() {
           <div className="pb-3 overflow-x-auto">
             <div className="inline-flex gap-1 p-1 rounded-full bg-white/10 border border-white/15">
               {navBtn('dashboard', <LayoutDashboard className="w-4 h-4" />, 'Dashboard')}
+              {navBtn('screening', <ShieldCheck className="w-4 h-4" />, 'Screening Berkas', 'Screening')}
               {navBtn('users', <Users className="w-4 h-4" />, 'Kelola Akun', 'Akun')}
               {navBtn('settings', <Settings className="w-4 h-4" />, 'Pengaturan Biaya, Rekening, Surat & TTD', 'Pengaturan')}
             </div>
@@ -101,6 +103,7 @@ export default function AdminPortal() {
             startWithCreate={userFilters.create}
           />
         )}
+        {activeTab === 'screening' && <Admin1Screening />}
         {activeTab === 'settings' && <SystemSettings />}
       </main>
 

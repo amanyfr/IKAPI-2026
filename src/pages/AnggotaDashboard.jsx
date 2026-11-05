@@ -2,12 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import StatusStepper from '../components/StatusStepper';
 import CentralPacketExporter from '../components/CentralPacketExporter';
+import PaymentInvoice, { downloadInvoicePdf, invoiceNumber, isInvoicePaid } from '../components/PaymentInvoice';
+import { feesFromSettings, formatRupiah } from '../utils/fees';
+import { formatLongDate } from '../components/PengurusSignature';
 import {
   Building2, CreditCard, Upload, FileText, AlertCircle,
   CheckCircle, ExternalLink, RefreshCw,
   Edit3, GraduationCap, ArrowRight, UserPlus, X,
-  ShieldCheck, Landmark
+  ShieldCheck, Landmark, Receipt, Download, XCircle, PartyPopper
 } from 'lucide-react';
+
+// Label hasil screening berkas: hijau = diterima, merah = tidak sesuai (unggah ulang), abu = belum diperiksa
+const SCREENING_LABEL = {
+  Sesuai:         { text: 'Diterima',        cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
+  'Perlu Revisi': { text: 'Tidak sesuai',    cls: 'bg-red-50 text-red-700 border-red-200',             dot: 'bg-red-500' },
+  Menunggu:       { text: 'Menunggu screening', cls: 'bg-slate-50 text-slate-600 border-slate-200',    dot: 'bg-slate-400' },
+};
 
 const REQUIRED_DOCS = {
   Baru: {
@@ -38,7 +48,7 @@ const REQUIRED_DOCS = {
 
 const token = () => localStorage.getItem('ikapi_token');
 
-export default function AnggotaDashboard({ onNewSubmission, onEditDraft, defaultType = 'Baru', defaultCategory = 'Biasa' }) {
+export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditProfile, defaultType = 'Baru', defaultCategory = 'Biasa' }) {
   const { user } = useAuth();
   const [submissions,    setSubmissions]    = useState([]);
   const [selectedSub,    setSelectedSub]    = useState(null);
@@ -46,7 +56,10 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
   const [loading,        setLoading]        = useState(true);
   const [uploadingDocId, setUploadingDocId] = useState(null);
   const [showPacket,     setShowPacket]     = useState(false);
+  const [showInvoice,    setShowInvoice]    = useState(false);
   const [refreshing,     setRefreshing]     = useState(false);
+  const [appSettings,    setAppSettings]    = useState({});
+  const [showWelcome,    setShowWelcome]    = useState(false);
   const [lastUpdated,    setLastUpdated]    = useState(null);
 
   const [pickType,     setPickType]     = useState(defaultType);
@@ -90,6 +103,25 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
 
   useEffect(() => { loadSubmissions(); }, [user]);
 
+  // Biaya & rekening diatur Admin: dimuat ulang tiap 30 detik dan saat kembali ke tab,
+  // jadi perubahan harga oleh Admin langsung terlihat di sini
+  useEffect(() => {
+    const loadSettings = () => {
+      if (document.visibilityState !== 'visible') return;
+      fetch('/api/settings')
+        .then((res) => res.json())
+        .then((data) => data.settings && setAppSettings(data.settings))
+        .catch((err) => console.error('Failed to load settings:', err));
+    };
+    loadSettings();
+    const timer = setInterval(loadSettings, 30000);
+    document.addEventListener('visibilitychange', loadSettings);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', loadSettings);
+    };
+  }, []);
+
   // Perbarui status pengajuan: tombol manual dengan indikator, otomatis tiap 30 detik,
   // dan saat pengguna kembali ke tab ini
   const refreshStatus = async () => {
@@ -112,6 +144,21 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
       document.removeEventListener('visibilitychange', tick);
     };
   }, [selectedSub?.id]);
+
+  // Ucapan selamat saat pengajuan baru saja menjadi Aktif (sekali per pengajuan di browser ini)
+  const activeSubId = detailData?.submission?.status === 'Aktif' ? detailData.submission.id : null;
+  const welcomeKey = activeSubId ? `ikapi_welcome_aktif_${activeSubId}` : null;
+  useEffect(() => {
+    if (!welcomeKey) return;
+    try {
+      if (!localStorage.getItem(welcomeKey)) setShowWelcome(true);
+    } catch { /* penyimpanan browser tidak tersedia: lewati */ }
+  }, [welcomeKey]);
+
+  const closeWelcome = () => {
+    setShowWelcome(false);
+    try { localStorage.setItem(welcomeKey, '1'); } catch { /* abaikan */ }
+  };
 
   const handleDocUpload = async (doc, file) => {
     if (!file) return;
@@ -180,7 +227,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
             <div className="accent-yellow px-4 py-2 rounded-2xl text-right shadow-[0_10px_24px_-14px_rgba(234,179,8,0.8)]">
               <div className="text-xs font-medium text-slate-700">Biaya pendaftaran</div>
               <div className="text-xl font-medium text-slate-900">
-                {pickType === 'Baru' ? 'Rp 1.700.000' : 'Rp 1.200.000'}
+                {formatRupiah(feesFromSettings(appSettings, pickType).total)}
               </div>
             </div>
           </div>
@@ -229,9 +276,16 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
                   })}
                   {/* Jenis pengajuan dikunci sesuai jawaban profil (anggota lama/baru) */}
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 px-3.5 py-3 text-xs text-slate-500 flex items-center">
-                    {defaultType === 'Heregistrasi'
-                      ? 'Anda terdaftar sebagai anggota lama, jadi pengajuan Anda adalah registrasi perpanjangan KTA.'
-                      : 'Anda terdaftar sebagai anggota baru, jadi pengajuan Anda adalah pendaftaran anggota baru.'}
+                    <span>
+                      {defaultType === 'Heregistrasi'
+                        ? 'Anda terdaftar sebagai anggota lama, jadi pengajuan Anda adalah registrasi perpanjangan KTA.'
+                        : 'Anda terdaftar sebagai anggota baru, jadi pengajuan Anda adalah pendaftaran anggota baru.'}
+                      {onEditProfile && (
+                        <button type="button" onClick={onEditProfile} className="ml-1 text-[#3b82f6] hover:underline font-medium">
+                          Salah pilih? Ubah jawaban
+                        </button>
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -320,7 +374,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
   const sub      = detailData?.submission || selectedSub;
   const docs     = detailData?.documents  || [];
   const payment  = detailData?.payment;
-  const settings = detailData?.settings;
+  const settings = { ...appSettings, ...detailData?.settings };
 
   if (!sub) {
     return (
@@ -333,6 +387,18 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
   const isDraf        = sub.status === 'Draf';
   const isWaitPayment = sub.status === 'Menunggu Pembayaran';
   const isNeedRevision = sub.status === 'Perlu Revisi';
+  const rejectedDocs   = docs.filter((d) => d.screening_status === 'Perlu Revisi');
+  const paymentRejected = payment?.verification_status === 'Perlu Revisi';
+
+  // Tagihan tersimpan di server (ikut harga terbaru selama belum dibayar)
+  const bill = payment?.fee_breakdown?.total != null
+    ? { ...payment.fee_breakdown, total: payment.amount }
+    : feesFromSettings(settings, sub.submission_type);
+  const billItems = [
+    ['Uang Pangkal', bill.uangPangkal],
+    [`Iuran ${sub.submission_type === 'Baru' ? '' : 'Perpanjangan '}${bill.durasiBulan || 24} Bulan`, bill.iuran24Bulan],
+    ['Biaya Administrasi', bill.administrasi],
+  ].filter(([, amount]) => Number(amount) > 0);
 
   return (
     <div className="space-y-6 w-full">
@@ -392,8 +458,15 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
               <span>Anggota Resmi Aktif</span>
             </div>
             <h3 className="text-2xl sm:text-3xl font-light">{sub.publisher_name}</h3>
+            <p className="text-sm text-white/90">
+              Selamat! Anda resmi terdaftar sebagai anggota IKAPI Jawa Barat
+              {sub.activated_at && <> sejak <strong className="font-medium text-white">{formatLongDate(sub.activated_at)}</strong></>}.
+            </p>
             <p className="text-sm text-white/85">
-              Nomor KTA: <strong className="text-white text-lg font-medium tracking-wide">{sub.member_kta || sub.kta_number || '—'}</strong>
+              Nomor KTA:{' '}
+              {sub.member_kta || sub.kta_number
+                ? <strong className="text-white text-lg font-medium tracking-wide">{sub.member_kta || sub.kta_number}</strong>
+                : <span className="text-white/90">sedang dicatat oleh pengurus</span>}
             </p>
           </div>
           <button
@@ -406,72 +479,107 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
         </div>
       )}
 
-      {/* ══ CATATAN REVISI ADMIN ══ */}
-      {isNeedRevision && sub.admin_notes && (
-        <div className="accent-yellow rounded-[22px] p-5 flex items-start gap-3.5">
-          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-amber-900">
-            <span className="font-bold">Catatan Verifikator: </span>
-            <span>{sub.admin_notes}</span>
+      {/* ══ PENGAJUAN TIDAK DI-ACC: unggah ulang yang bertanda merah saja ══ */}
+      {isNeedRevision && (
+        <div className="rounded-[22px] p-5 bg-red-50 border border-red-200 flex items-start gap-3.5">
+          <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-red-900 space-y-1">
+            <p className="font-semibold">
+              {rejectedDocs.length > 0 && `${rejectedDocs.length} berkas`}
+              {rejectedDocs.length > 0 && paymentRejected && ' dan '}
+              {paymentRejected && 'bukti pembayaran'} tidak sesuai screening
+            </p>
+            <p>Cukup unggah ulang yang bertanda <strong>merah</strong>. Berkas berlabel hijau sudah diterima dan tidak perlu diubah.</p>
+            {sub.admin_notes && <p className="text-red-800/80">Catatan verifikator: {sub.admin_notes}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* ══ INVOICE PEMBAYARAN (setelah bukti transfer diunggah) ══ */}
+      {payment?.proof_file && (
+        <div className="card-surface px-5 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-11 h-11 flex-shrink-0 rounded-full flex items-center justify-center ${
+              isInvoicePaid(payment) ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'
+            }`}>
+              <Receipt className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-base text-slate-800">Invoice pembayaran</p>
+              <p className="text-xs text-slate-500 truncate">
+                <span className="font-mono">{invoiceNumber(sub, settings)}</span> · Rp {Number(payment.amount || 0).toLocaleString('id-ID')}
+              </p>
+            </div>
+            <span className={`ml-1 flex-shrink-0 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+              isInvoicePaid(payment)
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : payment.verification_status === 'Perlu Revisi'
+                ? 'bg-red-50 text-red-700 border-red-200'
+                : 'bg-amber-50 text-amber-700 border-amber-200'
+            }`}>
+              {isInvoicePaid(payment) ? 'Lunas' : payment.verification_status === 'Perlu Revisi' ? 'Ditolak' : 'Menunggu verifikasi'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowInvoice(true)} className="soft-pill !text-xs">
+              <Receipt className="w-4 h-4" /> Lihat invoice
+            </button>
+            <button
+              onClick={() => downloadInvoicePdf({ submission: sub, payment, settings })}
+              className="soft-pill-primary !text-xs"
+            >
+              <Download className="w-4 h-4" /> Unduh PDF
+            </button>
           </div>
         </div>
       )}
 
       {/* ══ PEMBAYARAN & UPLOAD BUKTI BAYAR ══ */}
-      {(isWaitPayment || (payment && payment.verification_status !== 'Valid' && !isDraf)) && (
+      {/* Form bayar: saat menunggu pembayaran, atau bukti transfer ditolak (unggah ulang) */}
+      {(isWaitPayment || paymentRejected || (payment && !payment.proof_file && !isDraf)) && (
         <div className="card-surface overflow-hidden">
           <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <CreditCard className="w-5 h-5 text-[#0884c4]" />
               <h3 className="text-lg text-slate-800">Pembayaran Keanggotaan</h3>
             </div>
-            <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-              {payment?.verification_status === 'Menunggu' ? 'Menunggu Verifikasi' : 'Belum Dibayar'}
-            </span>
+            {paymentRejected ? (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-red-50 text-red-700 border-red-200">
+                Tidak sesuai · unggah ulang
+              </span>
+            ) : (
+              <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                {payment?.proof_file ? 'Menunggu Verifikasi' : 'Belum Dibayar'}
+              </span>
+            )}
           </div>
+          {paymentRejected && payment?.verification_notes && (
+            <p className="mx-5 sm:mx-7 mt-4 text-xs text-red-800 bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5">
+              <strong>Alasan:</strong> {payment.verification_notes}
+            </p>
+          )}
 
           <div className="p-4 sm:p-7 grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
             {/* Info Tagihan & Rekening */}
             <div className="space-y-5">
               <div className="panel-inner p-4 sm:p-5 space-y-3 text-sm">
-                {sub.submission_type === 'Baru' ? (
-                  <>
-                    <div className="flex justify-between text-slate-600">
-                      <span>Uang Pangkal</span>
-                      <span className="font-semibold text-slate-900">Rp 250.000</span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>Iuran 24 Bulan</span>
-                      <span className="font-semibold text-slate-900">Rp 1.200.000</span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>Biaya Administrasi</span>
-                      <span className="font-semibold text-slate-900">Rp 250.000</span>
-                    </div>
-                    <div className="border-t border-slate-200/70 pt-3 flex justify-between font-medium text-base text-slate-900">
-                      <span>Total Tagihan</span>
-                      <span className="text-[#3b82f6] text-lg">Rp 1.700.000</span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex justify-between text-slate-600">
-                      <span>Iuran Perpanjangan 24 Bulan</span>
-                      <span className="font-semibold text-slate-900">Rp 1.200.000</span>
-                    </div>
-                    <div className="border-t border-slate-200/70 pt-3 flex justify-between font-medium text-base text-slate-900">
-                      <span>Total Tagihan</span>
-                      <span className="text-[#3b82f6] text-lg">Rp 1.200.000</span>
-                    </div>
-                  </>
-                )}
+                {billItems.map(([label, amount]) => (
+                  <div key={label} className="flex justify-between text-slate-600">
+                    <span>{label}</span>
+                    <span className="font-semibold text-slate-900">{formatRupiah(amount)}</span>
+                  </div>
+                ))}
+                <div className="border-t border-slate-200/70 pt-3 flex justify-between font-medium text-base text-slate-900">
+                  <span>Total Tagihan</span>
+                  <span className="text-[#3b82f6] text-lg">{formatRupiah(bill.total)}</span>
+                </div>
               </div>
 
               <div className="accent-violet rounded-[22px] p-5 flex items-center justify-between shadow-[0_14px_30px_-16px_rgba(123,92,255,0.8)]">
                 <div>
-                  <p className="text-xs text-white/80">Rekening tujuan · Bank BNI</p>
-                  <p className="text-2xl sm:text-3xl font-medium mt-1 tracking-wide">2089992087</p>
-                  <p className="text-sm text-white/90 font-semibold mt-0.5">a.n. Abdul Rasyid</p>
+                  <p className="text-xs text-white/80">Rekening tujuan · {settings.bank_name || 'Bank BNI'}</p>
+                  <p className="text-2xl sm:text-3xl font-medium mt-1 tracking-wide">{settings.bank_account || '2089992087'}</p>
+                  <p className="text-sm text-white/90 font-semibold mt-0.5">a.n. {settings.bank_holder || 'Abdul Rasyid'}</p>
                 </div>
                 <div className="w-12 h-12 rounded-full bg-white/20 border border-white/40 flex items-center justify-center">
                   <Landmark className="w-6 h-6 text-white" />
@@ -566,9 +674,16 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
             <FileText className="w-5 h-5 text-[#0884c4]" />
             <h3 className="text-lg text-slate-800">Dokumen Persyaratan</h3>
           </div>
-          <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-[#12c26f]" />
-            {docs.filter(d => d.screening_status === 'Sesuai').length}/{docs.length} Sesuai
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">
+              {docs.filter(d => d.screening_status === 'Sesuai').length} diterima
+            </span>
+            {rejectedDocs.length > 0 && (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-red-50 text-red-700 border-red-200">
+                {rejectedDocs.length} tidak sesuai
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="divide-y divide-[#e2f2fd]">
@@ -580,30 +695,29 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
             const isSesuai  = doc.screening_status === 'Sesuai';
             const hasFile   = Boolean(doc.file_path && doc.file_name && doc.file_name !== 'Belum diunggah');
             const canUpload = isNeedRevision ? isRevisi : (isDraf || isWaitPayment);
+            const label     = SCREENING_LABEL[doc.screening_status] || SCREENING_LABEL.Menunggu;
 
             return (
               <div
                 key={doc.id || idx}
-                className={`px-7 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition ${
-                  idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'
+                className={`px-5 sm:px-7 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition ${
+                  isRevisi ? 'bg-red-50/50' : 'bg-white'
                 }`}
               >
                 <div className="space-y-1 flex-1 min-w-0">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-bold text-slate-900">{doc.document_title}</span>
-                    <span className="soft-chip">
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        isSesuai ? 'bg-[#12c26f]' : isRevisi ? 'bg-amber-400' : 'bg-[#3b82f6]'
-                      }`} />
-                      {doc.screening_status || 'Menunggu'}
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${label.cls}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${label.dot}`} />
+                      {label.text}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 truncate">
                     {hasFile ? doc.file_name : 'Belum diunggah'}
                   </p>
                   {isRevisi && doc.revision_notes && (
-                    <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1.5">
-                      <strong>Revisi:</strong> {doc.revision_notes}
+                    <p className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-1.5">
+                      <strong>Alasan tidak sesuai:</strong> {doc.revision_notes}
                     </p>
                   )}
                 </div>
@@ -623,14 +737,14 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
                   {canUpload ? (
                     <label className={`px-4 py-2 text-xs font-medium rounded-full cursor-pointer flex items-center gap-1.5 transition ${
                       isRevisi
-                        ? 'bg-amber-400 hover:bg-amber-500 text-slate-900 shadow-sm'
+                        ? 'bg-red-600 hover:bg-red-700 text-white shadow-sm'
                         : doc.file_path
                         ? 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/70 shadow-sm'
                         : 'bg-[#3b82f6] hover:bg-[#2f6fe0] text-white shadow-sm'
                     }`}>
                       <Upload className="w-3.5 h-3.5" />
                       <span>
-                        {uploadingDocId === doc.id ? '...' : isRevisi ? 'Perbaiki' : doc.file_path ? 'Ganti' : 'Unggah'}
+                        {uploadingDocId === doc.id ? '...' : isRevisi ? 'Unggah ulang' : doc.file_path ? 'Ganti' : 'Unggah'}
                       </span>
                       <input
                         type="file"
@@ -649,6 +763,64 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, default
           })}
         </div>
       </div>
+
+      {/* ══ UCAPAN SELAMAT: BARU SAJA AKTIF ══ */}
+      {showWelcome && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeWelcome}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="welcome-title"
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-md bg-white rounded-[28px] shadow-2xl overflow-hidden text-center"
+          >
+            <div className="accent-green px-6 pt-8 pb-10">
+              <div className="mx-auto w-16 h-16 rounded-full bg-white/25 flex items-center justify-center">
+                <PartyPopper className="w-8 h-8 text-white" />
+              </div>
+            </div>
+            <div className="-mt-6 mx-4 mb-4 bg-white rounded-3xl px-5 pt-6 pb-5">
+              <h3 id="welcome-title" className="text-xl font-medium text-slate-900">Selamat, Anda resmi menjadi anggota!</h3>
+              <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+                Pengajuan <strong className="font-medium text-slate-800">{sub.publisher_name}</strong> telah disetujui dan
+                ditandatangani Sekretaris serta Ketua. Anda kini terdaftar sebagai <strong className="font-medium text-emerald-700">anggota aktif IKAPI Jawa Barat</strong>
+                {sub.activated_at && <> sejak {formatLongDate(sub.activated_at)}</>}.
+              </p>
+              <p className="text-xs text-slate-500 mt-3">
+                Dokumen resmi (surat, formulir, berita acara & SK) sudah bisa diunduh. Nomor KTA akan tampil setelah dicatat pengurus.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2 mt-5">
+                <button
+                  onClick={() => { closeWelcome(); setShowPacket(true); }}
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium transition"
+                >
+                  <FileText className="w-4 h-4" /> Lihat dokumen
+                </button>
+                <button
+                  onClick={closeWelcome}
+                  className="flex-1 px-4 py-2.5 rounded-2xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-medium transition"
+                >
+                  Tutup
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ INVOICE MODAL ══ */}
+      {showInvoice && payment && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto">
+            <div className="flex justify-end mb-2">
+              <button onClick={() => setShowInvoice(false)} className="soft-pill !py-2 !text-xs">
+                <X className="w-4 h-4" /> Tutup
+              </button>
+            </div>
+            <PaymentInvoice submission={sub} payment={payment} settings={settings} />
+          </div>
+        </div>
+      )}
 
       {/* ══ PACKET MODAL ══ */}
       {showPacket && (

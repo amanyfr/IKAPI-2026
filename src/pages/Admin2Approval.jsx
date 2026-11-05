@@ -4,21 +4,19 @@ import CentralPacketExporter from '../components/CentralPacketExporter';
 import { useMySignature, MySignatureCard, SignLetterModal } from '../components/LetterSigning';
 import StatusStepper from '../components/StatusStepper';
 import {
-  Award, CheckCircle, XCircle, Send, FileText, Users,
+  Award, CheckCircle, XCircle, FileText, Users,
   DollarSign, Eye, PenTool, RefreshCw, Search, Activity,
   Clock, ShieldCheck, AlertCircle, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 const STAGE_PROGRESS = {
-  'Draf':                  { step: 1, total: 7, label: 'Tahap 1/7 · Pengisian Draf Pemohon', color: 'bg-slate-400' },
-  'Menunggu Pembayaran':   { step: 2, total: 7, label: 'Tahap 2/7 · Menunggu Bukti Transfer', color: 'bg-amber-500' },
-  'Menunggu Verifikasi':   { step: 3, total: 7, label: 'Tahap 3/7 · Screening Berkas (Sekretaris)', color: 'bg-[#0da2e7]' },
-  'Perlu Revisi':          { step: 3, total: 7, label: 'Tahap 3/7 · Dikembalikan untuk Revisi', color: 'bg-amber-500' },
-  'Menunggu Approval':     { step: 4, total: 7, label: 'Tahap 4/7 · Menunggu Approval & TTD Ketua', color: 'bg-indigo-600' },
-  'Disetujui':             { step: 5, total: 7, label: 'Tahap 5/7 · Disetujui & Surat Ditandatangani', color: 'bg-emerald-500' },
-  'Dikirim ke Pusat':      { step: 6, total: 7, label: 'Tahap 6/7 · Paket Dikirim ke IKAPI Pusat', color: 'bg-purple-600' },
-  'Aktif':                 { step: 7, total: 7, label: 'Tahap 7/7 · Anggota Resmi Aktif (KTA Terbit)', color: 'bg-emerald-600' },
-  'Ditolak':               { step: 0, total: 7, label: 'Pengajuan Ditolak oleh Pengurus', color: 'bg-red-500' },
+  'Draf':                  { step: 1, total: 5, label: 'Tahap 1/5 · Pengisian Draf Pemohon', color: 'bg-slate-400' },
+  'Menunggu Pembayaran':   { step: 2, total: 5, label: 'Tahap 2/5 · Menunggu Bukti Transfer', color: 'bg-amber-500' },
+  'Menunggu Verifikasi':   { step: 3, total: 5, label: 'Tahap 3/5 · Screening Admin & TTD Sekretaris', color: 'bg-[#0da2e7]' },
+  'Perlu Revisi':          { step: 3, total: 5, label: 'Tahap 3/5 · Dikembalikan untuk Revisi', color: 'bg-amber-500' },
+  'Menunggu Approval':     { step: 4, total: 5, label: 'Tahap 4/5 · Menunggu Approval & TTD Ketua', color: 'bg-indigo-600' },
+  'Aktif':                 { step: 5, total: 5, label: 'Tahap 5/5 · Resmi Menjadi Anggota Aktif', color: 'bg-emerald-600' },
+  'Ditolak':               { step: 0, total: 5, label: 'Pengajuan Ditolak oleh Pengurus', color: 'bg-red-500' },
 };
 
 const STATUS_BADGE = {
@@ -27,8 +25,6 @@ const STATUS_BADGE = {
   'Menunggu Verifikasi':   'bg-[#f0f9ff] text-[#0884c4] border-[#b8e6fc]',
   'Perlu Revisi':          'bg-amber-100 text-amber-800 border-amber-300',
   'Menunggu Approval':     'bg-indigo-50 text-indigo-800 border-indigo-200',
-  'Disetujui':             'bg-emerald-50 text-emerald-800 border-emerald-200',
-  'Dikirim ke Pusat':      'bg-purple-50 text-purple-800 border-purple-200',
   'Aktif':                 'bg-emerald-100 text-emerald-900 border-emerald-300',
   'Ditolak':               'bg-red-50 text-red-800 border-red-200',
 };
@@ -109,7 +105,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
     }
   };
 
-  // Ketua Action (approve / reject / send_to_central)
+  // Ketua Action (approve / reject)
   const handleAdmin2Action = async (subId, action, reason = null, extra = {}) => {
     setProcessing(true);
     try {
@@ -138,7 +134,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
 
   // Filtered submissions
   const pendingApproval = submissions.filter(s => s.status === 'Menunggu Approval');
-  const signedList = submissions.filter(s => ['Disetujui', 'Dikirim ke Pusat', 'Aktif'].includes(s.status));
+  const signedList = submissions.filter(s => s.status === 'Aktif');
 
   const filteredMonitoring = submissions.filter(s => {
     const matchStatus = monitorStatus === 'Semua' || s.status === monitorStatus;
@@ -216,7 +212,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
             <span className="text-2xl font-black text-emerald-600 mt-1 block">
               {signedList.length}
             </span>
-            <span className="text-[10px] text-slate-400">Disetujui / Dikirim / Aktif</span>
+            <span className="text-[10px] text-slate-400">Disetujui & aktif</span>
           </div>
           <div className="hidden sm:block p-3 bg-emerald-50 text-emerald-600 rounded-xl">
             <CheckCircle className="w-6 h-6" />
@@ -345,7 +341,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
             <FileText className="w-5 h-5 text-[#0da2e7]" />
             <div>
               <h3 className="text-lg text-slate-800">
-                Dokumen Surat Pengantar Resmi & Pengiriman ke IKAPI Pusat
+                Dokumen Resmi Anggota yang Disetujui
               </h3>
               <p className="text-[11px] text-slate-500">
                 Daftar surat pengantar yang telah dibubuhi tanda tangan Ketua & Sekretaris beserta status pengirimannya.
@@ -364,7 +360,6 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
             </div>
           ) : (
             signedList.map((sub) => {
-              const isDisetujui = sub.status === 'Disetujui';
               return (
                 <div key={sub.id} className="p-5 hover:bg-slate-50 transition flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
@@ -393,16 +388,6 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                       <FileText className="w-3.5 h-3.5" /> Lihat & Cetak Surat Pengantar (PDF)
                     </button>
 
-                    {isDisetujui && (
-                      <button
-                        onClick={() => handleAdmin2Action(sub.id, 'send_to_central')}
-                        disabled={processing}
-                        className="px-3.5 py-1.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-1.5"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        Tandai Dikirim ke IKAPI Pusat
-                      </button>
-                    )}
                   </div>
                 </div>
               );
@@ -449,31 +434,25 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
               >
                 <option value="Semua">Semua Tahapan Status ({submissions.length})</option>
                 <option value="Draf">Draf</option>
-                <option value="Menunggu Verifikasi">Menunggu Verifikasi (Sekretaris)</option>
+                <option value="Menunggu Verifikasi">Screening & TTD Sekretaris</option>
                 <option value="Perlu Revisi">Perlu Revisi</option>
                 <option value="Menunggu Approval">Menunggu Approval (Ketua)</option>
-                <option value="Disetujui">Disetujui</option>
-                <option value="Dikirim ke Pusat">Dikirim ke Pusat</option>
-                <option value="Aktif">Aktif (KTA Terbit)</option>
+                <option value="Aktif">Anggota Aktif</option>
                 <option value="Ditolak">Ditolak</option>
               </select>
             </div>
           </div>
 
           {/* Mini Stage Summary Pills */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-1">
             {[
-              { label: 'Screening Sekretaris', status: 'Menunggu Verifikasi', color: 'text-[#0884c4] bg-[#f0f9ff] border-[#b8e6fc]' },
+              { label: 'Screening & TTD Sekretaris', status: 'Menunggu Verifikasi', color: 'text-[#0884c4] bg-[#f0f9ff] border-[#b8e6fc]' },
               { label: 'Perlu Revisi', status: 'Perlu Revisi', color: 'text-amber-800 bg-amber-50 border-amber-200' },
               { label: 'Menunggu Approval', status: 'Menunggu Approval', color: 'text-indigo-800 bg-indigo-50 border-indigo-200' },
-              { label: 'Disetujui & TTD', status: 'Disetujui', color: 'text-emerald-800 bg-emerald-50 border-emerald-200' },
-              { label: 'Dikirim ke Pusat', status: 'Dikirim ke Pusat', color: 'text-purple-800 bg-purple-50 border-purple-200' },
-              { label: 'Anggota Aktif / Ditolak', status: 'Aktif', color: 'text-slate-700 bg-slate-50 border-slate-200' },
+              { label: 'Anggota Aktif', status: 'Aktif', color: 'text-emerald-800 bg-emerald-50 border-emerald-200' },
+              { label: 'Ditolak', status: 'Ditolak', color: 'text-red-800 bg-red-50 border-red-200' },
             ].map((pill) => {
-              const count =
-                pill.status === 'Aktif'
-                  ? submissions.filter(s => s.status === 'Aktif' || s.status === 'Ditolak').length
-                  : submissions.filter(s => s.status === pill.status).length;
+              const count = submissions.filter(s => s.status === pill.status).length;
               return (
                 <button
                   key={pill.label}

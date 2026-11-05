@@ -22,7 +22,8 @@ export default function DocumentVerificationModal({
   onScreenDocument, 
   onVerifyPayment, 
   onAdmin1Action,
-  onPassToAdmin2 // opsional: alur pembubuhan TTD Sekretaris sebelum diteruskan
+  onPassToAdmin2, // opsional: alur lanjutan (TTD Sekretaris, atau tandai lolos screening oleh Admin)
+  passLabel
 }) {
   const [activeTab, setActiveTab] = useState('documents'); // 'documents' | 'payment' | 'action'
   const [revisionNotes, setRevisionNotes] = useState({});
@@ -87,7 +88,7 @@ export default function DocumentVerificationModal({
             </div>
             <div>
               <h3 className="font-medium text-base sm:text-lg leading-tight">
-                Screening Berkas & Verifikasi Pembayaran (Sekretaris)
+                Screening Berkas & Verifikasi Pembayaran
               </h3>
               <p className="text-xs text-[#dff2fd] mt-0.5">
                 {submission.publisher_name} • Kategori {submission.member_category || submission.category} ({submission.submission_type})
@@ -394,7 +395,7 @@ export default function DocumentVerificationModal({
                   }`}
                 >
                   <CheckCircle className="w-4 h-4 text-amber-300" />
-                  {onPassToAdmin2 ? 'Tanda Tangani & Teruskan ke Ketua' : 'Loloskan & Teruskan ke Ketua (Approval)'}
+                  {passLabel || (onPassToAdmin2 ? 'Tanda Tangani & Teruskan ke Ketua' : 'Loloskan & Teruskan ke Ketua (Approval)')}
                 </button>
               </div>
             </div>
