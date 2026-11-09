@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { PenLine, PenTool, CheckCircle, Check, X, Paperclip, ExternalLink, Lock } from 'lucide-react';
 import SignaturePad from './SignaturePad';
 import OfficialLetterGenerator from './OfficialLetterGenerator';
@@ -64,7 +65,8 @@ export function useMySignature(enabled = true) {
 }
 
 function SignatureEditorModal({ title, signature, saving, onSave, onClose }) {
-  return (
+  // Dirender di <body> agar tidak terpotong oleh kontainer halaman (transform/overflow)
+  return createPortal(
     <div className="fixed inset-0 z-[60] overflow-y-auto modal-overlay flex items-center justify-center p-4">
       <div className="modal-surface max-w-lg w-full p-5 sm:p-6 space-y-4">
         <div className="flex items-start justify-between gap-3">
@@ -79,7 +81,7 @@ function SignatureEditorModal({ title, signature, saving, onSave, onClose }) {
         <SignaturePad onSave={onSave} saving={saving} initialImage={signature} />
       </div>
     </div>
-  );
+  , document.body);
 }
 
 // Kartu "Tanda tangan saya" + editor untuk membuat / mengganti TTD tersimpan
@@ -184,8 +186,9 @@ export function SignLetterModal({
 
   const ActiveDocument = DOC_COMPONENTS[activeDoc];
 
-  return (
-    <div className="fixed inset-0 z-50 modal-overlay flex items-stretch sm:items-center justify-center sm:p-4">
+  // Dirender di <body> agar menutup seluruh layar dan tidak terpotong oleh kontainer halaman
+  return createPortal(
+    <div className="fixed inset-0 z-[70] modal-overlay flex items-stretch sm:items-center justify-center sm:p-4">
       <div className="modal-surface w-full max-w-4xl sm:max-h-[94vh] flex flex-col overflow-hidden !rounded-none sm:!rounded-3xl">
         <div className="bg-[#0da2e7] text-white px-4 sm:px-6 py-3.5 flex items-center gap-3">
           <div className="p-2 bg-white/20 rounded-xl">
@@ -334,5 +337,5 @@ export function SignLetterModal({
         )}
       </div>
     </div>
-  );
+  , document.body);
 }

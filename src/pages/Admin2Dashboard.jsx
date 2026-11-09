@@ -5,6 +5,7 @@ import {
   parseDate, submittedDate, timeAgo, initials, pct,
   buildTrend, TrendChart, TrendLegend, PositionBubbles, RangeToggle
 } from '../components/DashboardWidgets';
+import QueueCard, { QueueFooter, QueueFilterBar } from '../components/QueueCard';
 import {
   ArrowUpRight, ArrowRight, PenTool, FileCheck2, Wallet, RefreshCw, ChevronDown, Lightbulb,
   Award, Activity, Users, Search, Sparkles
@@ -16,13 +17,15 @@ const PENDING   = ['Menunggu Approval'];
 const SIGNED    = POST_APPROVAL_STATUSES;
 const REJECTED  = ['Ditolak'];
 
-const STATUS_CHIP = {
-  'Menunggu Approval': 'bg-indigo-600 text-white',
-  'Pengiriman Berkas': 'bg-orange-100 text-orange-800 ring-1 ring-orange-200',
-  'Berkas Diterima':   'bg-violet-100 text-violet-800 ring-1 ring-violet-200',
-  'Dikirim ke Pusat':  'bg-violet-100 text-violet-800 ring-1 ring-violet-200',
-  'Aktif':             'bg-emerald-600 text-white',
-  'Ditolak':           'bg-red-100 text-red-800 ring-1 ring-red-200',
+// Label kartu: apa yang sedang terjadi / perlu dilakukan
+const CARD = {
+  'Menunggu Approval': { label: 'Perlu persetujuan Anda', chip: 'bg-indigo-100 text-indigo-800',   dot: 'bg-indigo-600' },
+  'Perlu Revisi':      { label: 'Revisi oleh pemohon',    chip: 'bg-amber-100 text-amber-800',     dot: 'bg-amber-500' },
+  'Pengiriman Berkas': { label: 'Menunggu berkas fisik',  chip: 'bg-orange-100 text-orange-800',   dot: 'bg-orange-500' },
+  'Berkas Diterima':   { label: 'Diproses ke Pusat',      chip: 'bg-violet-100 text-violet-800',   dot: 'bg-violet-500' },
+  'Dikirim ke Pusat':  { label: 'Diproses di Pusat',      chip: 'bg-violet-100 text-violet-800',   dot: 'bg-violet-500' },
+  'Aktif':             { label: 'Anggota aktif',          chip: 'bg-emerald-100 text-emerald-800', dot: 'bg-emerald-500' },
+  'Ditolak':           { label: 'Ditolak',                chip: 'bg-red-100 text-red-800',         dot: 'bg-red-500' },
 };
 
 const TREND_SERIES = [
@@ -72,7 +75,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
 
   const queue = useMemo(() => {
     const list = submissions.filter((s) =>
-      queueFilter === 'Semua' ? [...PENDING, ...SIGNED, ...REJECTED].includes(s.status) : queueFilter === 'Dikirim ke Pusat' ? ['Berkas Diterima', 'Dikirim ke Pusat'].includes(s.status) : s.status === queueFilter
+      queueFilter === 'Semua' ? [...PENDING, 'Perlu Revisi', ...SIGNED, ...REJECTED].includes(s.status) : queueFilter === 'Dikirim ke Pusat' ? ['Berkas Diterima', 'Dikirim ke Pusat'].includes(s.status) : s.status === queueFilter
     );
     // Yang paling lama menunggu tampil duluan agar tidak terlewat
     return list.sort((a, b) => (parseDate(a.updated_at) || 0) - (parseDate(b.updated_at) || 0));
@@ -91,12 +94,13 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
 
   // Satu filter untuk antrian (menggantikan widget "Keputusan" terpisah)
   const FILTERS = [
-    { key: 'Menunggu Approval', label: 'Menunggu approval', value: pending, dot: 'bg-indigo-600' },
+    { key: 'Menunggu Approval', label: 'Approval', value: pending, dot: 'bg-indigo-600' },
+    { key: 'Perlu Revisi', label: 'Revisi', value: count(['Perlu Revisi']), dot: 'bg-amber-500' },
     { key: 'Pengiriman Berkas', label: 'Berkas fisik', value: count(['Pengiriman Berkas']), dot: 'bg-orange-500' },
     { key: 'Dikirim ke Pusat', label: 'Proses Pusat', value: count(['Berkas Diterima', 'Dikirim ke Pusat']), dot: 'bg-violet-500' },
-    { key: 'Aktif', label: 'Anggota aktif', value: count(['Aktif']), dot: 'bg-emerald-500' },
+    { key: 'Aktif', label: 'Aktif', value: count(['Aktif']), dot: 'bg-emerald-500' },
     { key: 'Ditolak', label: 'Ditolak', value: rejected, dot: 'bg-red-500' },
-    { key: 'Semua', label: 'Semua', value: pending + signed + rejected, dot: 'bg-slate-400' },
+    { key: 'Semua', label: 'Semua', value: pending + count(['Perlu Revisi']) + signed + rejected, dot: 'bg-slate-400' },
   ];
 
   return (
@@ -136,24 +140,14 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
       {/* ══ Widget utama: antrian keputusan + tanda tangan ══ */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="card-surface p-4 sm:p-5 lg:col-span-9 flex flex-col">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-3">
-            <h2 className="text-lg text-slate-800 whitespace-nowrap">Antrian keputusan</h2>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {FILTERS.map((f) => (
-                <button key={f.key} onClick={() => setQueueFilter(f.key)}
-                  className={`flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-full text-xs border transition ${
-                    queueFilter === f.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-700 border-slate-200/70 hover:bg-white'}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />
-                  {f.label}
-                  <span className={`min-w-[1.5rem] text-center rounded-full px-1.5 py-0.5 font-semibold ${queueFilter === f.key ? 'bg-white/20' : 'bg-slate-900/5'}`}>{f.value}</span>
-                </button>
-              ))}
-              <button onClick={fetchSubmissions} title="Segarkan data"
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-indigo-600 transition">
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-          </div>
+          <QueueFilterBar
+            title="Antrian keputusan"
+            filters={FILTERS}
+            active={queueFilter}
+            onChange={(k) => { setQueueFilter(k); setShowAllQueue(false); }}
+            onRefresh={fetchSubmissions}
+            loading={loading}
+          />
 
           {queue.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-sm text-slate-500 py-10">
@@ -162,75 +156,30 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
           ) : (
             <div>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                {displayQueue.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => (s.status === 'Menunggu Approval' ? onOpenApproval() : onOpenApproval({ search: s.publisher_name || '' }))}
-                    className="text-left rounded-2xl bg-slate-50 hover:bg-white hover:border-[#0da2e7] hover:shadow-md border border-slate-200/80 p-4 flex flex-col justify-between transition-all group min-h-[142px]"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${STATUS_CHIP[s.status] || 'bg-slate-100 text-slate-700'}`}>
-                          {STATUS_LABEL[s.status] || s.status}
-                        </span>
-                        <span className="text-[11px] text-slate-500 font-medium">{timeAgo(s.updated_at)}</span>
-                      </div>
-
-                      <p className="text-sm text-slate-900 font-bold mt-2.5 truncate group-hover:text-[#0884c4] transition-colors">
-                        {s.publisher_name || '-'}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5 truncate">
-                        {s.submission_type} · {s.member_category} · {s.city || '-'}
-                      </p>
-                      <p className="text-[11px] font-mono text-[#0884c4] mt-1.5 truncate">
-                        {s.reference_number || 'No. surat belum terbit'}
-                      </p>
-                      {s.status === 'Ditolak' && s.rejection_reason && (
-                        <p className="text-[11px] text-red-700 mt-1 line-clamp-2">Alasan: {s.rejection_reason}</p>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-200/60">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="w-7 h-7 flex-shrink-0 rounded-full bg-gradient-to-br from-indigo-500 to-blue-700 text-white text-[11px] font-semibold flex items-center justify-center shadow-xs">
-                          {initials(s.applicant_name)}
-                        </span>
-                        <div className="min-w-0 leading-tight">
-                          <span className="block text-xs font-medium text-slate-800 truncate">{s.applicant_name}</span>
-                          <span className="block text-[10px] text-slate-500 truncate">{s.applicant_email}</span>
-                        </div>
-                      </div>
-                      <span className="text-xs font-semibold text-[#0884c4] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 flex-shrink-0">
-                        {s.status === 'Menunggu Approval' ? 'Setujui' : 'Tinjau'} <ArrowRight className="w-3.5 h-3.5" />
-                      </span>
-                    </div>
-                  </button>
-                ))}
+                {displayQueue.map((s) => {
+                  const c = CARD[s.status] || { label: STATUS_LABEL[s.status] || s.status };
+                  const note = s.status === 'Ditolak'
+                    ? (s.rejection_reason ? `Alasan: ${s.rejection_reason}` : null)
+                    : s.reference_number ? `No. surat ${s.reference_number}` : null;
+                  return (
+                    <QueueCard
+                      key={s.id}
+                      sub={s}
+                      label={c.label}
+                      tone={c}
+                      note={note}
+                      noteTone={s.status === 'Ditolak' ? 'text-red-700' : 'text-slate-500 font-mono'}
+                      actionLabel={s.status === 'Menunggu Approval' ? 'Tinjau & setujui' : 'Lihat detail'}
+                      onClick={() => (s.status === 'Menunggu Approval' ? onOpenApproval() : onOpenApproval({ search: s.publisher_name || '' }))}
+                    />
+                  );
+                })}
               </div>
 
               {queue.length > 6 && (
-                <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                  <span>
-                    Menampilkan {displayQueue.length} dari {queue.length} antrian keputusan
-                  </span>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowAllQueue(!showAllQueue)}
-                      className="font-medium text-slate-700 hover:text-slate-900 underline cursor-pointer"
-                    >
-                      {showAllQueue ? 'Tampilkan ringkas (6)' : `Tampilkan semua (${queue.length})`}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onOpenApproval?.()}
-                      className="font-semibold text-[#0884c4] hover:text-[#066190] hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>Buka di menu Approval</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
+                <QueueFooter shown={displayQueue.length} total={queue.length} noun="pengajuan"
+                  expanded={showAllQueue} onToggle={() => setShowAllQueue(!showAllQueue)}
+                  linkLabel="Buka menu Approval" onLink={() => onOpenApproval?.()} />
               )}
             </div>
           )}

@@ -14,6 +14,9 @@ export default function AdminPortal() {
   // Filter awal Kelola Akun saat dibuka dari Dashboard; key memaksa remount agar filter terpakai
   const [userFilters, setUserFilters] = useState({ key: 0 });
   const [screeningFilter, setScreeningFilter] = useState({ key: 0, status: 'Semua' });
+  // Detail satu pengajuan yang dibuka dari kartu Tugas Admin di Dashboard
+  const [detailId, setDetailId] = useState(null);
+  const [dashboardKey, setDashboardKey] = useState(0);
 
   const openScreening = (status = 'Semua') => {
     setScreeningFilter({ key: Date.now(), status });
@@ -101,10 +104,19 @@ export default function AdminPortal() {
       <main className="relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {activeTab === 'dashboard' && (
           <AdminDashboard
+            key={dashboardKey}
+            onOpenDetail={setDetailId}
             onOpenUsers={openUsers}
             onOpenSettings={() => setActiveTab('settings')}
             onOpenScreening={openScreening}
             onOpenMonitoring={() => setActiveTab('monitoring')}
+          />
+        )}
+        {activeTab === 'dashboard' && detailId && (
+          <Admin1Screening
+            key={detailId}
+            openSubmissionId={detailId}
+            onDetailClosed={() => { setDetailId(null); setDashboardKey(Date.now()); }}
           />
         )}
         {activeTab === 'users' && (

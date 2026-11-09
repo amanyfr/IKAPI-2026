@@ -5,7 +5,7 @@ import { Loader2, Package, FileText, FileSpreadsheet, Paperclip, Printer, Extern
 import OfficialLetterGenerator from './OfficialLetterGenerator';
 import OfficialApplicationFormPdf from './OfficialApplicationFormPdf';
 import { BeritaAcaraVerifikasi, SuratKeputusan } from './PengurusDocuments';
-import { KopSurat, formatLongDate } from './PengurusSignature';
+import { KopSurat, KopSuratFooter, formatLongDate } from './PengurusSignature';
 import { fileUrl, authUrl } from '../utils/fileUrl';
 import { downloadElementPdf, downloadElementsPdf, printElement, safeFileName } from '../utils/exportDocument';
 import { notify } from './AppDialog';
@@ -92,6 +92,7 @@ function PhysicalChecklistSheet({ submission, documents, settings }) {
             <p className="mt-12">( ____________________ )</p>
           </div>
         </div>
+        <KopSuratFooter className="mt-10" />
       </div>
     </div>
   );

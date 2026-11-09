@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { STATUS_LABEL } from '../components/StatusStepper';
+import QueueCard, { QueueFooter, QueueFilterBar } from '../components/QueueCard';
+import { revisionRoundIn } from '../components/StatusStepper';
 import {
   parseDate, submittedDate, timeAgo, initials, pct, greetingName,
   buildTrend, TrendChart, TrendLegend, RangeToggle
@@ -39,7 +40,7 @@ const settingsChecklist = (s) => [
 
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` });
 
-export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScreening, onOpenMonitoring }) {
+export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScreening, onOpenMonitoring, onOpenDetail }) {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
   const [submissions, setSubmissions] = useState([]);
@@ -88,16 +89,29 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   // Tugas Admin: screening dokumen (Tahap 1), verifikasi bayar (Tahap 2), konfirmasi berkas fisik
   // (setelah pemohon menandai sudah dikirim), dan mengirim paket ke IKAPI Pusat
   const TASKS = [
-    { key: 'screening', label: 'Screening dokumen', dot: 'bg-[#0da2e7]', icon: ShieldCheck, test: (x) => x.status === 'Menunggu Verifikasi' },
-    { key: 'bayar', label: 'Verifikasi bayar', dot: 'bg-amber-400', icon: CreditCard, test: (x) => x.status === 'Menunggu Pembayaran' && x.payment_status === 'Menunggu' && Boolean(x.payment_proof) },
-    { key: 'fisik', label: 'Konfirmasi berkas', dot: 'bg-orange-500', icon: Truck, test: (x) => x.status === 'Pengiriman Berkas' && x.physical_status === 'Dikirim' },
-    { key: 'pusat', label: 'Kirim ke Pusat', dot: 'bg-violet-500', icon: Truck, test: (x) => x.status === 'Berkas Diterima' },
+    { key: 'screening', label: 'Screening berkas', action: 'Screening berkas', dot: 'bg-[#0da2e7]', chip: 'bg-sky-100 text-sky-800', icon: ShieldCheck, test: (x) => x.status === 'Menunggu Verifikasi' && !revisionRoundIn(x) },
+    // Pemohon sudah mengirim dokumen perbaikan: diperiksa ulang, ditandai "Revisi ke-N"
+    { key: 'revisi', label: 'Revisi', action: 'Periksa revisi', dot: 'bg-amber-500', chip: 'bg-amber-100 text-amber-900', icon: RefreshCw, test: (x) => revisionRoundIn(x) > 0 },
+    { key: 'bayar', label: 'Verifikasi bayar', action: 'Cek bukti pembayaran', dot: 'bg-amber-400', chip: 'bg-amber-100 text-amber-800', icon: CreditCard, test: (x) => x.status === 'Menunggu Pembayaran' && x.payment_status === 'Menunggu' && Boolean(x.payment_proof) },
+    { key: 'fisik', label: 'Berkas fisik', action: 'Konfirmasi berkas fisik', dot: 'bg-orange-500', chip: 'bg-orange-100 text-orange-800', icon: Truck, test: (x) => x.status === 'Pengiriman Berkas' && x.physical_status === 'Dikirim' },
+    { key: 'pusat', label: 'Kirim ke Pusat', action: 'Kirim berkas ke Pusat', dot: 'bg-violet-500', chip: 'bg-violet-100 text-violet-800', icon: Truck, test: (x) => x.status === 'Berkas Diterima' },
   ];
+  // Pengajuan berjalan yang sedang menunggu pihak lain (pemohon, Sekretaris, Ketua, Pusat):
+  // hanya tampil di filter "Semua" agar Admin melihat posisi semua pengajuan
+  const WAITING = {
+    'Perlu Revisi': { label: 'Revisi oleh pemohon', dot: 'bg-amber-400', chip: 'bg-amber-50 text-amber-800' },
+    'Menunggu Pembayaran': { label: 'Menunggu pembayaran', dot: 'bg-slate-400', chip: 'bg-slate-100 text-slate-700' },
+    'Menunggu TTD Sekretaris': { label: 'Menunggu TTD Sekretaris', dot: 'bg-indigo-400', chip: 'bg-indigo-50 text-indigo-800' },
+    'Menunggu Approval': { label: 'Menunggu persetujuan Ketua', dot: 'bg-indigo-400', chip: 'bg-indigo-50 text-indigo-800' },
+    'Pengiriman Berkas': { label: 'Menunggu berkas fisik', dot: 'bg-orange-300', chip: 'bg-orange-50 text-orange-800' },
+    'Dikirim ke Pusat': { label: 'Diproses di Pusat', dot: 'bg-violet-400', chip: 'bg-violet-50 text-violet-800' },
+  };
   const taskOf = (x) => TASKS.find((t) => t.test(x));
+  const cardOf = (x) => { const t = taskOf(x); return t ? { ...t, label: t.action, isTask: true } : (WAITING[x.status] ? { key: 'tunggu', ...WAITING[x.status] } : null); };
   const tasks = useMemo(
     () => submissions
-      .filter((x) => taskOf(x) && (taskFilter === 'Semua' || taskOf(x).key === taskFilter))
-      .sort((a, b) => (parseDate(a.updated_at) || 0) - (parseDate(b.updated_at) || 0)),
+      .filter((x) => (taskFilter === 'Semua' ? cardOf(x) : taskOf(x)?.key === taskFilter))
+      .sort((a, b) => (taskOf(b) ? 1 : 0) - (taskOf(a) ? 1 : 0) || (parseDate(a.updated_at) || 0) - (parseDate(b.updated_at) || 0)),
     [submissions, taskFilter]
   );
   const displayTasks = showAllTasks ? tasks : tasks.slice(0, 6);
@@ -110,7 +124,9 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
     onOpenUsers({ search: search.trim() });
   };
 
+  // Satu kartu = satu pengajuan: langsung buka detailnya
   const openTask = (x) => {
+    if (onOpenDetail) return onOpenDetail(x.id);
     const t = taskOf(x)?.key;
     if (t === 'fisik' || t === 'pusat') onOpenMonitoring?.();
     else onOpenScreening?.(x.status);
@@ -130,7 +146,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
         <div className="grid grid-cols-3 gap-3 sm:flex sm:gap-8">
           {TASKS.map(({ key, label, icon: Icon }, i) => (
             <button key={key} onClick={() => { setTaskFilter(key); setShowAllTasks(false); }} className="flex items-center gap-2.5 text-left">
-              <span className={`w-8 h-8 flex-shrink-0 rounded-full flex items-center justify-center ring-4 ring-white/70 ${['bg-sky-100 text-[#0884c4]', 'bg-amber-100 text-amber-700', 'bg-orange-100 text-orange-700'][i]}`}>
+              <span className={`w-8 h-8 flex-shrink-0 rounded-full flex items-center justify-center ring-4 ring-white/70 ${TASKS[i].chip}`}>
                 <Icon className="w-4 h-4" />
               </span>
               <span className="leading-tight">
@@ -145,26 +161,17 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
       {/* ══ Widget utama: tugas Admin + kesiapan sistem ══ */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="card-surface p-4 sm:p-5 lg:col-span-9 flex flex-col">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-3.5">
-            <h2 className="text-lg text-slate-800 whitespace-nowrap">Tugas Admin</h2>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {[...TASKS, { key: 'Semua', label: 'Semua', dot: 'bg-slate-400' }].map((f) => (
-                <button key={f.key} onClick={() => { setTaskFilter(f.key); setShowAllTasks(false); }}
-                  className={`flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-full text-xs border transition ${
-                    taskFilter === f.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-700 border-slate-200/70 hover:bg-white'}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />
-                  {f.label}
-                  <span className={`min-w-[1.5rem] text-center rounded-full px-1.5 py-0.5 font-semibold ${taskFilter === f.key ? 'bg-white/20' : 'bg-slate-900/5'}`}>
-                    {f.key === 'Semua' ? TASKS.reduce((n, t) => n + taskCount(t.key), 0) : taskCount(f.key)}
-                  </span>
-                </button>
-              ))}
-              <button onClick={fetchData} title="Segarkan data"
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-blue-800 transition">
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-          </div>
+          <QueueFilterBar
+            title="Tugas Admin"
+            filters={[
+              ...TASKS.map((f) => ({ key: f.key, label: f.label, dot: f.dot, value: taskCount(f.key) })),
+              { key: 'Semua', label: 'Semua', dot: 'bg-slate-400', value: submissions.filter((x) => cardOf(x)).length },
+            ]}
+            active={taskFilter}
+            onChange={(k) => { setTaskFilter(k); setShowAllTasks(false); }}
+            onRefresh={fetchData}
+            loading={loading}
+          />
 
           {tasks.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-sm text-slate-500 py-10">
@@ -174,77 +181,28 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
             <div>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                 {displayTasks.map((x) => {
-                  const t = taskOf(x);
+                  const t = cardOf(x);
+                  const round = revisionRoundIn(x);
                   return (
-                    <button
+                    <QueueCard
                       key={x.id}
+                      sub={x}
+                      label={t.label}
+                      tone={t}
+                      revisionRound={round}
+                      note={t.key === 'fisik' ? `Dikirim lewat ${x.physical_courier || '-'}` : null}
+                      noteTone="text-orange-700"
                       onClick={() => openTask(x)}
-                      className="text-left rounded-2xl bg-slate-50 hover:bg-white hover:border-[#0da2e7] hover:shadow-md border border-slate-200/80 p-4 flex flex-col justify-between transition-all group min-h-[142px]"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-slate-900 text-white flex items-center gap-1.5 shadow-sm">
-                            <span className={`w-1.5 h-1.5 rounded-full ${t.dot}`} />
-                            {t.label}
-                          </span>
-                          <span className="text-[11px] text-slate-500 font-medium">{timeAgo(x.updated_at)}</span>
-                        </div>
-
-                        <p className="text-sm text-slate-900 font-bold mt-2.5 truncate group-hover:text-[#0884c4] transition-colors">
-                          {x.publisher_name || 'Tanpa Nama Penerbit'}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-0.5 truncate">
-                          {x.submission_type} · {x.member_category} · {STATUS_LABEL[x.status] || x.status}
-                        </p>
-                        {t.key === 'fisik' && (
-                          <p className="text-[11px] text-orange-700 mt-1 truncate font-medium">
-                            Dikirim pemohon · {x.physical_courier || '-'}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-200/60">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="w-7 h-7 flex-shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-blue-800 text-white text-[11px] font-semibold flex items-center justify-center shadow-xs">
-                            {initials(x.applicant_name)}
-                          </span>
-                          <div className="min-w-0 leading-tight">
-                            <span className="block text-xs font-medium text-slate-800 truncate">{x.applicant_name}</span>
-                            <span className="block text-[10px] text-slate-500 truncate">{x.applicant_email}</span>
-                          </div>
-                        </div>
-                        <span className="text-xs font-semibold text-[#0884c4] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 flex-shrink-0">
-                          Periksa <ArrowRight className="w-3.5 h-3.5" />
-                        </span>
-                      </div>
-                    </button>
+                    />
                   );
                 })}
               </div>
 
               {tasks.length > 6 && (
-                <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                  <span>
-                    Menampilkan {displayTasks.length} dari {tasks.length} tugas yang perlu ditindaklanjuti
-                  </span>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowAllTasks(!showAllTasks)}
-                      className="font-medium text-slate-700 hover:text-slate-900 underline cursor-pointer"
-                    >
-                      {showAllTasks ? 'Tampilkan ringkas (6)' : `Tampilkan semua (${tasks.length})`}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onOpenScreening?.()}
-                      className="font-semibold text-[#0884c4] hover:text-[#066190] hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>Buka di menu Screening</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
+                <QueueFooter shown={displayTasks.length} total={tasks.length}
+                  noun={taskFilter === 'Semua' ? 'pengajuan berjalan' : 'tugas'}
+                  expanded={showAllTasks} onToggle={() => setShowAllTasks(!showAllTasks)}
+                  linkLabel="Buka menu Screening" onLink={() => onOpenScreening?.()} />
               )}
             </div>
           )}

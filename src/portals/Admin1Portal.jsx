@@ -11,6 +11,9 @@ export default function Admin1Portal() {
   const [activeTab, setActiveTab] = useState('dashboard');
   // Filter awal halaman Screening saat dibuka dari Dashboard; key memaksa remount agar filter terpakai
   const [screeningFilters, setScreeningFilters] = useState({ key: 0 });
+  // Kartu Dashboard = satu pengajuan: buka detailnya langsung, tanpa pindah ke halaman Screening
+  const [detailId, setDetailId] = useState(null);
+  const [dashboardKey, setDashboardKey] = useState(0);
 
   const openScreening = (filters = {}) => {
     setScreeningFilters({ ...filters, key: Date.now() });
@@ -20,6 +23,7 @@ export default function Admin1Portal() {
   // Data Anggota bisa dibuka langsung ke tab 'Menunggu KTA'
   const [membersFilter, setMembersFilter] = useState({ key: 0 });
   const openMembers = (f) => {
+    setDetailId(null);
     setMembersFilter({ status: typeof f?.status === 'string' ? f.status : undefined, key: Date.now() });
     setActiveTab('members');
   };
@@ -99,8 +103,18 @@ export default function Admin1Portal() {
       <main className="relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {activeTab === 'dashboard' && (
           <Admin1Dashboard
+            key={dashboardKey}
+            onOpenDetail={setDetailId}
             onOpenScreening={openScreening}
             onOpenMembers={() => openMembers({ status: 'Menunggu KTA' })}
+          />
+        )}
+        {activeTab === 'dashboard' && detailId && (
+          <Admin1Screening
+            key={detailId}
+            openSubmissionId={detailId}
+            onNavigateToMembers={openMembers}
+            onDetailClosed={() => { setDetailId(null); setDashboardKey(Date.now()); }}
           />
         )}
         {activeTab === 'screening' && (

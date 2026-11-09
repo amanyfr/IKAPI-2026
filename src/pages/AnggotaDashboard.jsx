@@ -9,20 +9,23 @@ import PaymentInvoice, { downloadInvoicePdf, invoiceNumber, isInvoicePaid } from
 import { feesFromSettings, formatRupiah } from '../utils/fees';
 import { formatLongDate } from '../components/PengurusSignature';
 import { fileUrl } from '../utils/fileUrl';
+import { canMarkFile, parseMarks, adminGeneralNote } from '../components/DocumentMarker';
+import RevisionMarksViewer from '../components/RevisionMarksViewer';
 import { FILTERS, NUMERIC } from '../utils/inputFilters';
 import {
   Building2, CreditCard, Upload, FileText, AlertCircle,
   CheckCircle, ExternalLink, RefreshCw,
   Edit3, GraduationCap, ArrowRight, UserPlus, X,
   ShieldCheck, Landmark, Receipt, Download, XCircle, PartyPopper,
-  Printer, Truck, Clock, PenLine, MapPin, Info, ArrowLeft, Send, Phone, Mail
+  Printer, Truck, Clock, PenLine, MapPin, Info, ArrowLeft, Send, Phone, Mail, Eye, Trash2
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
+import UploadReviewDialog, { formatFileSize } from '../components/UploadReviewDialog';
 
 // Label hasil screening berkas: hijau = diterima, merah = tidak sesuai (unggah ulang), abu = belum diperiksa
 const SCREENING_LABEL = {
   Sesuai:         { text: 'Sesuai',          cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
-  'Perlu Revisi': { text: 'Tidak sesuai',    cls: 'bg-red-50 text-red-700 border-red-200',             dot: 'bg-red-500' },
+  'Perlu Revisi': { text: 'Tidak sesuai',    cls: 'bg-amber-50 text-amber-800 border-amber-200',       dot: 'bg-amber-500' },
   Menunggu:       { text: 'Menunggu screening', cls: 'bg-slate-50 text-slate-600 border-slate-200',    dot: 'bg-slate-400' },
 };
 
@@ -93,6 +96,18 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   const [detailData,     setDetailData]     = useState(null);
   const [loading,        setLoading]        = useState(true);
   const [uploadingDocId, setUploadingDocId] = useState(null);
+  const [stagedFiles,    setStagedFiles]    = useState({}); // { docId: File } dipilih tapi belum dikirim
+  const [reviewOpen,     setReviewOpen]     = useState(false);
+  const [sendingDocs,    setSendingDocs]    = useState(false);
+  // File pilihan milik pengajuan lain tidak boleh terbawa saat berpindah pengajuan
+  useEffect(() => { setStagedFiles({}); setReviewOpen(false); }, [selectedSub?.id]);
+  // Ingatkan bila halaman ditutup padahal ada file yang belum dikirim
+  useEffect(() => {
+    if (Object.keys(stagedFiles).length === 0) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [stagedFiles]);
   const [showPacket,     setShowPacket]     = useState(false);
   const [showInvoice,    setShowInvoice]    = useState(false);
   const [refreshing,     setRefreshing]     = useState(false);
@@ -102,6 +117,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   const [shipForm,       setShipForm]       = useState({ courier: '', trackingNo: '', notes: '' });
   const [sendingShip,    setSendingShip]    = useState(false);
   const [lastUpdated,    setLastUpdated]    = useState(null);
+  const [markDoc,        setMarkDoc]        = useState(null); // dokumen yang dilihat beserta sorotan revisi Admin
 
 
   const [payForm, setPayForm] = useState({
@@ -231,29 +247,74 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
     finally { setSendingShip(false); }
   };
 
-  const handleDocUpload = async (doc, file) => {
+  // File yang dipilih hanya ditahan di browser (bisa dilihat/diganti/dihapus) sampai pemohon menekan Kirim
+  const stageDocFile = (doc, file) => {
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      notify('Ukuran file maksimal 10 MB. Kompres atau pilih file lain.', { tone: 'warning', title: 'File terlalu besar' });
+      return;
+    }
+    setStagedFiles((prev) => ({ ...prev, [doc.id]: file }));
+  };
+  const unstageDocFile = (doc) => setStagedFiles((prev) => {
+    const next = { ...prev };
+    delete next[doc.id];
+    return next;
+  });
+  const previewStaged = (file) => {
+    const url = URL.createObjectURL(file);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
+  const sendStagedDocs = async () => {
     const currentSubId = selectedSub?.id || detailData?.submission?.id;
     if (!currentSubId) {
       notify('ID pengajuan tidak ditemukan.');
       return;
     }
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('documentType', doc.document_type || doc.type);
-    fd.append('documentTitle', doc.document_title || doc.title);
-    setUploadingDocId(doc.id);
+    const docsById = Object.fromEntries((detailData?.documents || []).map((d) => [String(d.id), d]));
+    const entries = Object.entries(stagedFiles).filter(([id]) => docsById[id]);
+    setSendingDocs(true);
+    let lastData = null;
+    const sent = [];
     try {
-      const res  = await fetch(`/api/submissions/${currentSubId}/documents`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token()}` }, body: fd
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      for (const [id, file] of entries) {
+        const doc = docsById[id];
+        setUploadingDocId(doc.id);
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('documentType', doc.document_type || doc.type);
+        fd.append('documentTitle', doc.document_title || doc.title);
+        const res  = await fetch(`/api/submissions/${currentSubId}/documents`, {
+          method: 'POST', headers: { Authorization: `Bearer ${token()}` }, body: fd
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(`"${doc.document_title}": ${data.error || 'periksa file lalu coba lagi.'}`);
+        lastData = data;
+        sent.push(id);
+      }
+      setStagedFiles({});
+      setReviewOpen(false);
+      notify(
+        lastData?.resubmitted
+          ? 'Dokumen perbaikan sudah diterima dan pengajuan kembali masuk antrean screening Admin. Pantau statusnya di halaman ini.'
+          : detailData?.submission?.status === 'Draf'
+          ? `${sent.length} dokumen tersimpan di draf. Kirim pengajuan lewat Lanjutkan Draf bila semua sudah lengkap.`
+          : `${sent.length} dokumen berhasil dikirim ke Admin.`,
+        { tone: 'success', title: lastData?.resubmitted ? 'Revisi terkirim!' : detailData?.submission?.status === 'Draf' ? 'Dokumen tersimpan' : 'Dokumen terkirim', okLabel: 'Mengerti' }
+      );
+    } catch (e) {
+      // Yang sudah terkirim dilepas dari daftar; sisanya tetap bisa dikirim ulang
+      setStagedFiles((prev) => { const next = { ...prev }; sent.forEach((id) => delete next[id]); return next; });
+      setReviewOpen(false);
+      notify('Sebagian dokumen belum terkirim. ' + e.message, { tone: 'error', title: 'Gagal mengirim dokumen' });
+    } finally {
+      setUploadingDocId(null);
+      setSendingDocs(false);
       await loadDetail(currentSubId);
       await loadSubmissions();
-      notify(data.message || 'Dokumen berhasil diunggah.');
-    } catch (e) { notify('Gagal mengunggah berkas: ' + e.message); }
-    finally    { setUploadingDocId(null); }
+    }
   };
 
   const handlePaymentSubmit = async (e) => {
@@ -399,6 +460,10 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   const isShipping    = sub.status === 'Pengiriman Berkas';
   const actionDocs = docs.filter((d) => d.screening_status === 'Perlu Revisi'
     || ((isDraf || isScreening || isNeedRevision) && !d.file_path));
+  const stagedActionDocs = actionDocs.filter((d) => stagedFiles[d.id]);
+  const stagedCount      = stagedActionDocs.length;
+  const remainingCount   = actionDocs.length - stagedCount;
+  const reviewItems      = stagedActionDocs.map((d) => ({ key: d.id, title: d.document_title, file: stagedFiles[d.id] }));
   const paymentRejected = isWaitPayment && payment?.verification_status === 'Perlu Revisi';
   const paymentPending  = isWaitPayment && payment?.proof_file && payment?.verification_status === 'Menunggu';
   const showPayForm     = isWaitPayment && (!payment?.proof_file || paymentRejected);
@@ -472,48 +537,58 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
 
       {/* ══ PEMBERITAHUAN REVISI DOKUMEN ══ */}
       {isNeedRevision && (
-        <div className="rounded-[24px] p-5 sm:p-6 bg-gradient-to-r from-red-50 to-amber-50 border-2 border-red-300/80 shadow-sm space-y-3.5">
+        <div className="rounded-[24px] p-5 sm:p-6 bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300/80 shadow-sm space-y-3.5">
           <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-full bg-red-100 border border-red-200 flex items-center justify-center flex-shrink-0 text-red-600 mt-0.5">
+            <div className="w-10 h-10 rounded-full bg-amber-100 border border-amber-200 flex items-center justify-center flex-shrink-0 text-amber-600 mt-0.5">
               <AlertCircle className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0 space-y-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h4 className="text-base font-bold text-red-900">Pemberitahuan: Dokumen Perlu Direvisi</h4>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white">
+                <h4 className="text-base font-bold text-amber-900">Pemberitahuan: Dokumen Perlu Direvisi</h4>
+                {sub.revision_round > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white text-amber-800 border border-amber-300">
+                    Revisi ke-{sub.revision_round}
+                  </span>
+                )}
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500 text-white">
                   {rejectedDocs.length} Dokumen Belum Sesuai
                 </span>
               </div>
-              <p className="text-sm text-red-800 leading-relaxed">
-                Hasil pemeriksaan admin menemukan ada dokumen yang belum sesuai persyaratan. Silakan periksa catatan revisi di bawah dan unggah ulang dokumen yang bertanda merah.
+              <p className="text-sm text-amber-900 leading-relaxed">
+                Hasil pemeriksaan admin menemukan ada dokumen yang belum sesuai persyaratan. Silakan periksa catatan revisi di bawah dan unggah ulang dokumen yang bertanda kuning.
               </p>
               {sub.admin_notes && (
-                <div className="p-3 mt-2 rounded-xl bg-white/90 border border-red-200 text-xs text-red-950 flex items-start gap-2">
-                  <Info className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="p-3 mt-2 rounded-xl bg-white/90 border border-amber-200 text-xs text-amber-950 flex items-start gap-2">
+                  <Info className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-semibold text-red-900">Catatan Admin:</span>
+                    <span className="font-semibold text-amber-900">Catatan Admin:</span>
                     <p className="mt-0.5 font-medium">{sub.admin_notes}</p>
                   </div>
                 </div>
               )}
             </div>
           </div>
-          <div className="bg-white/85 rounded-xl p-3.5 border border-red-200/70 text-xs text-slate-700 space-y-1.5">
+          <div className="bg-white/85 rounded-xl p-3.5 border border-amber-200/70 text-xs text-slate-700 space-y-1.5">
             <p className="font-semibold text-slate-900">Dokumen yang harus diunggah ulang:</p>
             <ul className="list-disc pl-5 space-y-1">
               {rejectedDocs.map((d) => (
                 <li key={d.id}>
                   <strong className="text-slate-800">{d.document_title}</strong>
                   {d.revision_notes ? (
-                    <span className="text-red-700 font-medium"> — Alasan: "{d.revision_notes}"</span>
+                    <span className="text-amber-800 font-medium"> — Alasan: "{d.revision_notes}"</span>
                   ) : (
                     <span className="text-amber-700 font-medium"> — Belum sesuai ketentuan</span>
+                  )}
+                  {parseMarks(d.revision_marks).length > 0 && canMarkFile(d) && (
+                    <button type="button" onClick={() => setMarkDoc(d)} className="ml-1.5 text-[#0884c4] font-semibold hover:underline">
+                      Lihat bagian yang disorot
+                    </button>
                   )}
                 </li>
               ))}
             </ul>
             <p className="text-[11px] text-slate-500 pt-1">
-              💡 Dokumen yang bertanda hijau ("Sesuai") tidak perlu diunggah ulang. Setelah dokumen perbaikan diunggah, berkas akan otomatis masuk ke antrean screening ulang Admin.
+              💡 Dokumen yang bertanda hijau ("Sesuai") tidak perlu diunggah ulang. Pilih file pengganti, periksa lagi, lalu tekan "Kirim ke Admin". Berkas baru masuk antrean screening ulang setelah dikirim.
             </p>
           </div>
         </div>
@@ -522,7 +597,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       {/* ══ INFO TAHAP SAAT INI (Normal) ══ */}
       {isDraf && <PrintNotice />}
       {isScreening && !isNeedRevision && (
-        <StageInfo icon={Clock} tone="blue" title="Tahap 1 · Dokumen sedang diperiksa Admin">
+        <StageInfo icon={Clock} tone="blue" title={sub.revision_round > 0 ? `Tahap 1 · Hasil revisi ke-${sub.revision_round} sedang diperiksa Admin` : 'Tahap 1 · Dokumen sedang diperiksa Admin'}>
           Admin memeriksa setiap dokumen satu per satu. Pembayaran (Tahap 2) dibuka setelah semua dokumen dinyatakan sesuai.
           {docs.some((d) => !d.file_path) && ' Masih ada dokumen yang belum diunggah, lengkapi di bawah.'}
         </StageInfo>
@@ -920,7 +995,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         <div className="card-surface overflow-hidden">
           <div className="px-5 sm:px-7 py-5 flex flex-wrap items-start justify-between gap-3 border-b border-slate-100">
             <div className="flex items-start gap-3">
-              <span className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${rejectedDocs.length > 0 ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
+              <span className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${rejectedDocs.length > 0 ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-500'}`}>
                 <AlertCircle className="w-5 h-5" />
               </span>
               <div>
@@ -935,7 +1010,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               </div>
             </div>
             {rejectedDocs.length > 0 && (
-              <span className="px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-100 whitespace-nowrap">
+              <span className="px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap">
                 {rejectedDocs.length} dokumen perlu diganti
               </span>
             )}
@@ -946,22 +1021,23 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               const isRevisi  = doc.screening_status === 'Perlu Revisi';
               const hasFile   = Boolean(doc.file_path && doc.file_name && doc.file_name !== 'Belum diunggah');
               const canUpload = isDraf || isRevisi || ((isScreening || isNeedRevision) && !hasFile);
+              const staged    = canUpload ? stagedFiles[doc.id] : null;
               const label = !hasFile && !isRevisi
                 ? { text: 'Belum diunggah', cls: 'bg-slate-50 text-slate-500 border-slate-200', dot: 'bg-slate-300' }
                 : isRevisi
-                ? { text: 'Perlu revisi', cls: 'bg-red-50 text-red-700 border-red-100', dot: 'bg-red-500' }
+                ? { text: `Perlu revisi ke-${(doc.revision_count || 0) + 1}`, cls: 'bg-amber-50 text-amber-800 border-amber-200', dot: 'bg-amber-500' }
                 : SCREENING_LABEL[doc.screening_status] || SCREENING_LABEL.Menunggu;
 
               return (
                 <li
                   key={doc.id || idx}
-                  className="px-5 sm:px-7 py-5 grid grid-cols-[auto,1fr] lg:grid-cols-[auto,1fr,auto] gap-x-4 gap-y-3 items-start"
+                  className="px-5 sm:px-7 py-5 grid grid-cols-[auto,1fr] gap-x-4 items-start"
                 >
                   <span className="w-7 h-7 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center mt-0.5">
                     {idx + 1}
                   </span>
 
-                  <div className="min-w-0 space-y-2">
+                  <div className="min-w-0 space-y-2.5">
                     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
                       <span className="text-sm font-semibold text-slate-900">{doc.document_title}</span>
                       <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${label.cls}`}>
@@ -970,60 +1046,144 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                       </span>
                     </div>
 
-                    {isRevisi && (
-                      <div className="border-l-2 border-red-300 bg-red-50/60 rounded-r-lg px-3 py-2 max-w-xl">
-                        <p className="text-[11px] font-medium text-red-600 uppercase tracking-wide">Catatan Admin</p>
-                        <p className="text-sm text-slate-800 leading-relaxed mt-0.5">
-                          {doc.revision_notes || 'Format atau berkas belum sesuai ketentuan. Silakan unggah dokumen pengganti.'}
-                        </p>
-                      </div>
-                    )}
+                    <div className={`grid gap-3 items-stretch ${canUpload ? 'lg:grid-cols-[minmax(0,1fr),20rem]' : ''}`}>
+                      {isRevisi ? (() => {
+                        const marks = parseMarks(doc.revision_marks);
+                        const showMarks = marks.length > 0 && canMarkFile(doc);
+                        const general = adminGeneralNote(doc, marks);
+                        return (
+                          <div className="rounded-2xl bg-amber-50 border border-amber-200 p-4 text-sm text-slate-800 flex flex-col">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-2">Catatan Admin</p>
+                            {showMarks && (
+                              <ol className="space-y-1.5">
+                                {marks.map((m, i) => (
+                                  <li key={i} className="flex items-start gap-2">
+                                    <span className="mt-0.5 w-5 h-5 flex-shrink-0 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
+                                    <span className="leading-snug">{m.note || 'Bagian yang ditandai perlu diperbaiki.'}</span>
+                                  </li>
+                                ))}
+                              </ol>
+                            )}
+                            {(general || !showMarks) && (
+                              <p className={`leading-relaxed ${showMarks ? 'mt-2' : ''}`}>
+                                {general || 'Format atau berkas belum sesuai ketentuan. Silakan unggah dokumen pengganti.'}
+                              </p>
+                            )}
+                            <div className="mt-auto pt-3 flex flex-wrap gap-2 text-xs font-medium">
+                              {showMarks && (
+                                <button type="button" onClick={() => setMarkDoc(doc)}
+                                  className="px-3 py-1.5 rounded-full bg-yellow-300 hover:bg-yellow-400 text-amber-950 flex items-center gap-1.5 transition">
+                                  <Eye className="w-3.5 h-3.5" /> Lihat bagian yang disorot
+                                </button>
+                              )}
+                              {doc.file_path && (
+                                <a href={fileUrl(doc.file_path)} target="_blank" rel="noreferrer"
+                                  className="px-3 py-1.5 rounded-full bg-white border border-amber-200 text-slate-600 hover:text-slate-800 flex items-center gap-1.5 transition">
+                                  <ExternalLink className="w-3.5 h-3.5" /> Berkas lama
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })() : (
+                        <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 text-sm text-slate-600 flex items-center gap-2 min-w-0">
+                          <FileText className="w-4 h-4 flex-shrink-0 text-slate-400" />
+                          {hasFile ? (
+                            <a href={fileUrl(doc.file_path)} target="_blank" rel="noreferrer" className="truncate hover:underline">{doc.file_name}</a>
+                          ) : <span>Belum ada berkas diunggah</span>}
+                        </div>
+                      )}
 
-                    <p className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
-                      <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                      <span className="truncate">{hasFile ? `Berkas sebelumnya: ${doc.file_name}` : 'Belum ada berkas diunggah'}</span>
-                    </p>
-                  </div>
-
-                  <div className="col-start-2 lg:col-start-3 flex flex-wrap items-center gap-2 lg:justify-end lg:self-center">
-                    {doc.file_path && (
-                      <a
-                        href={fileUrl(doc.file_path)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3.5 py-2 text-xs font-medium rounded-full border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-800 flex items-center gap-1.5 transition"
-                        title="Buka dokumen sebelumnya di tab baru"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Lihat berkas</span>
-                      </a>
-                    )}
-
-                    {canUpload && (
-                      <label className="px-4 py-2 text-xs font-semibold rounded-full cursor-pointer flex items-center gap-1.5 transition bg-[#0da2e7] hover:bg-[#0884c4] text-white shadow-sm">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>
-                          {uploadingDocId === doc.id ? 'Mengunggah...' : isRevisi ? 'Unggah ulang' : 'Unggah'}
-                        </span>
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept=".pdf,.jpg,.jpeg,.png"
-                          disabled={uploadingDocId === doc.id}
-                          onChange={(e) => handleDocUpload(doc, e.target.files[0])}
-                        />
-                      </label>
-                    )}
+                      {canUpload && (staged ? (
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex flex-col gap-3 min-w-0">
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <span className="w-9 h-9 rounded-xl bg-white border border-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0">
+                              <CheckCircle className="w-5 h-5" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">File pengganti siap</p>
+                              <button type="button" onClick={() => previewStaged(staged)} title="Lihat file"
+                                className="block max-w-full text-left text-sm font-medium text-slate-800 truncate hover:underline">{staged.name}</button>
+                              <p className="text-xs text-slate-500">{formatFileSize(staged.size)}</p>
+                            </div>
+                          </div>
+                          {uploadingDocId === doc.id ? (
+                            <span className="mt-auto text-xs text-[#0884c4] flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Mengirim…</span>
+                          ) : (
+                            <div className="mt-auto grid grid-cols-2 gap-2">
+                              <label className={`px-3 py-2 rounded-full bg-white border border-slate-200 text-xs font-medium text-[#0884c4] hover:border-[#0da2e7] flex items-center justify-center gap-1.5 transition ${sendingDocs ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}>
+                                <RefreshCw className="w-3.5 h-3.5" /> Ganti
+                                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" disabled={sendingDocs}
+                                  onChange={(e) => { stageDocFile(doc, e.target.files[0]); e.target.value = ''; }} />
+                              </label>
+                              <button type="button" onClick={() => unstageDocFile(doc)} disabled={sendingDocs}
+                                className="px-3 py-2 rounded-full bg-white border border-slate-200 text-xs font-medium text-red-600 hover:border-red-300 flex items-center justify-center gap-1.5 transition disabled:opacity-50">
+                                <Trash2 className="w-3.5 h-3.5" /> Hapus
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <label className={`rounded-2xl border-2 border-dashed border-sky-300 bg-sky-50/60 hover:bg-sky-50 hover:border-[#0da2e7] p-4 flex flex-col items-center justify-center text-center gap-1.5 transition ${sendingDocs ? 'opacity-60 pointer-events-none' : 'cursor-pointer'}`}>
+                          <span className="w-10 h-10 rounded-full bg-[#0da2e7] text-white flex items-center justify-center shadow-sm">
+                            <Upload className="w-4 h-4" />
+                          </span>
+                          <span className="text-sm font-semibold text-slate-800">{isRevisi ? 'Unggah file pengganti' : 'Pilih file'}</span>
+                          <span className="text-xs text-slate-500">PDF, JPG, atau PNG</span>
+                          <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" disabled={sendingDocs}
+                            onChange={(e) => { stageDocFile(doc, e.target.files[0]); e.target.value = ''; }} />
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 </li>
               );
             })}
           </ol>
+
+          {/* Kirim file yang sudah dipilih: baru masuk ke Admin setelah dikonfirmasi */}
+          <div className="px-5 sm:px-7 py-4 border-t border-slate-100 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-slate-600 max-w-md">
+              {stagedCount === 0
+                ? (isDraf
+                  ? 'Pilih file untuk setiap dokumen di atas. File belum tersimpan sampai Anda menekan tombol Simpan.'
+                  : 'Pilih file untuk setiap dokumen di atas. File belum dikirim sampai Anda menekan tombol Kirim.')
+                : remainingCount > 0
+                ? <><strong className="text-slate-800">{stagedCount} file siap dikirim.</strong> Masih ada {remainingCount} dokumen yang belum dipilih filenya.</>
+                : <><strong className="text-slate-800">Semua file siap.</strong> {isDraf ? 'Periksa sekali lagi lalu simpan ke draf.' : 'Periksa sekali lagi lalu kirim ke Admin.'}</>}
+            </p>
+            <button type="button" disabled={stagedCount === 0 || sendingDocs} onClick={() => setReviewOpen(true)}
+              className="px-5 py-2.5 rounded-full text-sm font-semibold flex items-center gap-2 transition bg-[#0da2e7] hover:bg-[#0884c4] text-white shadow-sm disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none">
+              <Send className="w-4 h-4" />
+              {isDraf
+                ? (stagedCount > 0 ? `Simpan ${stagedCount} dokumen ke draf` : 'Simpan ke draf')
+                : (stagedCount > 0 ? `Kirim ${stagedCount} dokumen ke Admin` : 'Kirim ke Admin')}
+            </button>
+          </div>
         </div>
       )}
 
+      <UploadReviewDialog
+        open={reviewOpen}
+        title={isDraf ? 'Simpan dokumen ke draf?' : rejectedDocs.length > 0 ? 'Kirim dokumen perbaikan?' : 'Kirim dokumen ke Admin?'}
+        description={isDraf
+          ? 'File disimpan di draf dan belum dikirim ke Admin. Pengajuan dikirim lewat tombol Lanjutkan Draf → Submit Pengajuan.'
+          : 'Pastikan file sudah benar dan terbaca jelas. Setelah dikirim, dokumen tidak bisa diganti sampai Admin selesai memeriksa.'}
+        items={reviewItems}
+        confirmLabel={isDraf ? 'Simpan ke draf' : 'Kirim ke Admin'}
+        note={remainingCount > 0 && !isDraf
+          ? `Masih ada ${remainingCount} dokumen yang belum dipilih. Pengajuan baru diperiksa ulang Admin setelah semua dokumen yang diminta terkirim.`
+          : null}
+        busy={sendingDocs}
+        onConfirm={sendStagedDocs}
+        onClose={() => setReviewOpen(false)}
+      />
+
       {/* ══ RIWAYAT ALUR BERKAS ══ */}
       <SubmissionTimeline timeline={detailData?.timeline || []} cardClassName="card-surface" />
+
+      {/* ══ DOKUMEN DENGAN SOROTAN REVISI ══ */}
+      {markDoc && <RevisionMarksViewer doc={markDoc} onClose={() => setMarkDoc(null)} />}
 
       {/* ══ POP UP: KIRIM BERKAS FISIK ══ */}
       {showShipNotice && (

@@ -337,6 +337,39 @@ async function upgradeSchema() {
   await addColumnIfMissing('submissions', 'central_notes', 'TEXT NULL AFTER central_tracking_no');
   await addColumnIfMissing('submissions', 'central_sent_by', 'VARCHAR(255) NULL AFTER central_notes');
   await syncStatusCheck();
+  // Penanda dokumen hasil revisi pemohon (untuk sorotan di layar screening Admin)
+  await addColumnIfMissing('documents', 'revised_at', 'DATETIME NULL');
+  await addColumnIfMissing('documents', 'previous_revision_notes', 'TEXT NULL');
+  // Sorotan bagian dokumen yang perlu direvisi (JSON [{page,x,y,w,h,note}], koordinat relatif 0–1)
+  await addColumnIfMissing('documents', 'revision_marks', 'TEXT NULL');
+  await addColumnIfMissing('documents', 'previous_revision_marks', 'TEXT NULL');
+  // Hitungan revisi: berapa kali dokumen diganti pemohon & berapa kali pengajuan dikembalikan untuk revisi
+  if (await addColumnIfMissing('documents', 'revision_count', 'INT NOT NULL DEFAULT 0')) {
+    // Data lama: hitung dari riwayat unggah revisi
+    await query.exec(
+      `UPDATE documents d SET revision_count = (
+         SELECT COUNT(*) FROM submission_logs l
+         WHERE l.submission_id = d.submission_id AND l.action = CONCAT('Revisi dokumen diunggah: ', d.document_title))`
+    );
+  }
+  if (await addColumnIfMissing('submissions', 'revision_round', 'INT NOT NULL DEFAULT 0')) {
+    await query.exec(
+      `UPDATE submissions s SET revision_round = (
+         SELECT COUNT(*) FROM submission_logs l
+         WHERE l.submission_id = s.id AND l.action LIKE 'Dikembalikan ke pemohon%')`
+    );
+  }
+  // Selalu selaraskan dengan riwayat: pengembalian/unggah revisi yang tercatat saat server lama berjalan tetap terhitung
+  await query.exec(
+    `UPDATE submissions s SET revision_round = GREATEST(revision_round, (
+       SELECT COUNT(*) FROM submission_logs l
+       WHERE l.submission_id = s.id AND l.action LIKE 'Dikembalikan ke pemohon%'))`
+  );
+  await query.exec(
+    `UPDATE documents d SET revision_count = GREATEST(revision_count, (
+       SELECT COUNT(*) FROM submission_logs l
+       WHERE l.submission_id = d.submission_id AND l.action = CONCAT('Revisi dokumen diunggah: ', d.document_title)))`
+  );
   if (await addColumnIfMissing('submissions', 'rejected_at_status', 'VARCHAR(40) NULL AFTER rejection_reason')) {
     // Pengajuan lama yang sudah ditolak: tentukan tahapnya dari riwayat
     await query.exec(

@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, CheckCircle, XCircle, FileText, CreditCard, ExternalLink, ShieldCheck, Eye, Lock,
-  History, Truck, PenTool, Send, Clock
+  History, Truck, PenTool, Send, Clock, RefreshCw
 } from 'lucide-react';
 import SubmissionTimeline, { formatTime } from './SubmissionTimeline';
 import { STATUS_LABEL, POST_APPROVAL_STATUSES } from './StatusStepper';
 import { notify } from './AppDialog';
 import { fileUrl } from '../utils/fileUrl';
+import DocumentMarker, { canMarkFile, parseMarks } from './DocumentMarker';
 import { FILTERS, NUMERIC } from '../utils/inputFilters';
 
 // Label cepat alasan "Tidak sesuai" (mengisi komentar, tetap bisa diubah)
@@ -41,7 +42,13 @@ function FilePreview({ file }) {
         {isImage(file) ? (
           <img src={fileUrl(file.file_path)} alt={file.file_name} className="w-full h-full max-h-[60vh] object-contain" />
         ) : isPdf(file) ? (
-          <iframe title={file.file_name} src={fileUrl(file.file_path)} className="w-full h-full min-h-[320px] lg:min-h-[52vh] bg-white" />
+          // Buka dari halaman 1, tanpa panel thumbnail, lebar halaman pas dengan panel
+          <iframe
+            key={file.file_path}
+            title={file.file_name}
+            src={`${fileUrl(file.file_path)}#page=1&navpanes=0&view=FitH`}
+            className="w-full h-full min-h-[320px] lg:min-h-[60vh] bg-white"
+          />
         ) : (
           <div className="h-full flex items-center justify-center text-xs text-slate-500 p-6 text-center">
             Pratinjau tidak tersedia untuk jenis file ini. Buka di tab baru untuk memeriksa.
@@ -57,6 +64,8 @@ const DOC_BADGE = {
   'Perlu Revisi': 'bg-red-100 text-red-700',
   Menunggu: 'bg-slate-100 text-slate-600',
 };
+// Dokumen pengganti dari pemohon yang belum diperiksa ulang Admin
+const isFreshRevision = (doc) => Boolean(doc?.revised_at && doc.file_path && doc.screening_status === 'Menunggu');
 const docBadgeText = (doc) => (!doc.file_path ? 'Belum diunggah' : doc.screening_status === 'Perlu Revisi' ? 'Tidak sesuai' : doc.screening_status === 'Menunggu' ? 'Belum diperiksa' : 'Sesuai');
 
 export default function DocumentVerificationModal({
@@ -84,6 +93,7 @@ export default function DocumentVerificationModal({
   const [openedAt, setOpenedAt] = useState({});             // waktu dibuka yang baru dicatat server
   const [rejecting, setRejecting] = useState(null);         // docId yang sedang diberi komentar
   const [comment, setComment] = useState('');
+  const [marks, setMarks] = useState([]);                   // sorotan bagian dokumen yang perlu direvisi
   const [payReject, setPayReject] = useState(false);
   const [payComment, setPayComment] = useState('');
   const [generalNotes, setGeneralNotes] = useState('');
@@ -105,6 +115,8 @@ export default function DocumentVerificationModal({
 
   const isAdmin = role === 'Admin';
   const canScreenDocs = isAdmin && status === 'Menunggu Verifikasi';
+  // Pengajuan menunggu revisi: Admin masih bisa memperbarui catatan & sorotan dokumen yang belum diganti
+  const canEditRevision = (doc) => isAdmin && status === 'Perlu Revisi' && doc?.screening_status === 'Perlu Revisi';
   const canVerifyPayment = isAdmin && status === 'Menunggu Pembayaran' && payment?.proof_file && payment?.verification_status === 'Menunggu';
   const canSign = role === 'Sekretaris' && status === 'Menunggu TTD Sekretaris';
   // Berkas fisik baru bisa dikonfirmasi setelah pemohon menandainya sudah dikirim
@@ -140,6 +152,7 @@ export default function DocumentVerificationModal({
       if (!doc.opened_at) recordOpen(doc.id, `/api/documents/${doc.id}/opened`);
     }
     setRejecting(null);
+    setMarks([]);
   };
 
   const openPayment = () => {
@@ -162,10 +175,14 @@ export default function DocumentVerificationModal({
   };
 
   const markDoc = (doc, value) => run(async () => {
-    if (value === 'Perlu Revisi' && !comment.trim()) throw new Error('Tulis komentar alasan dokumen tidak sesuai.');
-    await onScreenDocument(doc.id, value, value === 'Perlu Revisi' ? comment.trim() : '');
+    // Komentar umum boleh kosong bila sorotan sudah berisi catatan: ringkasan dibuat dari catatan sorotan
+    const markNotes = marks.map((m) => String(m.note || '').trim()).filter(Boolean);
+    const finalComment = comment.trim() || (markNotes.length ? `Perbaiki bagian yang disorot: ${markNotes.join('; ')}` : '');
+    if (value === 'Perlu Revisi' && !finalComment) throw new Error('Tulis alasan dokumen tidak sesuai, di komentar atau di catatan sorotan.');
+    await onScreenDocument(doc.id, value, value === 'Perlu Revisi' ? finalComment : '', value === 'Perlu Revisi' ? marks : []);
     setRejecting(null);
     setComment('');
+    setMarks([]);
     // Lanjut otomatis ke dokumen berikutnya yang belum diperiksa
     const next = documents.find((d) => d.id !== doc.id && d.file_path && d.screening_status === 'Menunggu');
     if (next) setActiveDocId(next.id);
@@ -195,6 +212,12 @@ export default function DocumentVerificationModal({
               <p className="text-xs text-[#dff2fd] mt-0.5">
                 {submission.submission_type === 'Heregistrasi' ? 'Registrasi' : 'Anggota Baru'} · {submission.member_category || submission.category} ·{' '}
                 <strong className="font-semibold text-white">{STATUS_LABEL[status] || status}</strong>
+                {/* Badge revisi hanya selama tahap screening dokumen; setelah lolos screening tidak ditampilkan lagi */}
+                {submission.revision_round > 0 && (status === 'Menunggu Verifikasi' || status === 'Perlu Revisi') && (
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-amber-300 text-amber-950 text-[10px] font-bold align-middle">
+                    Revisi ke-{submission.revision_round}
+                  </span>
+                )}
                 {!isAdmin && !canSign && <span className="ml-1 opacity-90">· mode lihat</span>}
               </p>
               {(submission.applicant_name || submission.applicant_email) && (
@@ -257,6 +280,7 @@ export default function DocumentVerificationModal({
                 {documents.map((doc, i) => {
                   const active = activeDoc?.id === doc.id;
                   const seen = opened.has(doc.id);
+                  const fresh = isFreshRevision(doc);
                   return (
                     <button
                       key={doc.id}
@@ -265,6 +289,16 @@ export default function DocumentVerificationModal({
                         active ? 'border-[#0da2e7] bg-[#f0f9ff]' : 'border-slate-200 bg-white hover:border-[#b8e6fc]'
                       }`}
                     >
+                      {fresh && (
+                        <span className="mb-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 text-[10px] font-semibold">
+                          <RefreshCw className="w-3 h-3" /> Revisi ke-{doc.revision_count || 1} · {formatTime(doc.revised_at)}
+                        </span>
+                      )}
+                      {!fresh && doc.revision_count > 0 && (
+                        <span className="mb-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-semibold">
+                          <RefreshCw className="w-3 h-3" /> Sudah direvisi {doc.revision_count}×
+                        </span>
+                      )}
                       <div className="flex items-start justify-between gap-2">
                         <span className="text-xs font-semibold text-slate-800">{i + 1}. {doc.document_title}</span>
                         <span className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold ${doc.file_path ? DOC_BADGE[doc.screening_status] : DOC_BADGE.Menunggu}`}>
@@ -291,6 +325,11 @@ export default function DocumentVerificationModal({
                       {doc.screening_status === 'Perlu Revisi' && doc.revision_notes && (
                         <p className="mt-1.5 text-[11px] text-red-700 bg-red-50 rounded-lg px-2 py-1">{doc.revision_notes}</p>
                       )}
+                      {fresh && doc.previous_revision_notes && (
+                        <p className="mt-1.5 text-[11px] text-slate-600">
+                          <span className="font-semibold">Alasan revisi sebelumnya:</span> {doc.previous_revision_notes}
+                        </p>
+                      )}
                     </button>
                   );
                 })}
@@ -299,7 +338,13 @@ export default function DocumentVerificationModal({
               <div className="flex flex-col">
                 <div className="flex-1 border-b border-slate-200">
                   {activeDoc && opened.has(activeDoc.id) ? (
-                    <FilePreview file={activeDoc} />
+                    rejecting === activeDoc.id && canMarkFile(activeDoc) ? (
+                      <DocumentMarker key={`mark-${activeDoc.id}`} file={activeDoc} marks={marks} onChange={setMarks} editable />
+                    ) : activeDoc.screening_status === 'Perlu Revisi' && parseMarks(activeDoc.revision_marks).length > 0 && canMarkFile(activeDoc) ? (
+                      <DocumentMarker key={`view-${activeDoc.id}`} file={activeDoc} marks={parseMarks(activeDoc.revision_marks)} />
+                    ) : (
+                      <FilePreview file={activeDoc} />
+                    )
                   ) : (
                     <div className="h-full min-h-[300px] flex flex-col items-center justify-center gap-3 p-6 text-center">
                       <FileText className="w-10 h-10 text-slate-300" />
@@ -316,13 +361,36 @@ export default function DocumentVerificationModal({
                 </div>
 
                 {/* Penilaian per dokumen (hanya Admin, hanya setelah dokumen dibuka) */}
-                {canScreenDocs && activeDoc?.file_path && (
+                {(canScreenDocs || canEditRevision(activeDoc)) && activeDoc?.file_path && (
                   <div className="p-4 bg-slate-50 space-y-3">
+                    {isFreshRevision(activeDoc) && rejecting !== activeDoc.id && (
+                      <div className="text-xs text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-start gap-2">
+                        <RefreshCw className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-sky-600" />
+                        <span className="flex-1">
+                          <strong>Dokumen revisi ke-{activeDoc.revision_count || 1}</strong> diunggah ulang pemohon {formatTime(activeDoc.revised_at)}.
+                          {activeDoc.previous_revision_notes && <> Pastikan sudah memperbaiki: <em>"{activeDoc.previous_revision_notes}"</em></>}
+                        </span>
+                      </div>
+                    )}
                     {!opened.has(activeDoc.id) && !docOpenInfo(activeDoc) ? (
                       <p className="text-xs text-slate-500 flex items-center gap-1.5"><Lock className="w-3.5 h-3.5" /> Buka dokumen dulu untuk menilai.</p>
                     ) : rejecting === activeDoc.id ? (
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold text-red-700">Tandai tidak sesuai — pilih label atau tulis komentar untuk pemohon:</p>
+                      <div className="space-y-2.5">
+                        <p className="text-sm font-semibold text-red-700 flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Tandai tidak sesuai</p>
+                        {canMarkFile(activeDoc) && (
+                          <div className="text-[11px] rounded-lg px-3 py-2 bg-amber-50 border border-amber-200 text-amber-900">
+                            <span className="font-semibold">Sorotan di dokumen:</span>{' '}
+                            {marks.length > 0
+                              ? <>{marks.length} bagian disorot. Catatan tiap sorotan diisi di kotak bernomor di bawah dokumen.</>
+                              : <>belum ada. Opsional: seret pada dokumen di atas untuk menandai bagian yang salah.</>}
+                          </div>
+                        )}
+                        <p className="text-xs font-semibold text-slate-700">
+                          Komentar umum untuk pemohon
+                          {marks.some((m) => String(m.note || '').trim())
+                            ? <span className="font-normal text-slate-500"> (opsional, sorotan sudah berisi catatan)</span>
+                            : <span className="font-normal text-slate-500"> (wajib bila sorotan tidak diberi catatan)</span>}
+                        </p>
                         <div className="flex flex-wrap gap-1.5">
                           {REASON_LABELS.map((r) => (
                             <button key={r} type="button" onClick={() => setComment((c) => (c.includes(r) ? c : c ? `${c}; ${r}` : r))}
@@ -335,7 +403,7 @@ export default function DocumentVerificationModal({
                           placeholder="Contoh: Scan akta terpotong di halaman 2, mohon unggah ulang yang lengkap."
                           className="w-full text-xs p-2.5 border border-red-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-300" />
                         <div className="flex justify-end gap-2">
-                          <button onClick={() => { setRejecting(null); setComment(''); }} className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white">Batal</button>
+                          <button onClick={() => { setRejecting(null); setComment(''); setMarks([]); }} className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white">Batal</button>
                           <button disabled={busy} onClick={() => markDoc(activeDoc, 'Perlu Revisi')}
                             className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5">
                             <XCircle className="w-3.5 h-3.5" /> Simpan: tidak sesuai
@@ -344,15 +412,19 @@ export default function DocumentVerificationModal({
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-center justify-end gap-2">
-                        <span className="mr-auto text-xs text-slate-600">Hasil pemeriksaan <strong>{activeDoc.document_title}</strong>:</span>
-                        <button disabled={busy} onClick={() => { setRejecting(activeDoc.id); setComment(activeDoc.revision_notes || ''); }}
+                        <span className="mr-auto text-xs text-slate-600">
+                          {canScreenDocs
+                            ? <>Hasil pemeriksaan <strong>{activeDoc.document_title}</strong>:</>
+                            : <>Menunggu pemohon mengganti dokumen ini. Catatan & sorotan masih bisa diperbarui.</>}
+                        </span>
+                        <button disabled={busy} onClick={() => { setRejecting(activeDoc.id); setComment(activeDoc.revision_notes || ''); setMarks(activeDoc.screening_status === 'Perlu Revisi' ? parseMarks(activeDoc.revision_marks) : []); }}
                           className={`px-3.5 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 border ${activeDoc.screening_status === 'Perlu Revisi' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-700 border-red-200 hover:bg-red-50'}`}>
-                          <XCircle className="w-3.5 h-3.5" /> Tidak sesuai
+                          <XCircle className="w-3.5 h-3.5" /> {canScreenDocs ? 'Tidak sesuai' : 'Ubah catatan & sorotan'}
                         </button>
-                        <button disabled={busy} onClick={() => markDoc(activeDoc, 'Sesuai')}
+                        {canScreenDocs && <button disabled={busy} onClick={() => markDoc(activeDoc, 'Sesuai')}
                           className={`px-3.5 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 ${activeDoc.screening_status === 'Sesuai' ? 'bg-emerald-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}>
                           <CheckCircle className="w-3.5 h-3.5" /> Sesuai
-                        </button>
+                        </button>}
                       </div>
                     )}
                   </div>

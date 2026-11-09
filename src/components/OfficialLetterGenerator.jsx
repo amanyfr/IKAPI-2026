@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { POST_APPROVAL_STATUSES } from './StatusStepper';
 import { Printer, Download, CheckCircle, FileText } from 'lucide-react';
-import { PengurusSignatureBlock, KopSurat } from './PengurusSignature';
+import { PengurusSignatureBlock, KopSurat, KopSuratFooter } from './PengurusSignature';
 import { downloadElementPdf, printElement, safeFileName } from '../utils/exportDocument';
 
 // `signing` (opsional) = { role: 'chairman' | 'secretary', img, pos, onChange }: mode pembubuhan
@@ -77,8 +77,8 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
       <div
         ref={paperRef}
         data-paper
-        className="p-8 sm:p-12 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white"
-        style={{ minHeight: '850px' }}
+        className="p-8 sm:p-12 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white flex flex-col"
+        style={{ minHeight: '1123px' }}
       >
         {/* Kop Surat Resmi IKAPI Jawa Barat */}
         <KopSurat settings={settings} />
@@ -152,6 +152,9 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
 
         {/* Signatures & Seal Section */}
         <PengurusSignatureBlock submission={submission} settings={settings} docKey="surat" signing={signing} />
+
+        {/* Kaki surat resmi */}
+        <KopSuratFooter className="mt-auto pt-10" />
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Printer, Download, ClipboardCheck, Gavel } from 'lucide-react';
-import { PengurusSignatureBlock, KopSurat, formatLongDate } from './PengurusSignature';
+import { PengurusSignatureBlock, KopSurat, KopSuratFooter, formatLongDate } from './PengurusSignature';
 import { downloadElementPdf, printElement } from '../utils/exportDocument';
 
 // Dokumen resmi pengurus yang ditandatangani Ketua & Sekretaris (selain Surat Pengantar):
@@ -37,8 +37,9 @@ function DocShell({ icon: Icon, title, number, signing, fileName, children }) {
           </button>
         </div>
       </div>
-      <div ref={paperRef} data-paper className="p-8 sm:p-12 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white" style={{ minHeight: '850px' }}>
+      <div ref={paperRef} data-paper className="p-8 sm:p-12 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white flex flex-col" style={{ minHeight: '1123px' }}>
         {children}
+        <KopSuratFooter className="mt-auto pt-10" />
       </div>
     </div>
   );

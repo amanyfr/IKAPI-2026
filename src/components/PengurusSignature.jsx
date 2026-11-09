@@ -12,8 +12,9 @@ export const SIGNABLE_DOCS = [
 // Posisi awal TTD per penandatangan: Ketua di kolom kiri, Sekretaris di kolom kanan.
 // Posisi {x, y, w} relatif (0–1) terhadap area tanda tangan; x/y = titik tengah gambar.
 export const DEFAULT_SIGNATURE_POS = {
-  chairman:  { x: 0.25, y: 0.55, w: 0.26 },
-  secretary: { x: 0.75, y: 0.55, w: 0.26 },
+  // Disamakan dengan posisi TTD pada spesimen resmi
+  chairman:  { x: 0.252, y: 0.545, w: 0.42 },
+  secretary: { x: 0.711, y: 0.545, w: 0.34 },
 };
 
 const SIGNER_LABEL = { chairman: 'Ketua', secretary: 'Sekretaris' };
@@ -32,8 +33,8 @@ const validPos = (pos) => (pos && typeof pos.x === 'number' ? pos : null);
 
 export function signerNames(submission, settings) {
   return {
-    chairmanName: submission.signed_by_chairman || settings?.ketua_nama || 'Dr. H. Mahpudi, M.T.',
-    secretaryName: submission.signed_by_secretary || settings?.sekretaris_nama || 'Drs. H. Anwar Rosyid, M.Si.',
+    chairmanName: submission.signed_by_chairman || settings?.ketua_nama || 'Dr. Abdul Raup, M.Pd.',
+    secretaryName: submission.signed_by_secretary || settings?.sekretaris_nama || 'Taofiq Rahman Ahmad, S.H.',
   };
 }
 
@@ -115,67 +116,72 @@ function SignatureZone({ placed, signing, className = '', children }) {
   );
 }
 
-function FallbackSignature({ image, name, alt, rotate }) {
-  if (image) return <img src={image} alt={alt} className="max-h-18 max-w-[160px] object-contain" />;
-  return <div className={`font-serif italic text-[#0884c4] text-lg font-bold select-none transform ${rotate}`}>{name}</div>;
-}
+// Gambar default dari "Spesimen Ttd IKAPI Jabar" (bisa diganti lewat Pengaturan Sistem)
+const DEFAULT_IMG = {
+  ketua: '/ttd-ketua.png',
+  sekretaris: '/ttd-sekretaris.png',
+  stempel: '/stempel-ikapi.png',
+};
 
-// Blok tanda tangan Pengurus Daerah: Ketua (kiri), stempel (tengah), Sekretaris (kanan)
+// Geometri persis spesimen (tabel 15 cm, 2 kolom 7,5 cm). Nama berada ±2,6 cm di bawah awal baris TTD.
+// left/width = % lebar blok; top = % tinggi area TTD (2,6 cm).
+const SPECIMEN = {
+  ratio: 15 / 2.6,
+  ketua: { left: '4.1%', width: '42.3%', top: '-16.9%' },
+  sekretaris: { left: '54.3%', width: '33.7%', top: '-16.9%' },
+  stempel: { left: '38.5%', width: '21.7%', top: '-5%' },
+};
+
+// Blok tanda tangan Pengurus Daerah sesuai spesimen resmi:
+// "Hormat kami," + nama lembaga di tengah, Ketua (kiri), Sekretaris (kanan) dengan stempel menimpa sisi kiri TTD Sekretaris
 export function PengurusSignatureBlock({ submission, settings, docKey, signing = null, heading, className = 'mt-8 pt-4' }) {
   const placed = placedSignatures(submission, docKey, signing);
   const { chairmanName, secretaryName } = signerNames(submission, settings);
+  const img = (style, src, alt, z) => (
+    <img
+      src={src}
+      alt={alt}
+      draggable={false}
+      className={`absolute h-auto select-none pointer-events-none ${z}`}
+      style={style}
+    />
+  );
 
   return (
-    <SignatureZone placed={placed} signing={signing} className={`font-sans text-xs sm:text-sm ${className}`}>
-      <p className="text-center font-bold text-slate-800">
-        {heading || (
-          <>
-            PENGURUS DAERAH IKATAN PENERBIT INDONESIA (IKAPI)
-            <br />
-            JAWA BARAT
-          </>
-        )}
-      </p>
-
-      <div className="grid grid-cols-2 gap-8 mt-6 relative">
-        {/* Stempel resmi di tengah */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-90 z-10">
-          {settings?.stempel_img ? (
-            <img src={settings.stempel_img} alt="Stempel Resmi IKAPI" className="w-28 h-28 object-contain transform -rotate-6" />
-          ) : (
-            <div className="w-28 h-28 rounded-full border-2 border-dashed border-[#0884c4]/80 p-1 flex items-center justify-center transform -rotate-12 bg-[#0da2e7]/5">
-              <div className="w-full h-full rounded-full border-2 border-[#0884c4] flex flex-col items-center justify-center text-center p-1">
-                <span className="text-[7px] font-bold text-[#0884c4] uppercase tracking-widest">★ IKAPI ★</span>
-                <span className="text-[9px] font-black text-[#0da2e7] tracking-tighter">JAWA BARAT</span>
-                <span className="text-[6px] font-bold text-[#0884c4] uppercase mt-0.5">PENGURUS DAERAH</span>
-              </div>
-            </div>
+    <SignatureZone
+      placed={placed}
+      signing={signing}
+      className={`text-slate-900 ${className}`}
+    >
+      <div style={{ fontFamily: 'Tahoma, Verdana, Segoe UI, sans-serif', fontSize: '12pt', lineHeight: 1.2 }}>
+        <p className="text-center">
+          {heading ? <span className="font-bold">{heading}</span> : (
+            <>
+              Hormat kami,
+              <br />
+              <span className="font-bold">PENGURUS DAERAH</span>
+              <br />
+              <span className="font-bold">IKATAN PENERBIT INDONESIA (PD-IKAPI) JAWA BARAT</span>
+            </>
           )}
+        </p>
+
+        {/* Baris TTD: gambar diposisikan absolut seperti di spesimen */}
+        <div className="relative w-full" style={{ aspectRatio: SPECIMEN.ratio }}>
+          {!placed.chairman && img(SPECIMEN.ketua, settings?.ketua_signature_img || DEFAULT_IMG.ketua, 'Tanda Tangan Ketua', 'z-10')}
+          {!placed.secretary && img(SPECIMEN.sekretaris, settings?.sekretaris_signature_img || DEFAULT_IMG.sekretaris, 'Tanda Tangan Sekretaris', 'z-10')}
+          {/* Stempel resmi menimpa sisi kiri tanda tangan Sekretaris */}
+          {img(SPECIMEN.stempel, settings?.stempel_img || DEFAULT_IMG.stempel, 'Stempel Resmi IKAPI', 'z-20')}
         </div>
 
-        <div className="text-center space-y-4">
-          <p className="font-semibold text-slate-800">Ketua,</p>
-          <div className="h-20 flex items-center justify-center">
-            {!placed.chairman && (
-              <FallbackSignature image={settings?.ketua_signature_img} name={chairmanName} alt="Tanda Tangan Ketua" rotate="-rotate-3" />
-            )}
+        <div className="grid grid-cols-2 text-center">
+          <div>
+            <p className="font-bold underline underline-offset-2">{chairmanName}</p>
+            <p>K e t u a</p>
           </div>
           <div>
-            <p className="font-bold text-slate-900 underline">{chairmanName}</p>
-            <p className="text-[11px] text-slate-600">Ketua PD IKAPI Jawa Barat</p>
-          </div>
-        </div>
-
-        <div className="text-center space-y-4">
-          <p className="font-semibold text-slate-800">Sekretaris,</p>
-          <div className="h-20 flex items-center justify-center">
-            {!placed.secretary && (
-              <FallbackSignature image={settings?.sekretaris_signature_img} name={secretaryName} alt="Tanda Tangan Sekretaris" rotate="rotate-2" />
-            )}
-          </div>
-          <div>
-            <p className="font-bold text-slate-900 underline">{secretaryName}</p>
-            <p className="text-[11px] text-slate-600">Sekretaris PD IKAPI Jabar</p>
+            <p className="font-bold underline underline-offset-2">{secretaryName}</p>
+            <p>S e k r e t a r i s</p>
           </div>
         </div>
       </div>
@@ -183,24 +189,20 @@ export function PengurusSignatureBlock({ submission, settings, docKey, signing =
   );
 }
 
-// Kop surat resmi (HTML) yang dipakai bersama dokumen pengurus
-export function KopSurat({ settings }) {
-  const kopAlamat = settings?.surat_kop_alamat || 'Sekretariat: Jl. Ibu Inggit Garnasih No. 148, Regol, Kota Bandung 40252';
-  const kopKontak = settings?.surat_kop_kontak || 'Telp: (022) 5202684 | Email: sekretariat@ikapi-jabar.or.id | Web: https://ikapi-jabar.or.id';
+// Kop surat resmi IKAPI Jawa Barat 2026 (gambar dari "Kop Surat IKAPI 2026 Rev01")
+export function KopSurat() {
   return (
-    <div className="flex items-center border-b-[3px] border-double border-slate-900 pb-4 mb-6">
-      <div className="w-20 h-20 mr-4 flex-shrink-0 flex items-center justify-center">
-        <img src="/logo-ikapi.jpg" alt="Logo IKAPI" className="w-18 h-18 object-contain rounded-lg" />
-      </div>
-      <div className="text-center flex-1">
-        <h1 className="text-lg sm:text-xl font-bold tracking-wider text-[#0884c4] uppercase">Ikatan Penerbit Indonesia (IKAPI)</h1>
-        <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Pengurus Daerah Jawa Barat</h2>
-        <p className="text-[11px] font-sans text-slate-600 mt-1 leading-tight">
-          {kopAlamat}
-          <br />
-          {kopKontak}
-        </p>
-      </div>
+    <div className="mb-6">
+      <img src="/kop-surat-header.png" alt="Kop Surat PD IKAPI Jawa Barat" className="w-full h-auto block select-none" draggable={false} />
+    </div>
+  );
+}
+
+// Kaki surat resmi: QRIS, kanal resmi & rekening (bagian bawah kop 2026)
+export function KopSuratFooter({ className = 'mt-10' }) {
+  return (
+    <div className={className}>
+      <img src="/kop-surat-footer.png" alt="Kaki Surat PD IKAPI Jawa Barat" className="w-full h-auto block select-none" draggable={false} />
     </div>
   );
 }

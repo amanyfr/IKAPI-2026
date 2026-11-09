@@ -23,7 +23,9 @@ import {
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
 
-export default function Admin1Screening({ onNavigateToMembers, initialStatus = 'Semua', initialSearch = '' }) {
+export default function Admin1Screening({ onNavigateToMembers, initialStatus = 'Semua', initialSearch = '', openSubmissionId = null, onDetailClosed }) {
+  // Dibuka dari kartu Dashboard: hanya tampilkan detail satu pengajuan, tanpa halaman daftar
+  const detailOnly = Boolean(openSubmissionId);
   const { user } = useAuth();
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -72,8 +74,17 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
   };
 
   useEffect(() => {
-    fetchSubmissions();
+    if (!detailOnly) fetchSubmissions();
   }, [filterStatus, filterType, filterCategory]);
+
+  useEffect(() => {
+    if (openSubmissionId) openVerificationModal(openSubmissionId);
+  }, [openSubmissionId]);
+
+  const closeVerifyModal = () => {
+    setIsVerifyModalOpen(false);
+    if (detailOnly) onDetailClosed?.();
+  };
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -109,14 +120,14 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
   };
 
   // Screen document
-  const handleScreenDoc = async (docId, status, revisionNotes) => {
+  const handleScreenDoc = async (docId, status, revisionNotes, revisionMarks = []) => {
     const res = await fetch(`/api/documents/${docId}/screen`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${localStorage.getItem('ikapi_token')}`
       },
-      body: JSON.stringify({ status, revisionNotes })
+      body: JSON.stringify({ status, revisionNotes, revisionMarks })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
@@ -247,7 +258,8 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     if (sub.status === 'Pengiriman Berkas') return sub.physical_status === 'Dikirim' ? `Berkas dikirim (${sub.physical_courier || '-'})` : 'Berkas fisik belum dikirim';
     if (sub.status === 'Berkas Diterima') return 'Siap dikirim ke IKAPI Pusat';
     if (sub.status === 'Dikirim ke Pusat') return `Menunggu KTA Pusat${sub.central_courier ? ` (${sub.central_courier})` : ''}`;
-    if (sub.status === 'Perlu Revisi') return 'Menunggu revisi pemohon';
+    if (sub.status === 'Perlu Revisi') return `Menunggu revisi ke-${sub.revision_round || 1} dari pemohon`;
+    if (sub.status === 'Menunggu Verifikasi' && sub.revision_round > 0) return `Hasil revisi ke-${sub.revision_round} masuk`;
     return null;
   };
 
@@ -323,6 +335,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
 
   return (
     <div className="space-y-6">
+      {!detailOnly && (<>
 
       {/* Header Banner */}
       <div className="card-surface p-6 flex flex-wrap items-center justify-between gap-4">
@@ -584,11 +597,13 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
         </div>
       </div>
 
+      </>)}
+
       {/* MODAL 1: VERIFIKASI BERKAS & PEMBAYARAN */}
       {isVerifyModalOpen && selectedSubDetail && (
         <DocumentVerificationModal
           isOpen={isVerifyModalOpen}
-          onClose={() => setIsVerifyModalOpen(false)}
+          onClose={closeVerifyModal}
           submission={selectedSubDetail.submission}
           documents={selectedSubDetail.documents}
           payment={selectedSubDetail.payment}

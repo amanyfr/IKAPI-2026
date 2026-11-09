@@ -1564,7 +1564,7 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
 
     // Check if slot exists
     const existing = await query.get(
-      'SELECT id, screening_status, file_path, document_title FROM documents WHERE submission_id = ? AND document_type = ?',
+      'SELECT id, screening_status, revision_notes, revision_marks, file_path, document_title FROM documents WHERE submission_id = ? AND document_type = ?',
       [subId, documentType]
     );
 
@@ -1585,13 +1585,21 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
     if (existing?.file_path) await deleteStoredFile(existing.file_path);
 
     if (existing) {
+      // Dokumen pengganti untuk yang dinyatakan tidak sesuai: simpan waktu revisi & catatan lama agar Admin tahu
+      const isDocRevision = existing.screening_status === 'Perlu Revisi';
       await query.run(
         `UPDATE documents SET
           file_path = ?, file_name = ?, file_size = ?, mime_type = ?,
-          screening_status = 'Menunggu', revision_notes = NULL, opened_at = NULL, opened_by_name = NULL,
-          verified_at = NULL, verified_by = NULL, updated_at = NOW()
+          screening_status = 'Menunggu', revision_notes = NULL, revision_marks = NULL, opened_at = NULL, opened_by_name = NULL,
+          verified_at = NULL, verified_by = NULL, updated_at = NOW(),
+          revised_at = ${isDocRevision ? 'NOW()' : 'revised_at'},
+          revision_count = revision_count + ${isDocRevision ? 1 : 0},
+          previous_revision_notes = ${isDocRevision ? '?' : 'previous_revision_notes'},
+          previous_revision_marks = ${isDocRevision ? '?' : 'previous_revision_marks'}
          WHERE id = ?`,
-        [filePath, fileName, fileSize, mimeType, existing.id]
+        isDocRevision
+          ? [filePath, fileName, fileSize, mimeType, existing.revision_notes || null, existing.revision_marks || null, existing.id]
+          : [filePath, fileName, fileSize, mimeType, existing.id]
       );
     } else {
       await query.run(
@@ -1642,6 +1650,33 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
   }
 });
 
+// Pemohon menghapus file dokumen dari draf (sebelum dikirim ke Admin); slot dokumen tetap ada tapi kosong
+app.delete('/api/submissions/:id/documents/:docType', authenticate, async (req, res) => {
+  try {
+    const sub = await query.get('SELECT user_id, status FROM submissions WHERE id = ?', [req.params.id]);
+    if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (sub.user_id !== req.user.id) return res.status(403).json({ error: 'Akses ditolak.' });
+    if (sub.status !== 'Draf') {
+      return res.status(400).json({ error: 'File hanya bisa dihapus selama pengajuan masih berupa draf.' });
+    }
+    const doc = await query.get(
+      'SELECT id, file_path FROM documents WHERE submission_id = ? AND document_type = ?',
+      [req.params.id, req.params.docType]
+    );
+    if (!doc) return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
+    if (doc.file_path) await deleteStoredFile(doc.file_path);
+    await query.run(
+      `UPDATE documents SET file_path = '', file_name = 'Belum diunggah', file_size = NULL, mime_type = NULL, updated_at = NOW()
+       WHERE id = ?`,
+      [doc.id]
+    );
+    res.json({ message: 'File dihapus dari draf.' });
+  } catch (err) {
+    console.error('Delete document error:', err);
+    res.status(500).json({ error: 'Gagal menghapus file.' });
+  }
+});
+
 // Admin membuka dokumen saat screening: waktu pertama dibuka dicatat (log waktu)
 app.post('/api/documents/:docId/opened', authenticate, authorize('Admin'), async (req, res) => {
   try {
@@ -1684,7 +1719,7 @@ app.post('/api/submissions/:id/payment/opened', authenticate, authorize('Admin')
 app.put('/api/documents/:docId/screen', authenticate, authorize('Admin'), async (req, res) => {
   try {
     const docId = req.params.docId;
-    const { status, revisionNotes } = req.body;
+    const { status, revisionNotes, revisionMarks } = req.body;
 
     if (!['Sesuai', 'Perlu Revisi'].includes(status)) {
       return res.status(400).json({ error: 'Status screening harus "Sesuai" atau "Tidak sesuai".' });
@@ -1694,7 +1729,9 @@ app.put('/api/documents/:docId/screen', authenticate, authorize('Admin'), async 
       [docId]
     );
     if (!doc) return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
-    if (doc.sub_status !== 'Menunggu Verifikasi') {
+    // Saat pengajuan menunggu revisi, Admin masih boleh memperbarui catatan/sorotan dokumen yang belum diganti pemohon
+    const editingRevision = doc.sub_status === 'Perlu Revisi' && doc.screening_status === 'Perlu Revisi' && status === 'Perlu Revisi';
+    if (doc.sub_status !== 'Menunggu Verifikasi' && !editingRevision) {
       return res.status(400).json({ error: 'Dokumen hanya bisa diperiksa saat pengajuan berada di tahap screening dokumen.' });
     }
     if (!doc.file_path) {
@@ -1707,11 +1744,21 @@ app.put('/api/documents/:docId/screen', authenticate, authorize('Admin'), async 
       return res.status(400).json({ error: 'Tulis komentar alasan dokumen tidak sesuai agar pemohon tahu apa yang harus diperbaiki.' });
     }
 
+    // Sorotan bagian dokumen: dibatasi & dinormalisasi agar aman disimpan
+    const clamp01 = (v) => Math.min(1, Math.max(0, Number(v) || 0));
+    const marks = status === 'Perlu Revisi' && Array.isArray(revisionMarks)
+      ? revisionMarks.slice(0, 50).map((m) => ({
+          page: Math.min(999, Math.max(1, parseInt(m?.page, 10) || 1)),
+          x: clamp01(m?.x), y: clamp01(m?.y), w: clamp01(m?.w), h: clamp01(m?.h),
+          note: String(m?.note || '').trim().slice(0, 200),
+        })).filter((m) => m.w > 0 && m.h > 0)
+      : [];
+
     await query.run(
       `UPDATE documents SET
-        screening_status = ?, revision_notes = ?, verified_by = ?, verified_at = NOW(), updated_at = NOW()
+        screening_status = ?, revision_notes = ?, revision_marks = ?, verified_by = ?, verified_at = NOW(), updated_at = NOW()
        WHERE id = ?`,
-      [status, status === 'Sesuai' ? null : revisionNotes, req.user.id, docId]
+      [status, status === 'Sesuai' ? null : revisionNotes, marks.length ? JSON.stringify(marks) : null, req.user.id, docId]
     );
     await logEvent(
       doc.submission_id, req.user,
@@ -1901,11 +1948,12 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin', 
       }
       await query.run(
         `UPDATE submissions SET status = 'Perlu Revisi', admin_notes = ?, screened_at = NULL, screened_by_name = NULL,
-           updated_at = NOW()
+           revision_round = revision_round + 1, updated_at = NOW()
          WHERE id = ?`,
         [notes || 'Terdapat dokumen yang tidak sesuai. Unggah ulang dokumen yang ditandai.', subId]
       );
-      await logEvent(subId, req.user, `Dikembalikan ke pemohon: ${docStats.bad} dokumen perlu direvisi`, notes || null);
+      const round = (Number(sub.revision_round) || 0) + 1;
+      await logEvent(subId, req.user, `Dikembalikan ke pemohon (revisi ke-${round}): ${docStats.bad} dokumen perlu direvisi`, notes || null);
       return res.json({ message: 'Pemohon diminta merevisi dokumen yang tidak sesuai.', status: 'Perlu Revisi' });
     }
 
@@ -1973,7 +2021,7 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin', 
           secretaryPos,
           positionsJson,
           req.user.name,
-          secretarySig, secretaryNameRow?.value || 'Drs. H. Anwar Rosyid, M.Si.',
+          secretarySig, secretaryNameRow?.value || 'Taofiq Rahman Ahmad, S.H.',
           secretarySig,
           subId
         ]
@@ -2027,8 +2075,8 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
       const map = {};
       settingsList.forEach(s => { map[s.key] = s.value; });
 
-      const chairmanName = map.ketua_nama || 'Dr. H. Mahpudi, M.T.';
-      const secretaryName = map.sekretaris_nama || 'Drs. H. Anwar Rosyid, M.Si.';
+      const chairmanName = map.ketua_nama || 'Dr. Abdul Raup, M.Pd.';
+      const secretaryName = map.sekretaris_nama || 'Taofiq Rahman Ahmad, S.H.';
 
       await query.run(
         `UPDATE submissions SET

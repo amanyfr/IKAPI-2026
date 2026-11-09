@@ -11,6 +11,7 @@ import {
   FileStack, Send, BadgeCheck, RefreshCw, ChevronDown, Lightbulb
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
+import QueueCard, { QueueFooter, QueueFilterBar } from '../components/QueueCard';
 
 /* ── Helper data ── */
 // Antrean sebelum Ketua: TTD Sekretaris + tahap yang dikerjakan Admin (dipantau Sekretaris)
@@ -18,11 +19,12 @@ const ADMIN1_QUEUE = ['Menunggu TTD Sekretaris', 'Menunggu Verifikasi', 'Perlu R
 const AT_ADMIN2    = ['Menunggu Approval'];
 const FINISHED     = [...POST_APPROVAL_STATUSES, 'Ditolak'];
 
-const STATUS_CHIP = {
-  'Menunggu TTD Sekretaris': 'bg-indigo-600 text-white',
-  'Menunggu Verifikasi': 'bg-[#0da2e7] text-white',
-  'Perlu Revisi':        'bg-amber-100 text-amber-800 ring-1 ring-amber-200',
-  'Menunggu Pembayaran': 'bg-white text-slate-700 ring-1 ring-slate-200',
+// Label kartu: apa yang sedang terjadi / perlu dilakukan
+const CARD = {
+  'Menunggu TTD Sekretaris': { label: 'Perlu tanda tangan Anda', chip: 'bg-indigo-100 text-indigo-800', dot: 'bg-indigo-600' },
+  'Menunggu Verifikasi':     { label: 'Diperiksa Admin',         chip: 'bg-sky-100 text-sky-800',       dot: 'bg-[#0da2e7]' },
+  'Perlu Revisi':            { label: 'Revisi oleh pemohon', chip: 'bg-amber-100 text-amber-800',   dot: 'bg-amber-500' },
+  'Menunggu Pembayaran':     { label: 'Menunggu pembayaran',     chip: 'bg-slate-200/70 text-slate-700', dot: 'bg-slate-400' },
 };
 
 const TREND_SERIES = [
@@ -32,7 +34,7 @@ const TREND_SERIES = [
     dateOf: submittedDate, filter: (s) => s.submission_type === 'Heregistrasi' },
 ];
 
-export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
+export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpenDetail }) {
   const { user } = useAuth();
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -76,7 +78,8 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
 
   const queue = useMemo(() => {
     const list = submissions.filter((s) =>
-      queueFilter === 'Semua' ? ADMIN1_QUEUE.includes(s.status) : s.status === queueFilter
+      queueFilter === 'Semua' ? ADMIN1_QUEUE.includes(s.status)
+        : s.status === queueFilter
     );
     return list.sort((a, b) => {
       const diff = (parseDate(b.updated_at) || 0) - (parseDate(a.updated_at) || 0);
@@ -103,7 +106,7 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
   const FILTERS = [
     { key: 'Menunggu TTD Sekretaris', label: 'Perlu keputusan Anda', value: needScreening, dot: 'bg-[#0da2e7]' },
     { key: 'Menunggu Verifikasi', label: 'Screening Admin', value: count(['Menunggu Verifikasi']), dot: 'bg-sky-300' },
-    { key: 'Perlu Revisi', label: 'Revisi', value: needRevision, dot: 'bg-amber-400' },
+    { key: 'Perlu Revisi', label: 'Revisi', value: needRevision, dot: 'bg-amber-500' },
     { key: 'Menunggu Pembayaran', label: 'Pembayaran', value: needPayment, dot: 'bg-slate-400' },
     { key: 'Semua', label: 'Semua', value: atAdmin1, dot: 'bg-slate-300' },
   ];
@@ -144,28 +147,16 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
       {/* ══ Widget utama: antrian + prioritas ══ */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="card-surface p-4 sm:p-5 lg:col-span-9 flex flex-col">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-3">
-            <h2 className="text-lg text-slate-800 whitespace-nowrap">Antrian pengajuan</h2>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {FILTERS.map((f) => (
-                <button key={f.key} onClick={() => setQueueFilter(f.key)}
-                  className={`flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-full text-xs border transition ${
-                    queueFilter === f.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-700 border-slate-200/70 hover:bg-white'}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />
-                  {f.label}
-                  <span className={`min-w-[1.5rem] text-center rounded-full px-1.5 py-0.5 font-semibold ${queueFilter === f.key ? 'bg-white/20' : 'bg-slate-900/5'}`}>{f.value}</span>
-                </button>
-              ))}
-              <button onClick={() => setSortOrder(sortOrder === 'newest' ? 'oldest' : 'newest')}
-                className="px-3 py-1 rounded-full text-xs border bg-slate-50 text-slate-600 border-slate-200/70 hover:bg-white">
-                {sortOrder === 'newest' ? 'Terbaru' : 'Terlama'}
-              </button>
-              <button onClick={fetchSubmissions} title="Segarkan data"
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-[#0da2e7] transition">
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-          </div>
+          <QueueFilterBar
+            title="Antrian pengajuan"
+            filters={FILTERS}
+            active={queueFilter}
+            onChange={setQueueFilter}
+            sortOrder={sortOrder}
+            onToggleSort={() => setSortOrder(sortOrder === 'newest' ? 'oldest' : 'newest')}
+            onRefresh={fetchSubmissions}
+            loading={loading}
+          />
 
           {queue.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-sm text-slate-500 py-10">
@@ -174,71 +165,25 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
           ) : (
             <div>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                {displayQueue.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => onOpenScreening(s.status === 'Menunggu TTD Sekretaris' ? { status: s.status } : { search: s.publisher_name || '' })}
-                    className="text-left rounded-2xl bg-slate-50 hover:bg-white hover:border-[#0da2e7] hover:shadow-md border border-slate-200/80 p-4 flex flex-col justify-between transition-all group min-h-[142px]"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${STATUS_CHIP[s.status] || 'bg-slate-100 text-slate-700'}`}>
-                          {STATUS_LABEL[s.status] || s.status}
-                        </span>
-                        <span className="text-[11px] text-slate-500 font-medium">
-                          {timeAgo(s.updated_at)}
-                        </span>
-                      </div>
-
-                      <p className="text-sm text-slate-900 font-bold mt-2.5 truncate group-hover:text-[#0884c4] transition-colors">
-                        {s.publisher_name || '-'}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5 truncate">
-                        {s.submission_type} · {s.member_category} · {s.city || '-'}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-200/60">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="w-7 h-7 flex-shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-blue-700 text-white text-[11px] font-semibold flex items-center justify-center shadow-xs">
-                          {initials(s.applicant_name)}
-                        </span>
-                        <div className="min-w-0 leading-tight">
-                          <span className="block text-xs font-medium text-slate-800 truncate">{s.applicant_name}</span>
-                          <span className="block text-[10px] text-slate-500 truncate">{s.applicant_email}</span>
-                        </div>
-                      </div>
-                      <span className="text-xs font-semibold text-[#0884c4] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 flex-shrink-0">
-                        Tinjau <ArrowRight className="w-3.5 h-3.5" />
-                      </span>
-                    </div>
-                  </button>
-                ))}
+                {displayQueue.map((s) => {
+                  const c = CARD[s.status] || { label: STATUS_LABEL[s.status] || s.status };
+                  return (
+                    <QueueCard
+                      key={s.id}
+                      sub={s}
+                      label={c.label}
+                      tone={c}
+                      actionLabel={s.status === 'Menunggu TTD Sekretaris' ? 'Tinjau & TTD' : 'Lihat detail'}
+                      onClick={() => (onOpenDetail ? onOpenDetail(s.id) : onOpenScreening({ search: s.publisher_name || '' }))}
+                    />
+                  );
+                })}
               </div>
 
               {queue.length > 6 && (
-                <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                  <span>
-                    Menampilkan {displayQueue.length} dari {queue.length} antrian pengajuan
-                  </span>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowAllQueue(!showAllQueue)}
-                      className="font-medium text-slate-700 hover:text-slate-900 underline cursor-pointer"
-                    >
-                      {showAllQueue ? 'Tampilkan ringkas (6)' : `Tampilkan semua (${queue.length})`}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onOpenScreening?.({})}
-                      className="font-semibold text-[#0884c4] hover:text-[#066190] hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>Buka di menu Screening</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
+                <QueueFooter shown={displayQueue.length} total={queue.length} noun="pengajuan"
+                  expanded={showAllQueue} onToggle={() => setShowAllQueue(!showAllQueue)}
+                  linkLabel="Buka menu Screening" onLink={() => onOpenScreening?.({})} />
               )}
             </div>
           )}

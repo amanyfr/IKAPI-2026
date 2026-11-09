@@ -161,7 +161,8 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
   const signedList = submissions.filter(s => POST_APPROVAL_STATUSES.includes(s.status));
 
   const filteredMonitoring = submissions.filter(s => {
-    const matchStatus = monitorStatus === 'Semua' || s.status === monitorStatus;
+    const matchStatus = monitorStatus === 'Semua'
+      || s.status === monitorStatus;
     const q = monitorSearch.trim().toLowerCase();
     const matchSearch =
       !q ||
@@ -172,8 +173,8 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
     return matchStatus && matchSearch;
   });
 
-  const chairmanName = settings?.ketua_nama || 'Dr. H. Mahpudi, M.T.';
-  const secretaryName = settings?.sekretaris_nama || 'Drs. H. Anwar Rosyid, M.Si.';
+  const chairmanName = settings?.ketua_nama || 'Dr. Abdul Raup, M.Pd.';
+  const secretaryName = settings?.sekretaris_nama || 'Taofiq Rahman Ahmad, S.H.';
 
   return (
     <div className="space-y-6">
@@ -485,7 +486,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
             {[
               { label: 'Screening Dokumen', status: 'Menunggu Verifikasi', color: 'text-[#0884c4] bg-[#f0f9ff] border-[#b8e6fc]' },
-              { label: 'Revisi Dokumen', status: 'Perlu Revisi', color: 'text-amber-800 bg-amber-50 border-amber-200' },
+              { label: 'Revisi', status: 'Perlu Revisi', color: 'text-amber-800 bg-amber-50 border-amber-200' },
               { label: 'Pembayaran', status: 'Menunggu Pembayaran', color: 'text-amber-800 bg-amber-50 border-amber-200' },
               { label: 'TTD Sekretaris', status: 'Menunggu TTD Sekretaris', color: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
               { label: 'TTD Ketua', status: 'Menunggu Approval', color: 'text-indigo-800 bg-indigo-50 border-indigo-200' },

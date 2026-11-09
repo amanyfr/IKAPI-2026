@@ -40,9 +40,9 @@ export async function runSeed() {
     { key: 'fee_iuran_durasi_bulan', value: '24', description: 'Durasi Iuran Wajib Dibayar di Muka (Bulan)' },
     { key: 'fee_administrasi', value: '250000', description: 'Biaya Administrasi & Verifikasi Lapangan' },
     { key: 'fee_heregistrasi_iuran', value: '1200000', description: 'Biaya Iuran 24 Bulan Heregistrasi' },
-    { key: 'ketua_nama', value: 'Dr. H. Mahpudi, M.T.', description: 'Nama Ketua PD IKAPI Jawa Barat' },
+    { key: 'ketua_nama', value: 'Dr. Abdul Raup, M.Pd.', description: 'Nama Ketua PD IKAPI Jawa Barat' },
     { key: 'ketua_jabatan', value: 'Ketua Pengurus Daerah IKAPI Jawa Barat', description: 'Jabatan Ketua' },
-    { key: 'sekretaris_nama', value: 'Drs. H. Anwar Rosyid, M.Si.', description: 'Nama Sekretaris PD IKAPI Jawa Barat' },
+    { key: 'sekretaris_nama', value: 'Taofiq Rahman Ahmad, S.H.', description: 'Nama Sekretaris PD IKAPI Jawa Barat' },
     { key: 'sekretaris_jabatan', value: 'Sekretaris PD IKAPI Jawa Barat', description: 'Jabatan Sekretaris' },
     { key: 'surat_counter', value: '14', description: 'Nomor Urut Surat Terakhir' },
     { key: 'office_address', value: 'Jl. Ibu Inggit Garnasih No. 148, Ciateul, Kec. Regol, Kota Bandung, Jawa Barat 40252', description: 'Alamat Sekretariat IKAPI Jabar' },
@@ -84,7 +84,7 @@ export async function runSeed() {
       email_verified_at: '2026-01-10 08:00:00'
     },
     {
-      name: 'Drs. H. Anwar Rosyid, M.Si. (Sekretaris)',
+      name: 'Taofiq Rahman Ahmad, S.H. (Sekretaris)',
       email: 'sekretaris@ikapi-jabar.or.id',
       password: hashedPassword,
       role: 'Sekretaris',
@@ -92,7 +92,7 @@ export async function runSeed() {
       email_verified_at: '2026-01-10 08:00:00'
     },
     {
-      name: 'Dr. H. Mahpudi, M.T. (Ketua)',
+      name: 'Dr. Abdul Raup, M.Pd. (Ketua)',
       email: 'ketua@ikapi-jabar.or.id',
       password: hashedPassword,
       role: 'Ketua',
@@ -290,8 +290,8 @@ export async function runSeed() {
       '008/JBR/2022',
       '010/PD-Ikapi Jabar/II/2026',
       '2026-02-12',
-      'Dr. H. Mahpudi, M.T.',
-      'Drs. H. Anwar Rosyid, M.Si.',
+      'Dr. Abdul Raup, M.Pd.',
+      'Taofiq Rahman Ahmad, S.H.',
       '2026-02-14 10:00:00',
       '2026-02-14 11:30:00',
       '2026-02-02 09:00:00',

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
-  Save, Send, CheckCircle, Check, Upload, ArrowLeft, ArrowRight
+  Save, Send, CheckCircle, Check, Upload, ArrowLeft, ArrowRight, Eye, Trash2, RefreshCw
 } from 'lucide-react';
 import {
   PEMASARAN_DISTRIBUTOR, PEMASARAN_SENDIRI, PENJUALAN_OPTIONS, NASKAH_OPTIONS,
@@ -9,6 +9,7 @@ import {
   asList, karyawanRows
 } from '../utils/formulirIkapi';
 import { notify } from '../components/AppDialog';
+import UploadReviewDialog, { formatFileSize } from '../components/UploadReviewDialog';
 import { FILTERS, NUMERIC, DECIMAL, PHONE } from '../utils/inputFilters';
 
 // Field formulir yang tidak boleh berisi huruf beserta penyaringnya
@@ -83,6 +84,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
   // Dokumen yang sudah tersimpan di server (draf lama): { document_type: nama file }
   const [uploadedDocs, setUploadedDocs] = useState({});
   const [showMissingDocs, setShowMissingDocs] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false); // pop-up ringkasan sebelum dikirim ke Admin
+  const [removingDoc, setRemovingDoc] = useState(null);
 
   useEffect(() => {
     const id = existingSubmission?.id;
@@ -230,14 +233,48 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
 
   const handleFileSelect = (docType, file) => {
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      notify('Ukuran file maksimal 10 MB. Kompres atau pilih file lain.', { tone: 'warning', title: 'File terlalu besar' });
+      return;
+    }
     setSelectedFiles(prev => ({ ...prev, [docType]: file }));
+  };
+
+  // Batalkan file yang baru dipilih (belum terkirim ke server)
+  const handleFileRemove = (docType) => {
+    setSelectedFiles((prev) => { const next = { ...prev }; delete next[docType]; return next; });
+  };
+
+  const previewLocalFile = (file) => {
+    const url = URL.createObjectURL(file);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
+  // Hapus file yang sudah tersimpan di draf
+  const handleSavedFileRemove = async (docItem) => {
+    if (!draftId) return;
+    setRemovingDoc(docItem.type);
+    try {
+      const res = await fetch(`/api/submissions/${draftId}/documents/${encodeURIComponent(docItem.type)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Coba lagi.');
+      setUploadedDocs((prev) => { const next = { ...prev }; delete next[docItem.type]; return next; });
+    } catch (err) {
+      notify(`File "${docItem.title}" belum terhapus. ${err.message}`, { tone: 'error', title: 'Gagal menghapus file' });
+    } finally {
+      setRemovingDoc(null);
+    }
   };
 
   const requiredDocs = getRequiredDocsList(formData.submissionType, formData.category);
   const missingDocs = requiredDocs.filter((d) => !selectedFiles[d.type] && !uploadedDocs[d.type]);
   const isHereg = formData.submissionType === 'Heregistrasi';
 
-  const handleSubmit = async (isDraft = false, { stay = false } = {}) => {
+  const handleSubmit = async (isDraft = false, { stay = false, confirmed = false } = {}) => {
     if (isDraft && !formData.publisherName.trim()) {
       notify('Isi Nama Penerbit terlebih dahulu agar draf bisa disimpan.');
       setActiveTab(1);
@@ -275,6 +312,12 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
         items: missingDocs.map((d) => d.title),
         okLabel: 'Unggah dokumen',
       });
+      return;
+    }
+
+    // Tampilkan ringkasan dokumen dulu; baru dikirim ke Admin setelah pemohon menekan Kirim
+    if (!isDraft && !confirmed) {
+      setConfirmOpen(true);
       return;
     }
 
@@ -319,6 +362,13 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
               throw new Error(`Dokumen "${docItem.title}" belum berhasil diunggah. ${upData.error || 'Periksa file lalu coba lagi.'}`);
             }
             setUploadedDocs((prev) => ({ ...prev, [docItem.type]: file.name }));
+            // Sudah tersimpan di server: tidak perlu diunggah lagi saat simpan/kirim berikutnya
+            setSelectedFiles((prev) => {
+              if (prev[docItem.type] !== file) return prev;
+              const next = { ...prev };
+              delete next[docItem.type];
+              return next;
+            });
           }
         }
       }
@@ -343,8 +393,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
         setDraftSavedAt(new Date());
         return;
       }
+      setConfirmOpen(false);
       if (onComplete) onComplete(subId);
     } catch (err) {
+      setConfirmOpen(false);
       notify(err.message || 'Periksa koneksi internet lalu coba lagi.', {
         tone: 'warning',
         title: isDraft ? 'Draf belum tersimpan' : 'Pengajuan belum terkirim',
@@ -1071,30 +1123,55 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                         hasFile ? 'bg-emerald-50/40 border-emerald-200' : flagged ? 'bg-amber-50/60 border-amber-300' : 'bg-white border-slate-200/70'
                       }`}
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="text-sm font-bold text-slate-900">{docItem.title} *</div>
                         {hasFile ? (
-                          <div className="text-xs text-emerald-700 font-bold flex items-center gap-1.5 mt-1">
-                            <CheckCircle className="w-4 h-4" />
-                            <span className="truncate">{chosenFile ? chosenFile.name : `Sudah diunggah: ${savedName}`}</span>
+                          <div className="text-xs text-emerald-700 font-bold flex items-center gap-1.5 mt-1 min-w-0">
+                            <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                            <span className="truncate">
+                              {chosenFile ? `${chosenFile.name} · ${formatFileSize(chosenFile.size)}` : `Tersimpan di draf: ${savedName}`}
+                            </span>
                           </div>
                         ) : flagged ? (
                           <div className="text-xs text-amber-700 font-semibold mt-0.5">Belum diunggah — wajib sebelum pengajuan dikirim</div>
                         ) : (
-                          <div className="text-xs text-slate-400 mt-0.5">Format PDF / JPG / PNG</div>
+                          <div className="text-xs text-slate-400 mt-0.5">Format PDF / JPG / PNG · maks. 10 MB</div>
+                        )}
+
+                        {hasFile && (
+                          <div className="flex flex-wrap items-center gap-1 mt-2 -ml-2">
+                            {chosenFile && (
+                              <button type="button" onClick={() => previewLocalFile(chosenFile)}
+                                className="px-2 py-1 rounded-full text-xs font-medium text-slate-600 hover:bg-white flex items-center gap-1">
+                                <Eye className="w-3.5 h-3.5" /> Lihat
+                              </button>
+                            )}
+                            <label className={`px-2 py-1 rounded-full text-xs font-medium text-[#0884c4] hover:bg-white flex items-center gap-1 ${submitting ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}>
+                              <RefreshCw className="w-3.5 h-3.5" /> Ganti
+                              <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" disabled={submitting}
+                                onChange={(e) => { handleFileSelect(docItem.type, e.target.files?.[0]); e.target.value = ''; }} />
+                            </label>
+                            <button type="button" disabled={submitting || removingDoc === docItem.type}
+                              onClick={() => (chosenFile ? handleFileRemove(docItem.type) : handleSavedFileRemove(docItem))}
+                              className="px-2 py-1 rounded-full text-xs font-medium text-red-600 hover:bg-white flex items-center gap-1 disabled:opacity-50">
+                              <Trash2 className="w-3.5 h-3.5" /> {removingDoc === docItem.type ? 'Menghapus…' : chosenFile && savedName ? 'Batal ganti' : 'Hapus'}
+                            </button>
+                          </div>
                         )}
                       </div>
 
-                      <label className="soft-pill !text-xs cursor-pointer flex-shrink-0">
-                        <Upload className="w-4 h-4" />
-                        <span>{hasFile ? 'Ganti File' : 'Pilih File'}</span>
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png"
-                          className="hidden"
-                          onChange={(e) => handleFileSelect(docItem.type, e.target.files?.[0])}
-                        />
-                      </label>
+                      {!hasFile && (
+                        <label className="soft-pill !text-xs cursor-pointer flex-shrink-0">
+                          <Upload className="w-4 h-4" />
+                          <span>Pilih File</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            className="hidden"
+                            onChange={(e) => { handleFileSelect(docItem.type, e.target.files?.[0]); e.target.value = ''; }}
+                          />
+                        </label>
+                      )}
                     </div>
                   );
                 })}
@@ -1132,6 +1209,17 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   </button>
                 </div>
               </div>
+
+              <UploadReviewDialog
+                open={confirmOpen}
+                title="Kirim pengajuan ke Admin?"
+                description={`Periksa lagi ${requiredDocs.length} dokumen di bawah. Setelah dikirim, pengajuan masuk screening Admin dan dokumen tidak bisa diganti kecuali diminta revisi.`}
+                items={requiredDocs.map((d) => ({ key: d.type, title: d.title, file: selectedFiles[d.type], savedName: uploadedDocs[d.type] }))}
+                confirmLabel="Kirim pengajuan"
+                busy={submitting}
+                onConfirm={() => handleSubmit(false, { confirmed: true })}
+                onClose={() => setConfirmOpen(false)}
+              />
             </div>
           )}
 

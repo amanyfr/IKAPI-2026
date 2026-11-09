@@ -9,6 +9,8 @@ const ROLE_TONE = {
   Sistem: 'bg-slate-100 text-slate-600',
 };
 
+// Ditolak = merah; perlu revisi (tidak sesuai / dikembalikan) = kuning
+const REJECTED = /ditolak/i;
 const NEGATIVE = /(tidak sesuai|ditolak|dikembalikan)/i;
 const POSITIVE = /(sesuai|disetujui|valid|ditandatangani|diterima|resmi)/i;
 
@@ -42,16 +44,17 @@ export default function SubmissionTimeline({ timeline = [], cardClassName = 'car
           {shown.map((item, idx) => {
             const negative = NEGATIVE.test(item.action);
             const positive = !negative && POSITIVE.test(item.action);
-            const dot = negative ? 'bg-red-500' : positive ? 'bg-emerald-500' : 'bg-[#0da2e7]';
+            const rejected = REJECTED.test(item.action);
+            const dot = negative ? (rejected ? 'bg-red-500' : 'bg-amber-500') : positive ? 'bg-emerald-500' : 'bg-[#0da2e7]';
             const last = idx === shown.length - 1;
             return (
               <li key={item.id || `${item.created_at}-${idx}`} className="relative flex gap-3 pb-4 last:pb-0">
                 {!last && <span className="absolute left-[5px] top-4 bottom-0 w-px bg-slate-200" />}
                 <span className={`relative mt-1.5 w-[11px] h-[11px] rounded-full ring-4 ring-white flex-shrink-0 ${dot}`} />
                 <div className="min-w-0 flex-1">
-                  <p className={`text-sm leading-snug ${negative ? 'text-red-700' : 'text-slate-800'}`}>{item.action}</p>
+                  <p className={`text-sm leading-snug ${negative ? (rejected ? 'text-red-700' : 'text-amber-800') : 'text-slate-800'}`}>{item.action}</p>
                   {item.notes && (
-                    <p className={`text-xs mt-1 rounded-lg px-2.5 py-1.5 ${negative ? 'bg-red-50 text-red-800 border border-red-100' : 'bg-slate-50 text-slate-600'}`}>
+                    <p className={`text-xs mt-1 rounded-lg px-2.5 py-1.5 ${negative ? (rejected ? 'bg-red-50 text-red-800 border border-red-100' : 'bg-amber-50 text-amber-900 border border-amber-200') : 'bg-slate-50 text-slate-600'}`}>
                       {item.notes}
                     </p>
                   )}
