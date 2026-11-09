@@ -57,6 +57,45 @@ export async function downloadInvoicePdf({ submission, payment, settings }) {
 
 const invoiceFileName = (submission) => `Invoice_${safeFileName(submission.publisher_name)}.pdf`;
 
+const TYPE_LABEL = { Baru: 'Pendaftaran Anggota Baru', Heregistrasi: 'Registrasi Ulang (Heregistrasi)' };
+
+// Alamat penagihan: alamat + kota + kode pos, tanpa mengulang kota yang sudah tertulis di alamat
+function billingAddress(sub) {
+  const address = String(sub.address || '').trim();
+  const city = String(sub.city || '').trim();
+  const postal = String(sub.postal_code || '').trim();
+  const parts = [address];
+  if (city && !address.toLowerCase().includes(city.toLowerCase())) parts.push(city);
+  if (postal && postal !== '-' && !address.includes(postal)) parts.push(postal);
+  return parts.filter((p) => p && p !== '-').join(', ');
+}
+
+function InfoBox({ title, className = '', children }) {
+  return (
+    <div className={`border border-slate-200 rounded-lg p-4 ${className}`}>
+      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#0b86c2] mb-2">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+// Baris label : nilai; baris tanpa nilai tidak ditampilkan
+function InfoRows({ rows }) {
+  return (
+    <dl className="grid grid-cols-[auto_auto_1fr] gap-x-2 gap-y-1 text-xs">
+      {rows
+        .filter(([, value]) => value && value !== '-')
+        .map(([label, value]) => (
+          <React.Fragment key={label}>
+            <dt className="text-slate-500 whitespace-nowrap">{label}</dt>
+            <span className="text-slate-500" aria-hidden="true">:</span>
+            <dd className="text-slate-800 break-words">{value}</dd>
+          </React.Fragment>
+        ))}
+    </dl>
+  );
+}
+
 // Tampilan invoice (HTML) untuk pratinjau anggota & Admin
 export default function PaymentInvoice({ submission, payment, settings }) {
   const paperRef = useRef(null);
@@ -90,26 +129,38 @@ export default function PaymentInvoice({ submission, payment, settings }) {
 
         <div className="text-center mb-6">
           <h3 className="text-lg font-semibold uppercase tracking-wide">{s.invoice_title}</h3>
-          <p className="text-xs text-slate-500 mt-0.5 font-mono">No. {invoiceNumber(submission, settings)}</p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-          <div>
-            <p className="text-xs text-slate-500">Ditagihkan kepada</p>
-            <p className="font-medium">{submission.publisher_name}</p>
-            <p className="text-slate-600">{submission.leader_name}</p>
-            <p className="text-slate-600 text-xs">{[submission.address, submission.city].filter(Boolean).join(', ')}</p>
-          </div>
-          <div className="sm:text-right">
-            <p className="text-xs text-slate-500">Tanggal</p>
-            <p className="font-medium">{dateStr}</p>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr] gap-4 mb-6">
+          <InfoBox title="Ditagihkan kepada">
+            <p className="font-semibold text-[15px] text-slate-900 leading-snug">{submission.publisher_name}</p>
+            <p className="text-[11px] text-slate-500 mb-2">Penerbit pemohon keanggotaan IKAPI Jawa Barat</p>
+            <InfoRows
+              rows={[
+                ['Pimpinan', [submission.leader_name, submission.leader_title].filter(Boolean).join(' — ')],
+                ['Alamat', billingAddress(submission)],
+                ['Telepon', submission.publisher_phone || submission.leader_phone],
+                ['Email', submission.publisher_email],
+              ]}
+            />
+          </InfoBox>
+          <InfoBox title="Rincian invoice">
+            <InfoRows
+              rows={[
+                ['No. Invoice', <span className="font-mono font-semibold whitespace-nowrap">{invoiceNumber(submission, settings)}</span>],
+                ['Tanggal', dateStr],
+                ['Jenis', TYPE_LABEL[submission.submission_type] || submission.submission_type],
+                ['Kategori', submission.member_category || submission.category],
+                ['No. KTA', submission.member_kta || submission.old_kta_number],
+              ]}
+            />
+          </InfoBox>
         </div>
 
         <table className="w-full mb-6">
           <thead>
             <tr className="bg-[#f0f9ff] text-xs text-slate-600">
-              <th className="text-left font-semibold px-3 py-2">Keterangan</th>
+              <th className="text-left font-semibold px-3 py-2">Uraian</th>
               <th className="text-right font-semibold px-3 py-2">Jumlah</th>
             </tr>
           </thead>
@@ -128,11 +179,15 @@ export default function PaymentInvoice({ submission, payment, settings }) {
         </table>
 
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-5">
-          <div className="text-xs text-slate-600 space-y-1">
-            <p>Dibayar ke: <strong>{settings?.bank_name || 'Bank BNI'} {settings?.bank_account}</strong> a.n. {settings?.bank_holder}</p>
-            <p>Dari: {payment.sender_bank || '-'} a.n. {payment.sender_account_name || '-'}</p>
-            <p>Tanggal transfer: {formatLongDate(payment.transfer_date)}</p>
-          </div>
+          <InfoBox title="Informasi pembayaran" className="flex-1 sm:max-w-md">
+            <InfoRows
+              rows={[
+                ['Rekening tujuan', `${settings?.bank_name || 'Bank BNI'} ${settings?.bank_account || ''} a.n. ${settings?.bank_holder || '-'}`],
+                ['Rekening pengirim', [payment.sender_bank, payment.sender_account_number].filter(Boolean).join(' ') + (payment.sender_account_name ? ` a.n. ${payment.sender_account_name}` : '')],
+                ['Tanggal transfer', formatLongDate(payment.transfer_date)],
+              ]}
+            />
+          </InfoBox>
           <span className={`self-start px-4 py-2 rounded-lg border-2 font-bold tracking-wider -rotate-3 ${
             paid ? 'border-emerald-600 text-emerald-600 text-xl' : 'border-amber-500 text-amber-600 text-xs'
           }`}>
@@ -141,10 +196,10 @@ export default function PaymentInvoice({ submission, payment, settings }) {
         </div>
 
         <div className="flex justify-end mt-8">
-          <div className="text-center text-xs">
+          <div className="text-center text-sm min-w-56">
             <p>Bandung, {dateStr}</p>
-            <p>{s.invoice_issuer_title}</p>
-            <p className="font-semibold mt-10">{s.invoice_issuer_name}</p>
+            <p>{s.invoice_issuer_title},</p>
+            <p className="font-bold underline mt-20">{s.invoice_issuer_name}</p>
           </div>
         </div>
 

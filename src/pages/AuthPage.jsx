@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Lock, Mail, User, Phone, AlertCircle, CheckCircle2, Eye, EyeOff, ArrowLeft, MessageCircle } from 'lucide-react';
 import { waLink } from '../utils/whatsapp';
+import { FILTERS } from '../utils/inputFilters';
 
 // Tautan dari email: /?verify=<token> (verifikasi email) atau /?reset=<token> (atur ulang sandi)
 const urlParams = new URLSearchParams(window.location.search);
@@ -365,7 +366,7 @@ export default function AuthPage() {
                       <input
                         type="tel" required
                         value={regPhone}
-                        onChange={(e) => setRegPhone(e.target.value)}
+                        onChange={(e) => setRegPhone(FILTERS.phone(e.target.value))}
                         placeholder="08XXXXXXXXXX"
                         className={inputBase}
                       />

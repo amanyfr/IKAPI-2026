@@ -49,28 +49,71 @@ app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split('
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Ensure upload directories
-const uploadsDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-// Catatan: /uploads TIDAK lagi disajikan publik. Lihat route GET /uploads/:filename di bawah
-// (butuh login + hak akses ke pengajuan pemilik file).
+// Folder lama tempat file unggahan dulu disimpan. Sekarang hanya dibaca sekali saat start
+// untuk memindahkan file lama ke tabel `files` (lihat migrateDiskUploads).
+const legacyUploadsDir = path.join(__dirname, '..', 'uploads');
+// Catatan: /uploads/:filename TIDAK publik. Lihat route GET /uploads/:filename di bawah
+// (butuh login + hak akses ke pengajuan pemilik file). Isi file diambil dari tabel `files`.
 
 const ALLOWED_UPLOAD_EXT = ['.pdf', '.png', '.jpg', '.jpeg', '.webp'];
 const ALLOWED_UPLOAD_MIME = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
+const MIME_BY_EXT = { '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
 
-// Multer storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
-    cb(null, `${Date.now()}_${base}${ext}`);
+// File ditampung di memori lalu disimpan ke database oleh storeUpload()
+const storage = multer.memoryStorage();
+
+function makeStoredName(originalName) {
+  const ext = path.extname(originalName).toLowerCase();
+  const base = path.basename(originalName, path.extname(originalName)).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  return `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${base}${ext}`;
+}
+
+// Simpan file hasil multer ke tabel `files`; kembalikan path '/uploads/<nama>' untuk kolom file_path.
+async function storeUpload(file) {
+  const storedName = makeStoredName(file.originalname);
+  await query.run(
+    'INSERT INTO files (stored_name, original_name, mime_type, file_size, data) VALUES (?, ?, ?, ?, ?)',
+    [storedName, file.originalname, file.mimetype, file.size, file.buffer]
+  );
+  return `/uploads/${storedName}`;
+}
+
+// Hapus isi file lama yang sudah tidak dipakai (mis. dokumen diganti)
+async function deleteStoredFile(filePath) {
+  if (!filePath) return;
+  await query.run('DELETE FROM files WHERE stored_name = ?', [path.basename(filePath)]);
+}
+
+async function readStoredFile(filePath) {
+  if (!filePath) return null;
+  return query.get('SELECT original_name, mime_type, file_size, data FROM files WHERE stored_name = ?', [path.basename(filePath)]);
+}
+
+// Pindahkan file lama dari folder uploads/ ke database (sekali jalan, aman diulang).
+// File di folder tidak dihapus; setelah semua pindah, folder uploads/ boleh dihapus manual.
+async function migrateDiskUploads() {
+  if (!fs.existsSync(legacyUploadsDir)) return;
+  const names = fs.readdirSync(legacyUploadsDir).filter((n) => MIME_BY_EXT[path.extname(n).toLowerCase()]);
+  let moved = 0;
+  for (const name of names) {
+    const exists = await query.get('SELECT 1 AS ok FROM files WHERE stored_name = ?', [name]);
+    if (exists) continue;
+    const data = fs.readFileSync(path.join(legacyUploadsDir, name));
+    const ref = `/uploads/${name}`;
+    const meta = await query.get(
+      `SELECT file_name AS original_name FROM documents WHERE file_path = ?
+       UNION SELECT proof_filename FROM payments WHERE proof_file = ? LIMIT 1`,
+      [ref, ref]
+    );
+    await query.run(
+      'INSERT INTO files (stored_name, original_name, mime_type, file_size, data) VALUES (?, ?, ?, ?, ?)',
+      [name, meta?.original_name || name, MIME_BY_EXT[path.extname(name).toLowerCase()], data.length, data]
+    );
+    moved += 1;
   }
-});
+  if (moved) console.log(`[uploads] ${moved} file lama dipindahkan dari folder uploads/ ke database.`);
+}
+
 const upload = multer({
   storage,
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
@@ -249,6 +292,8 @@ app.post('/api/auth/register', registerLimiter, async (req, res) => {
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Nama, email, dan password wajib diisi.' });
     }
+    const regFormatErr = formatError(req.body, PHONE_FORMAT);
+    if (regFormatErr) return res.status(400).json({ error: regFormatErr });
 
     const existing = await query.get('SELECT id FROM users WHERE email = ?', [email]);
     if (existing) {
@@ -630,6 +675,50 @@ app.put('/api/auth/signature', authenticate, authorize('Ketua', 'Sekretaris'), a
 // ==========================================
 // BIAYA KEANGGOTAAN (diatur Admin di Pengaturan)
 // ==========================================
+// Format field yang tidak boleh berisi huruf (cermin dari src/utils/inputFilters.js).
+// Nilai kosong atau "-" (placeholder data lama) dilewati.
+const FORMAT_RULES = {
+  digits: [/^\d+$/, 'hanya boleh berisi angka'],
+  phone: [/^[\d+\-\s()/]+$/, 'hanya boleh berisi angka (boleh + - spasi ( ) /)'],
+  decimal: [/^\d+([.,]\d+)?%?$/, 'hanya boleh berisi angka'],
+  npwp: [/^[\d.\-]+$/, 'hanya boleh berisi angka, titik, dan strip'],
+  isbn: [/^[\dXx-]+$/, 'hanya boleh berisi angka dan strip'],
+};
+function formatError(values, spec) {
+  for (const [key, [rule, label]] of Object.entries(spec)) {
+    const v = values?.[key];
+    if (v === undefined || v === null) continue;
+    const text = String(v).trim();
+    if (text === '' || text === '-') continue;
+    const [re, msg] = FORMAT_RULES[rule];
+    if (!re.test(text)) return `${label} ${msg}.`;
+  }
+  return null;
+}
+const SUBMISSION_FORMAT = {
+  nib: ['digits', 'NIB'],
+  npwp: ['npwp', 'NPWP'],
+  postalCode: ['digits', 'Kode pos'],
+  phone: ['phone', 'Telepon'],
+  fax: ['phone', 'Faksimili'],
+  leaderPhone: ['phone', 'Telepon pimpinan'],
+  personInChargePhone: ['phone', 'Telepon penanggung jawab'],
+  tahunMulaiUsaha: ['digits', 'Tahun mulai usaha'],
+  jumlahJudulTerbit: ['digits', 'Jumlah judul terbit'],
+  rataRataOplah: ['digits', 'Rata-rata oplag'],
+  annualBookCount: ['digits', 'Rencana produksi'],
+  rataRataDiskon: ['decimal', 'Rata-rata diskon'],
+  persentaseRoyalti: ['decimal', 'Persentase royalti'],
+  contohIsbn: ['isbn', 'Contoh ISBN'],
+};
+const SETTINGS_FORMAT = {
+  bank_account: ['digits', 'Nomor rekening'],
+  surat_counter: ['digits', 'Nomor urut surat'],
+  admin_whatsapp: ['phone', 'Nomor WhatsApp Admin'],
+  office_phone: ['phone', 'Telepon kantor'],
+};
+const PHONE_FORMAT = { phone: ['phone', 'Nomor telepon'] };
+
 const FEE_KEYS = ['fee_uang_pangkal', 'fee_iuran_bulanan', 'fee_iuran_durasi_bulan', 'fee_administrasi', 'fee_heregistrasi_iuran'];
 
 // Rincian tagihan dari pengaturan biaya terbaru
@@ -733,6 +822,29 @@ app.post('/api/notifications/read', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Read notifications error:', err);
     res.status(500).json({ error: 'Gagal memperbarui notifikasi.' });
+  }
+});
+
+// Hapus notifikasi milik sendiri: /api/notifications/:id untuk satu, /api/notifications untuk semua
+app.delete('/api/notifications/:id', authenticate, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID notifikasi tidak valid.' });
+    await query.run('DELETE FROM notifications WHERE id = ? AND user_id = ?', [id, req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete notification error:', err);
+    res.status(500).json({ error: 'Gagal menghapus notifikasi.' });
+  }
+});
+
+app.delete('/api/notifications', authenticate, async (req, res) => {
+  try {
+    await query.run('DELETE FROM notifications WHERE user_id = ?', [req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete notifications error:', err);
+    res.status(500).json({ error: 'Gagal menghapus notifikasi.' });
   }
 });
 
@@ -948,6 +1060,8 @@ app.post('/api/admin/users', authenticate, authorize('Admin'), async (req, res) 
     if (String(password).length < 6) {
       return res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
     }
+    const userFormatErr = formatError(req.body, PHONE_FORMAT);
+    if (userFormatErr) return res.status(400).json({ error: userFormatErr });
     const existing = await query.get('SELECT id FROM users WHERE email = ?', [email]);
     if (existing) {
       return res.status(400).json({ error: 'Email sudah dipakai akun lain.' });
@@ -977,6 +1091,8 @@ app.put('/api/admin/users/:id', authenticate, authorize('Admin'), async (req, re
     if (role && !ROLES.includes(role)) {
       return res.status(400).json({ error: 'Peran tidak valid.' });
     }
+    const editFormatErr = formatError(req.body, PHONE_FORMAT);
+    if (editFormatErr) return res.status(400).json({ error: editFormatErr });
     // Cegah Admin mengunci dirinya sendiri dari halaman kelola akun
     if (id === req.user.id && role && role !== 'Admin') {
       return res.status(400).json({ error: 'Anda tidak bisa mengubah peran akun Anda sendiri.' });
@@ -1209,6 +1325,8 @@ app.post('/api/submissions', authenticate, async (req, res) => {
     if (!publisherName || !category || !submissionType) {
       return res.status(400).json({ error: 'Nama penerbit, kategori, dan jenis pengajuan wajib diisi.' });
     }
+    const createFormatErr = formatError(req.body, SUBMISSION_FORMAT);
+    if (createFormatErr) return res.status(400).json({ error: createFormatErr });
 
     if (req.user.role === 'Anggota') {
       // Satu akun anggota hanya untuk satu pengajuan
@@ -1334,6 +1452,8 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
   try {
     const subId = req.params.id;
     const { isSubmit, ...formData } = req.body;
+    const updateFormatErr = formatError(formData, SUBMISSION_FORMAT);
+    if (updateFormatErr) return res.status(400).json({ error: updateFormatErr });
 
     const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
     if (!sub) {
@@ -1432,7 +1552,6 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
       return res.status(400).json({ error: 'Silakan pilih file untuk diunggah.' });
     }
 
-    const filePath = `/uploads/${req.file.filename}`;
     const fileName = req.file.originalname;
     const fileSize = req.file.size;
     const mimeType = req.file.mimetype;
@@ -1461,6 +1580,9 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
     }
 
     const wasRevision = existing && (existing.screening_status === 'Perlu Revisi' || owner.status === 'Perlu Revisi');
+
+    const filePath = await storeUpload(req.file);
+    if (existing?.file_path) await deleteStoredFile(existing.file_path);
 
     if (existing) {
       await query.run(
@@ -1617,6 +1739,8 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
     if (!req.file) {
       return res.status(400).json({ error: 'Bukti transfer wajib diunggah.' });
     }
+    const payFormatErr = formatError(req.body, { senderAccountNumber: ['digits', 'Nomor rekening'] });
+    if (payFormatErr) return res.status(400).json({ error: payFormatErr });
 
     const sub = await query.get('SELECT user_id, status FROM submissions WHERE id = ?', [subId]);
     if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
@@ -1627,7 +1751,9 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
       return res.status(400).json({ error: 'Pembayaran baru dapat dilakukan setelah semua dokumen disetujui Admin (Tahap 1).' });
     }
 
-    const filePath = `/uploads/${req.file.filename}`;
+    const oldProof = await query.get('SELECT proof_file FROM payments WHERE submission_id = ?', [subId]);
+    const filePath = await storeUpload(req.file);
+    if (oldProof?.proof_file) await deleteStoredFile(oldProof.proof_file);
     const fileName = req.file.originalname;
 
     await query.run(
@@ -1983,6 +2109,8 @@ app.post('/api/submissions/:id/physical-sent', authenticate, authorize('Anggota'
     if (!String(courier || '').trim()) {
       return res.status(400).json({ error: 'Isi cara pengiriman (mis. JNE, POS, atau diantar langsung).' });
     }
+    const trackFormatErr = formatError(req.body, { trackingNo: ['digits', 'Nomor resi'] });
+    if (trackFormatErr) return res.status(400).json({ error: trackFormatErr });
     await query.run(
       `UPDATE submissions SET physical_status = 'Dikirim', physical_sent_at = NOW(),
          physical_courier = ?, physical_tracking_no = ?, physical_notes = ?, updated_at = NOW()
@@ -2041,6 +2169,8 @@ app.post('/api/submissions/:id/sent-to-central', authenticate, authorize('Admin'
     if (!String(courier || '').trim()) {
       return res.status(400).json({ error: 'Isi jasa pengiriman / cara pengiriman ke IKAPI Pusat.' });
     }
+    const trackFormatErr = formatError(req.body, { trackingNo: ['digits', 'Nomor resi'] });
+    if (trackFormatErr) return res.status(400).json({ error: trackFormatErr });
     await query.run(
       `UPDATE submissions SET status = 'Dikirim ke Pusat', sent_to_central_at = NOW(),
          central_courier = ?, central_tracking_no = ?, central_notes = ?, central_sent_by = ?, updated_at = NOW()
@@ -2323,6 +2453,8 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
     if (!settings || typeof settings !== 'object') {
       return res.status(400).json({ error: 'Format pengaturan tidak valid.' });
     }
+    const settingsFormatErr = formatError(settings, SETTINGS_FORMAT);
+    if (settingsFormatErr) return res.status(400).json({ error: settingsFormatErr });
     for (const key of FEE_KEYS) {
       if (key in settings && !(Number.isFinite(Number(settings[key])) && Number(settings[key]) >= 0)) {
         return res.status(400).json({ error: 'Nilai biaya harus berupa angka 0 atau lebih.' });
@@ -2428,12 +2560,12 @@ app.get('/api/submissions/:id/documents/merged', async (req, res) => {
 
     const results = [];
     for (const doc of docs) {
-      const fullPath = path.join(uploadsDir, path.basename(doc.file_path));
-      const ext = path.extname(fullPath).toLowerCase();
+      const ext = path.extname(doc.file_path).toLowerCase();
       const startPage = out.getPageCount() + 2; // +1 sampul, +1 nomor halaman berbasis 1
       try {
-        if (!fs.existsSync(fullPath)) throw new Error('file tidak ditemukan di server');
-        const bytes = fs.readFileSync(fullPath);
+        const stored = await readStoredFile(doc.file_path);
+        if (!stored) throw new Error('file tidak ditemukan di server');
+        const bytes = stored.data;
         if (ext === '.pdf') {
           const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
           const pages = await out.copyPages(src, src.getPageIndices());
@@ -2518,10 +2650,6 @@ app.get('/uploads/:filename', async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Sesi login telah kedaluwarsa atau tidak valid.' });
 
   const filename = path.basename(req.params.filename);
-  const fullPath = path.join(uploadsDir, filename);
-  if (!fullPath.startsWith(uploadsDir + path.sep) || !fs.existsSync(fullPath)) {
-    return res.status(404).json({ error: 'File tidak ditemukan.' });
-  }
 
   try {
     if (user.role === 'Anggota') {
@@ -2540,10 +2668,16 @@ app.get('/uploads/:filename', async (req, res) => {
       return res.status(403).json({ error: 'Akses ditolak.' });
     }
 
+    const stored = await readStoredFile(filename);
+    if (!stored) return res.status(404).json({ error: 'File tidak ditemukan.' });
+
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.sendFile(fullPath);
+    res.setHeader('Content-Type', stored.mime_type);
+    res.setHeader('Content-Length', stored.data.length);
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(stored.original_name || filename)}`);
+    res.end(stored.data);
   } catch (err) {
     console.error('Serve upload error:', err);
     res.status(500).json({ error: 'Gagal membuka file.' });
@@ -2575,6 +2709,7 @@ if (fs.existsSync(distDir)) {
 async function startServer() {
   await initDb();
   await runSeed();
+  await migrateDiskUploads();
   await migrateFlowV2();
   await syncUnpaidBills();
   await activateApprovedSubmissions();

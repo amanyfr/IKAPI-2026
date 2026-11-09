@@ -6,6 +6,20 @@ import {
 import { INVOICE_DEFAULTS } from '../components/PaymentInvoice';
 import { waLink } from '../utils/whatsapp';
 import { notify } from '../components/AppDialog';
+import { FILTERS, NUMERIC, PHONE } from '../utils/inputFilters';
+
+// Pengaturan yang tidak boleh berisi huruf beserta penyaringnya
+const FIELD_FILTERS = {
+  bank_account: FILTERS.digits,
+  fee_uang_pangkal: FILTERS.digits,
+  fee_iuran_bulanan: FILTERS.digits,
+  fee_iuran_durasi_bulan: FILTERS.digits,
+  fee_administrasi: FILTERS.digits,
+  fee_heregistrasi_iuran: FILTERS.digits,
+  surat_counter: FILTERS.digits,
+  admin_whatsapp: FILTERS.phone,
+  office_phone: FILTERS.phone,
+};
 
 const DEFAULT_TEMPLATES = {
   surat_kop_alamat: 'Sekretariat: Jl. Ibu Inggit Garnasih No. 148, Regol, Kota Bandung 40252',
@@ -64,7 +78,8 @@ export default function SystemSettings() {
   }, []);
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    const { name } = e.target;
+    const value = FIELD_FILTERS[name] ? FIELD_FILTERS[name](e.target.value) : e.target.value;
     setSettings(prev => ({ ...prev, [name]: value }));
   };
 
@@ -184,6 +199,7 @@ export default function SystemSettings() {
               </label>
               <input
                 type="text"
+                {...NUMERIC}
                 name="bank_account"
                 value={settings.bank_account}
                 onChange={handleChange}
@@ -236,7 +252,8 @@ export default function SystemSettings() {
               <div className="relative">
                 <span className="absolute left-2.5 top-2.5 text-xs text-slate-400">Rp</span>
                 <input
-                  type="number"
+                  type="text"
+                  {...NUMERIC}
                   name="fee_uang_pangkal"
                   value={settings.fee_uang_pangkal}
                   onChange={handleChange}
@@ -252,7 +269,8 @@ export default function SystemSettings() {
               <div className="relative">
                 <span className="absolute left-2.5 top-2.5 text-xs text-slate-400">Rp</span>
                 <input
-                  type="number"
+                  type="text"
+                  {...NUMERIC}
                   name="fee_iuran_bulanan"
                   value={settings.fee_iuran_bulanan}
                   onChange={handleChange}
@@ -266,7 +284,8 @@ export default function SystemSettings() {
                 Durasi Bayar (Bulan)
               </label>
               <input
-                type="number"
+                type="text"
+                {...NUMERIC}
                 name="fee_iuran_durasi_bulan"
                 value={settings.fee_iuran_durasi_bulan}
                 onChange={handleChange}
@@ -281,7 +300,8 @@ export default function SystemSettings() {
               <div className="relative">
                 <span className="absolute left-2.5 top-2.5 text-xs text-slate-400">Rp</span>
                 <input
-                  type="number"
+                  type="text"
+                  {...NUMERIC}
                   name="fee_administrasi"
                   value={settings.fee_administrasi}
                   onChange={handleChange}
@@ -297,7 +317,8 @@ export default function SystemSettings() {
               <div className="relative">
                 <span className="absolute left-2.5 top-2.5 text-xs text-slate-400">Rp</span>
                 <input
-                  type="number"
+                  type="text"
+                  {...NUMERIC}
                   name="fee_heregistrasi_iuran"
                   value={settings.fee_heregistrasi_iuran}
                   onChange={handleChange}
@@ -354,7 +375,8 @@ export default function SystemSettings() {
                 Nomor Urut Surat (Counter)
               </label>
               <input
-                type="number"
+                type="text"
+                {...NUMERIC}
                 name="surat_counter"
                 value={settings.surat_counter}
                 onChange={handleChange}
@@ -554,6 +576,7 @@ export default function SystemSettings() {
               <label className="text-xs font-semibold text-slate-700 block mb-1">Nomor WhatsApp Admin</label>
               <input
                 type="tel"
+                {...PHONE}
                 name="admin_whatsapp"
                 value={settings.admin_whatsapp || ''}
                 onChange={handleChange}
@@ -573,6 +596,7 @@ export default function SystemSettings() {
               <label className="text-xs font-semibold text-slate-700 block mb-1">Telepon Sekretariat</label>
               <input
                 type="text"
+                {...PHONE}
                 name="office_phone"
                 value={settings.office_phone || ''}
                 onChange={handleChange}

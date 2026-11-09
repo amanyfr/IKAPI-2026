@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Users, UserPlus, Search, Pencil, X, AlertCircle, RefreshCw } from 'lucide-react';
+import { FILTERS, PHONE } from '../utils/inputFilters';
 
 const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota'];
 
@@ -260,7 +261,7 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
               </div>
               <div>
                 <label className="text-sm font-semibold text-slate-700 block mb-1.5">Nomor telepon</label>
-                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="08XXXXXXXXXX" className={field} />
+                <input type="tel" {...PHONE} value={form.phone} onChange={(e) => setForm({ ...form, phone: FILTERS.phone(e.target.value) })} placeholder="08XXXXXXXXXX" className={field} />
               </div>
               <div className="sm:col-span-2">
                 <label className="text-sm font-semibold text-slate-700 block mb-1.5">Peran</label>

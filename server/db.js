@@ -276,6 +276,18 @@ export const SCHEMA_SQL = `
     INDEX idx_notifications_user (user_id, read_at),
     CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  -- Isi file unggahan (dokumen & bukti transfer) disimpan di database, bukan di folder uploads/.
+  -- documents.file_path / payments.proof_file tetap berisi '/uploads/<stored_name>' sebagai kunci.
+  CREATE TABLE IF NOT EXISTS files (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    stored_name VARCHAR(255) NOT NULL UNIQUE,
+    original_name VARCHAR(255),
+    mime_type VARCHAR(100) NOT NULL,
+    file_size INT NOT NULL,
+    data LONGBLOB NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 `;
 
 // Perubahan skema untuk database yang sudah ada (CREATE TABLE IF NOT EXISTS tidak mengubah tabel lama).

@@ -9,6 +9,23 @@ import {
   asList, karyawanRows
 } from '../utils/formulirIkapi';
 import { notify } from '../components/AppDialog';
+import { FILTERS, NUMERIC, DECIMAL, PHONE } from '../utils/inputFilters';
+
+// Field formulir yang tidak boleh berisi huruf beserta penyaringnya
+const FIELD_FILTERS = {
+  nib: FILTERS.digits,
+  npwp: FILTERS.npwp,
+  postalCode: FILTERS.digits,
+  phone: FILTERS.phone,
+  fax: FILTERS.phone,
+  tahunMulaiUsaha: FILTERS.digits,
+  jumlahJudulTerbit: FILTERS.digits,
+  rataRataOplah: FILTERS.digits,
+  annualBookCount: FILTERS.digits,
+  rataRataDiskon: FILTERS.decimal,
+  persentaseRoyalti: FILTERS.decimal,
+  contohIsbn: FILTERS.isbn,
+};
 
 const CITIES_JABAR = [
   'Kota Bandung', 'Kabupaten Bandung', 'Kabupaten Bandung Barat', 'Kota Cimahi',
@@ -166,7 +183,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
   }, [existingSubmission]);
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    const { name } = e.target;
+    const value = FIELD_FILTERS[name] ? FIELD_FILTERS[name](e.target.value) : e.target.value;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
@@ -444,6 +462,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   <label className={labelCls}>Nomor Induk Berusaha (NIB)</label>
                   <input
                     type="text"
+                    {...NUMERIC} maxLength={13}
                     name="nib"
                     value={formData.nib}
                     onChange={handleChange}
@@ -456,6 +475,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   <label className={labelCls}>NPWP</label>
                   <input
                     type="text"
+                    {...NUMERIC} maxLength={20}
                     name="npwp"
                     value={formData.npwp}
                     onChange={handleChange}
@@ -495,6 +515,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   <label className={labelCls}>Kode Pos</label>
                   <input
                     type="text"
+                    {...NUMERIC} maxLength={5}
                     name="postalCode"
                     value={formData.postalCode}
                     onChange={handleChange}
@@ -507,6 +528,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   <label className={labelCls}>Telepon *</label>
                   <input
                     type="text"
+                    {...PHONE}
                     name="phone"
                     value={formData.phone}
                     onChange={handleChange}
@@ -519,6 +541,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   <label className={labelCls}>Faksimili</label>
                   <input
                     type="text"
+                    {...PHONE}
                     name="fax"
                     value={formData.fax}
                     onChange={handleChange}
@@ -648,6 +671,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                       <label className={labelCls}>Tahun Mulai Usaha *</label>
                       <input
                         type="text"
+                        {...NUMERIC} maxLength={4}
                         name="tahunMulaiUsaha"
                         value={formData.tahunMulaiUsaha}
                         onChange={handleChange}
@@ -691,7 +715,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 <div>
                   <label className={labelCls}>Jumlah Judul yang Telah Diterbitkan</label>
                   <input
-                    type="number"
+                    type="text"
+                    {...NUMERIC}
                     name="jumlahJudulTerbit"
                     value={formData.jumlahJudulTerbit}
                     onChange={handleChange}
@@ -703,7 +728,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 <div>
                   <label className={labelCls}>Rata-rata Oplag Cetakan Pertama (eks)</label>
                   <input
-                    type="number"
+                    type="text"
+                    {...NUMERIC}
                     name="rataRataOplah"
                     value={formData.rataRataOplah}
                     onChange={handleChange}
@@ -715,7 +741,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 <div>
                   <label className={labelCls}>Rencana Produksi/Penerbitan (judul/tahun)</label>
                   <input
-                    type="number"
+                    type="text"
+                    {...NUMERIC}
                     name="annualBookCount"
                     value={formData.annualBookCount}
                     onChange={handleChange}
@@ -727,7 +754,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 <div>
                   <label className={labelCls}>Rata-rata Diskon yang Lepas (%)</label>
                   <input
-                    type="number"
+                    type="text"
+                    {...DECIMAL}
                     name="rataRataDiskon"
                     value={formData.rataRataDiskon}
                     onChange={handleChange}
@@ -774,7 +802,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                       <label className="flex items-center gap-2 text-sm text-slate-600">
                         Royalti =
                         <input
-                          type="number"
+                          type="text"
+                          {...DECIMAL}
                           name="persentaseRoyalti"
                           value={String(formData.persentaseRoyalti || '').replace('%', '')}
                           onChange={handleChange}
@@ -845,10 +874,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                           className={`${inputCls} flex-1 min-w-0`}
                         />
                         <input
-                          type="number"
-                          min="0"
+                          type="text"
+                          {...NUMERIC}
                           value={row.jumlah}
-                          onChange={(e) => setKaryawan(idx, 'jumlah', e.target.value)}
+                          onChange={(e) => setKaryawan(idx, 'jumlah', FILTERS.digits(e.target.value))}
                           placeholder="0"
                           aria-label={`Jumlah orang bagian ${row.bagian || idx + 1}`}
                           className={`${inputCls} !w-20`}
@@ -914,6 +943,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   <label className={labelCls}>Nomor ISBN yang Sudah Digunakan</label>
                   <input
                     type="text"
+                    maxLength={17}
                     name="contohIsbn"
                     value={formData.contohIsbn}
                     onChange={handleChange}

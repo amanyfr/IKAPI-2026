@@ -9,6 +9,7 @@ import PaymentInvoice, { downloadInvoicePdf, invoiceNumber, isInvoicePaid } from
 import { feesFromSettings, formatRupiah } from '../utils/fees';
 import { formatLongDate } from '../components/PengurusSignature';
 import { fileUrl } from '../utils/fileUrl';
+import { FILTERS, NUMERIC } from '../utils/inputFilters';
 import {
   Building2, CreditCard, Upload, FileText, AlertCircle,
   CheckCircle, ExternalLink, RefreshCw,
@@ -598,8 +599,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1">No. resi (jika ada)</label>
-                  <input value={shipForm.trackingNo} onChange={(e) => setShipForm({ ...shipForm, trackingNo: e.target.value })}
-                    placeholder="Nomor resi pengiriman" className="soft-input" />
+                  <input {...NUMERIC} value={shipForm.trackingNo} onChange={(e) => setShipForm({ ...shipForm, trackingNo: FILTERS.digits(e.target.value) })}
+                    placeholder="Nomor resi (angka saja)" className="soft-input" />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1">Catatan</label>
@@ -862,9 +863,10 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                   <label className="text-sm font-bold text-slate-800 block mb-1.5">No. Rekening</label>
                   <input
                     type="text"
+                    {...NUMERIC}
                     value={payForm.senderAccountNumber}
-                    onChange={(e) => setPayForm({ ...payForm, senderAccountNumber: e.target.value })}
-                    placeholder="Nomor rekening"
+                    onChange={(e) => setPayForm({ ...payForm, senderAccountNumber: FILTERS.digits(e.target.value) })}
+                    placeholder="Nomor rekening (angka saja)"
                     className="soft-input"
                   />
                 </div>

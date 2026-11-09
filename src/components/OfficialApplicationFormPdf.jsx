@@ -171,16 +171,16 @@ export default function OfficialApplicationFormPdf({ submission, settings, signi
         </FormSection>
 
         {/* Signature Box */}
-        <div className="flex justify-end text-xs text-right pt-4">
-          <div className="w-56 text-center space-y-10">
-            <p className="text-slate-600">
+        <div className="flex justify-end text-sm text-right pt-6">
+          <div className="w-64 text-center space-y-20">
+            <p className="text-slate-800 leading-relaxed">
               Bandung, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
               <br />
               Pimpinan Penerbit Pemohon,
             </p>
             <div>
               <p className="font-bold text-slate-900 underline">{submission.leader_name || formData.leaderName}</p>
-              <p className="text-slate-500">{submission.leader_title || formData.leaderTitle || 'Pimpinan'}</p>
+              <p className="text-slate-600">{submission.leader_title || formData.leaderTitle || 'Pimpinan'}</p>
             </div>
           </div>
         </div>

@@ -8,6 +8,7 @@ import SubmissionTimeline, { formatTime } from './SubmissionTimeline';
 import { STATUS_LABEL, POST_APPROVAL_STATUSES } from './StatusStepper';
 import { notify } from './AppDialog';
 import { fileUrl } from '../utils/fileUrl';
+import { FILTERS, NUMERIC } from '../utils/inputFilters';
 
 // Label cepat alasan "Tidak sesuai" (mengisi komentar, tetap bisa diubah)
 const REASON_LABELS = [
@@ -520,8 +521,8 @@ export default function DocumentVerificationModal({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input value={central.courier} onChange={(e) => setCentral((c) => ({ ...c, courier: e.target.value }))}
                       placeholder="Jasa pengiriman (wajib), mis. JNE / diantar langsung" className="text-xs p-2.5 border border-sky-200 rounded-lg bg-white" />
-                    <input value={central.trackingNo} onChange={(e) => setCentral((c) => ({ ...c, trackingNo: e.target.value }))}
-                      placeholder="No. resi (opsional)" className="text-xs p-2.5 border border-sky-200 rounded-lg bg-white font-mono" />
+                    <input {...NUMERIC} value={central.trackingNo} onChange={(e) => setCentral((c) => ({ ...c, trackingNo: FILTERS.digits(e.target.value) }))}
+                      placeholder="No. resi, angka saja (opsional)" className="text-xs p-2.5 border border-sky-200 rounded-lg bg-white font-mono" />
                   </div>
                   <textarea rows="2" value={central.notes} onChange={(e) => setCentral((c) => ({ ...c, notes: e.target.value }))}
                     placeholder="Catatan (opsional)" className="w-full text-xs p-2.5 border border-sky-200 rounded-lg bg-white" />
