@@ -80,6 +80,22 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
   const [draftSavedAt, setDraftSavedAt] = useState(null);
   const [activeTab, setActiveTab] = useState(1);
   const [selectedFiles, setSelectedFiles] = useState({});
+  // Dokumen yang sudah tersimpan di server (draf lama): { document_type: nama file }
+  const [uploadedDocs, setUploadedDocs] = useState({});
+  const [showMissingDocs, setShowMissingDocs] = useState(false);
+
+  useEffect(() => {
+    const id = existingSubmission?.id;
+    if (!id) return;
+    fetch(`/api/submissions/${id}`, { headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const map = {};
+        (data?.documents || []).forEach((d) => { if (d.file_path) map[d.document_type] = d.file_name || 'Sudah diunggah'; });
+        setUploadedDocs(map);
+      })
+      .catch(() => {});
+  }, [existingSubmission?.id]);
 
   const [formData, setFormData] = useState({
     submissionType: initialSubmissionType || 'Baru',
@@ -218,6 +234,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
   };
 
   const requiredDocs = getRequiredDocsList(formData.submissionType, formData.category);
+  const missingDocs = requiredDocs.filter((d) => !selectedFiles[d.type] && !uploadedDocs[d.type]);
   const isHereg = formData.submissionType === 'Heregistrasi';
 
   const handleSubmit = async (isDraft = false, { stay = false } = {}) => {
@@ -247,6 +264,18 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
         setActiveTab(1);
         return;
       }
+    }
+
+    if (!isDraft && missingDocs.length) {
+      setActiveTab(4);
+      setShowMissingDocs(true);
+      notify('Pengajuan belum bisa dikirim karena dokumen berikut belum diunggah:', {
+        tone: 'warning',
+        title: 'Dokumen belum lengkap',
+        items: missingDocs.map((d) => d.title),
+        okLabel: 'Unggah dokumen',
+      });
+      return;
     }
 
     setSubmitting(true);
@@ -286,8 +315,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
             });
             if (!up.ok) {
               const upData = await up.json().catch(() => ({}));
-              throw new Error(`${docItem.title}: ${upData.error || 'gagal diunggah'}`);
+              setActiveTab(4);
+              throw new Error(`Dokumen "${docItem.title}" belum berhasil diunggah. ${upData.error || 'Periksa file lalu coba lagi.'}`);
             }
+            setUploadedDocs((prev) => ({ ...prev, [docItem.type]: file.name }));
           }
         }
       }
@@ -300,8 +331,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
         });
         const submitData = await submitRes.json();
         if (!submitRes.ok) {
-          // Draf & dokumen sudah tersimpan; pemohon bisa melengkapi lalu kirim lagi
-          if (onComplete) onComplete(subId);
+          // Draf & dokumen sudah tersimpan; pemohon tetap di formulir untuk melengkapi lalu kirim lagi
+          setDraftSavedAt(new Date());
+          setActiveTab(4);
+          setShowMissingDocs(true);
           throw new Error(submitData.error);
         }
       }
@@ -312,7 +345,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
       }
       if (onComplete) onComplete(subId);
     } catch (err) {
-      notify('Gagal menyimpan formulir: ' + err.message);
+      notify(err.message || 'Periksa koneksi internet lalu coba lagi.', {
+        tone: 'warning',
+        title: isDraft ? 'Draf belum tersimpan' : 'Pengajuan belum terkirim',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -1025,20 +1061,25 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {requiredDocs.map((docItem) => {
                   const chosenFile = selectedFiles[docItem.type];
+                  const savedName = uploadedDocs[docItem.type];
+                  const hasFile = Boolean(chosenFile || savedName);
+                  const flagged = showMissingDocs && !hasFile;
                   return (
                     <div
                       key={docItem.type}
                       className={`p-4 rounded-2xl border flex items-center justify-between gap-4 ${
-                        chosenFile ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-slate-200/70'
+                        hasFile ? 'bg-emerald-50/40 border-emerald-200' : flagged ? 'bg-amber-50/60 border-amber-300' : 'bg-white border-slate-200/70'
                       }`}
                     >
                       <div className="min-w-0">
                         <div className="text-sm font-bold text-slate-900">{docItem.title} *</div>
-                        {chosenFile ? (
+                        {hasFile ? (
                           <div className="text-xs text-emerald-700 font-bold flex items-center gap-1.5 mt-1">
                             <CheckCircle className="w-4 h-4" />
-                            <span className="truncate">{chosenFile.name}</span>
+                            <span className="truncate">{chosenFile ? chosenFile.name : `Sudah diunggah: ${savedName}`}</span>
                           </div>
+                        ) : flagged ? (
+                          <div className="text-xs text-amber-700 font-semibold mt-0.5">Belum diunggah — wajib sebelum pengajuan dikirim</div>
                         ) : (
                           <div className="text-xs text-slate-400 mt-0.5">Format PDF / JPG / PNG</div>
                         )}
@@ -1046,7 +1087,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
 
                       <label className="soft-pill !text-xs cursor-pointer flex-shrink-0">
                         <Upload className="w-4 h-4" />
-                        <span>{chosenFile ? 'Ganti File' : 'Pilih File'}</span>
+                        <span>{hasFile ? 'Ganti File' : 'Pilih File'}</span>
                         <input
                           type="file"
                           accept=".pdf,.jpg,.jpeg,.png"

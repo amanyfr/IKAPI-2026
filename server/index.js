@@ -1479,7 +1479,7 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
       );
       if (missing.length) {
         return res.status(400).json({
-          error: `Lengkapi dokumen persyaratan terlebih dahulu: ${missing.map((d) => d.document_title).join(', ')}. Formulir tersimpan sebagai draf.`
+          error: `Dokumen berikut belum diunggah: ${missing.map((d) => d.document_title).join(', ')}. Isian Anda sudah tersimpan sebagai draf, silakan unggah dokumennya lalu kirim lagi.`
         });
       }
     }
