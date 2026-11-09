@@ -90,14 +90,28 @@
   height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #f0f9ff;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #7ad2f9;
+  background: rgb(100 116 139 / 0.28);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #0da2e7;
+  background: rgb(13 162 231 / 0.7);
+}
+
+/* Latar modal: gelap lembut + blur, scrollbar terang tipis */
+.modal-overlay {
+  background: radial-gradient(ellipse at top, rgb(15 23 42 / 0.72), rgb(2 6 23 / 0.86));
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  scrollbar-color: rgb(255 255 255 / 0.25) transparent;
+}
+.modal-overlay::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.22);
+}
+.modal-overlay::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.4);
 }
 
 /* =============================================

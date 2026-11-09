@@ -78,7 +78,28 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
     setForm({ name: u.name, email: u.email, phone: u.phone || '', role: u.role, password: '' });
     setError('');
   };
-  const closeModal = () => { setEditing(null); setError(''); };
+  const closeModal = () => { setEditing(null); setError(''); setConfirmDelete(false); };
+
+  // Klik pertama meminta konfirmasi, klik kedua menghapus
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const handleDelete = async () => {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/admin/users/${editing.id}`, { method: 'DELETE', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Gagal menghapus akun.');
+      setNotice(data.message);
+      closeModal();
+      loadUsers();
+    } catch (err) {
+      setError(err.message);
+      setConfirmDelete(false);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const isNew = editing && !editing.id;
   const isSelf = editing?.id === me?.id;
@@ -216,7 +237,7 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
 
       {/* Modal tambah / ubah akun */}
       {editing && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 overflow-y-auto modal-overlay flex items-center justify-center p-4">
           <form onSubmit={handleSave} className="modal-surface w-full max-w-lg p-5 sm:p-6 space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -273,6 +294,18 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
             )}
 
             <div className="flex justify-end gap-2 pt-1">
+              {!isNew && !isSelf && (
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={saving}
+                  className={`mr-auto px-4 py-2.5 text-sm font-semibold rounded-xl transition disabled:opacity-60 ${
+                    confirmDelete ? 'bg-red-600 hover:bg-red-700 text-white' : 'text-red-600 hover:bg-red-50'
+                  }`}
+                >
+                  {confirmDelete ? 'Yakin hapus akun?' : 'Hapus akun'}
+                </button>
+              )}
               <button type="button" onClick={closeModal} className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
                 Batal
               </button>

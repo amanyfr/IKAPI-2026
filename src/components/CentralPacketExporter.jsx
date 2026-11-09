@@ -6,6 +6,7 @@ import OfficialLetterGenerator from './OfficialLetterGenerator';
 import OfficialApplicationFormPdf from './OfficialApplicationFormPdf';
 import { BeritaAcaraVerifikasi, SuratKeputusan } from './PengurusDocuments';
 import { KopSurat, formatLongDate } from './PengurusSignature';
+import { fileUrl, authUrl } from '../utils/fileUrl';
 import { downloadElementPdf, downloadElementsPdf, printElement, safeFileName } from '../utils/exportDocument';
 import { notify } from './AppDialog';
 
@@ -191,7 +192,18 @@ export default function CentralPacketExporter({ submission, documents = [], sett
           <div className="space-y-4">
             <PhysicalChecklistSheet submission={submission} documents={documents} settings={settings} />
             <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
-              <p className="text-xs font-semibold text-slate-700">File asli yang sudah diunggah (untuk dicetak / difotokopi)</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-slate-700">File asli yang sudah diunggah (untuk dicetak / difotokopi)</p>
+                {submission.id && documents.some((d) => d.file_path) && (
+                  <a
+                    href={authUrl(`/api/submissions/${submission.id}/documents/merged`)}
+                    className="flex-shrink-0 px-3 py-1.5 text-xs bg-[#0da2e7] hover:bg-[#0884c4] text-white font-semibold rounded-lg flex items-center gap-1 transition"
+                    title="Semua berkas persyaratan & bukti transfer digabung menjadi satu PDF"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Unduh gabungan berkas (PDF)
+                  </a>
+                )}
+              </div>
               {documents.map((doc, idx) => (
                 <div key={doc.id || idx} className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-200">
                   <div className="min-w-0">
@@ -200,7 +212,7 @@ export default function CentralPacketExporter({ submission, documents = [], sett
                   </div>
                   {doc.file_path && (
                     <a
-                      href={doc.file_path}
+                      href={fileUrl(doc.file_path)}
                       target="_blank"
                       rel="noreferrer"
                       className="flex-shrink-0 px-3 py-1.5 text-xs bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] font-semibold rounded-lg border border-[#b8e6fc] flex items-center gap-1 transition"

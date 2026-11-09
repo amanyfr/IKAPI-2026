@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from '../components/NotificationBell';
 import Admin2Dashboard from '../pages/Admin2Dashboard';
 import Admin2Approval from '../pages/Admin2Approval';
 import MembersManagement from '../pages/MembersManagement';
@@ -35,8 +36,7 @@ export default function Admin2Portal() {
   );
 
   return (
-    // Dashboard dibuat pas satu layar (laptop/desktop): tidak perlu scroll ke bawah
-    <div className={`relative min-h-screen portal-bg flex flex-col font-sans ${activeTab === 'dashboard' ? 'lg:h-screen lg:overflow-hidden' : ''}`}>
+    <div className="relative min-h-screen portal-bg flex flex-col font-sans">
 
 
       {/* ── Header Portal Ketua ── */}
@@ -70,6 +70,7 @@ export default function Admin2Portal() {
                   <div className="text-[10px] text-sky-300 font-semibold">Ketua PD IKAPI Jabar</div>
                 </div>
               </div>
+              <NotificationBell tone="dark" />
               <button
                 onClick={logout}
                 aria-label="Keluar"
@@ -92,7 +93,7 @@ export default function Admin2Portal() {
       </header>
 
       {/* Main */}
-      <main className={`relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 ${activeTab === 'dashboard' ? 'py-5 lg:py-4 lg:min-h-0' : 'py-6 sm:py-8'}`}>
+      <main className="relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {activeTab === 'dashboard' && (
           <Admin2Dashboard
             onOpenApproval={openApproval}

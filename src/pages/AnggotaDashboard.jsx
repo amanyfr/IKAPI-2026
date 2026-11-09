@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
-import StatusStepper from '../components/StatusStepper';
+import StatusStepper, { POST_APPROVAL_STATUSES } from '../components/StatusStepper';
 import CentralPacketExporter, { officeAddress, physicalChecklist } from '../components/CentralPacketExporter';
+import ModalFrame from '../components/ModalFrame';
 import SubmissionTimeline from '../components/SubmissionTimeline';
 import PaymentInvoice, { downloadInvoicePdf, invoiceNumber, isInvoicePaid } from '../components/PaymentInvoice';
 import { feesFromSettings, formatRupiah } from '../utils/fees';
 import { formatLongDate } from '../components/PengurusSignature';
+import { fileUrl } from '../utils/fileUrl';
 import {
   Building2, CreditCard, Upload, FileText, AlertCircle,
   CheckCircle, ExternalLink, RefreshCw,
   Edit3, GraduationCap, ArrowRight, UserPlus, X,
   ShieldCheck, Landmark, Receipt, Download, XCircle, PartyPopper,
-  Printer, Truck, Clock, PenLine, MapPin, Info, ArrowLeft
+  Printer, Truck, Clock, PenLine, MapPin, Info, ArrowLeft, Send, Phone, Mail
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
 
@@ -144,7 +147,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   useEffect(() => {
     const loadSettings = () => {
       if (document.visibilityState !== 'visible') return;
-      fetch('/api/settings')
+      fetch('/api/settings', { headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` } })
         .then((res) => res.json())
         .then((data) => data.settings && setAppSettings(data.settings))
         .catch((err) => console.error('Failed to load settings:', err));
@@ -229,19 +232,25 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
 
   const handleDocUpload = async (doc, file) => {
     if (!file) return;
+    const currentSubId = selectedSub?.id || detailData?.submission?.id;
+    if (!currentSubId) {
+      notify('ID pengajuan tidak ditemukan.');
+      return;
+    }
     const fd = new FormData();
     fd.append('file', file);
     fd.append('documentType', doc.document_type || doc.type);
     fd.append('documentTitle', doc.document_title || doc.title);
     setUploadingDocId(doc.id);
     try {
-      const res  = await fetch(`/api/submissions/${selectedSub.id}/documents`, {
+      const res  = await fetch(`/api/submissions/${currentSubId}/documents`, {
         method: 'POST', headers: { Authorization: `Bearer ${token()}` }, body: fd
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      await loadDetail(selectedSub.id);
-      if (data.resubmitted) notify(data.message);
+      await loadDetail(currentSubId);
+      await loadSubmissions();
+      notify(data.message || 'Dokumen berhasil diunggah.');
     } catch (e) { notify('Gagal mengunggah berkas: ' + e.message); }
     finally    { setUploadingDocId(null); }
   };
@@ -383,16 +392,16 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   const isDraf        = sub.status === 'Draf';
   const isScreening   = sub.status === 'Menunggu Verifikasi';
   const isWaitPayment = sub.status === 'Menunggu Pembayaran';
-  const isNeedRevision = sub.status === 'Perlu Revisi';
-  const isShipping    = sub.status === 'Pengiriman Berkas';
   const rejectedDocs   = docs.filter((d) => d.screening_status === 'Perlu Revisi');
-  // Daftar dokumen hanya ditampilkan bila ada yang harus diunggah ulang atau masih kosong
+  const hasRejectedDocs = rejectedDocs.length > 0;
+  const isNeedRevision = sub.status === 'Perlu Revisi' || hasRejectedDocs;
+  const isShipping    = sub.status === 'Pengiriman Berkas';
   const actionDocs = docs.filter((d) => d.screening_status === 'Perlu Revisi'
-    || ((sub.status === 'Menunggu Verifikasi' || sub.status === 'Perlu Revisi') && !d.file_path));
+    || ((isDraf || isScreening || isNeedRevision) && !d.file_path));
   const paymentRejected = isWaitPayment && payment?.verification_status === 'Perlu Revisi';
   const paymentPending  = isWaitPayment && payment?.proof_file && payment?.verification_status === 'Menunggu';
   const showPayForm     = isWaitPayment && (!payment?.proof_file || paymentRejected);
-  const officialDocsReady = ['Pengiriman Berkas', 'Aktif'].includes(sub.status);
+  const officialDocsReady = POST_APPROVAL_STATUSES.includes(sub.status);
 
   // Tagihan tersimpan di server (ikut harga terbaru selama belum dibayar)
   const bill = payment?.fee_breakdown?.total != null
@@ -451,11 +460,67 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       </div>
 
       {/* ── Status Stepper ── */}
-      <StatusStepper currentStatus={sub.status} rejectionReason={sub.rejection_reason} paymentRejected={paymentRejected} cardClassName="card-surface" />
+      <StatusStepper
+        currentStatus={sub.status}
+        rejectionReason={sub.rejection_reason}
+        rejectedAtStatus={sub.rejected_at_status}
+        paymentRejected={paymentRejected}
+        hasDocRejection={hasRejectedDocs}
+        cardClassName="card-surface"
+      />
 
-      {/* ══ INFO TAHAP SAAT INI ══ */}
+      {/* ══ PEMBERITAHUAN REVISI DOKUMEN ══ */}
+      {isNeedRevision && (
+        <div className="rounded-[24px] p-5 sm:p-6 bg-gradient-to-r from-red-50 to-amber-50 border-2 border-red-300/80 shadow-sm space-y-3.5">
+          <div className="flex items-start gap-3.5">
+            <div className="w-10 h-10 rounded-full bg-red-100 border border-red-200 flex items-center justify-center flex-shrink-0 text-red-600 mt-0.5">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-base font-bold text-red-900">Pemberitahuan: Dokumen Perlu Direvisi</h4>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white">
+                  {rejectedDocs.length} Dokumen Belum Sesuai
+                </span>
+              </div>
+              <p className="text-sm text-red-800 leading-relaxed">
+                Hasil pemeriksaan admin menemukan ada dokumen yang belum sesuai persyaratan. Silakan periksa catatan revisi di bawah dan unggah ulang dokumen yang bertanda merah.
+              </p>
+              {sub.admin_notes && (
+                <div className="p-3 mt-2 rounded-xl bg-white/90 border border-red-200 text-xs text-red-950 flex items-start gap-2">
+                  <Info className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold text-red-900">Catatan Admin:</span>
+                    <p className="mt-0.5 font-medium">{sub.admin_notes}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="bg-white/85 rounded-xl p-3.5 border border-red-200/70 text-xs text-slate-700 space-y-1.5">
+            <p className="font-semibold text-slate-900">Dokumen yang harus diunggah ulang:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              {rejectedDocs.map((d) => (
+                <li key={d.id}>
+                  <strong className="text-slate-800">{d.document_title}</strong>
+                  {d.revision_notes ? (
+                    <span className="text-red-700 font-medium"> — Alasan: "{d.revision_notes}"</span>
+                  ) : (
+                    <span className="text-amber-700 font-medium"> — Belum sesuai ketentuan</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="text-[11px] text-slate-500 pt-1">
+              💡 Dokumen yang bertanda hijau ("Sesuai") tidak perlu diunggah ulang. Setelah dokumen perbaikan diunggah, berkas akan otomatis masuk ke antrean screening ulang Admin.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ══ INFO TAHAP SAAT INI (Normal) ══ */}
       {isDraf && <PrintNotice />}
-      {isScreening && (
+      {isScreening && !isNeedRevision && (
         <StageInfo icon={Clock} tone="blue" title="Tahap 1 · Dokumen sedang diperiksa Admin">
           Admin memeriksa setiap dokumen satu per satu. Pembayaran (Tahap 2) dibuka setelah semua dokumen dinyatakan sesuai.
           {docs.some((d) => !d.file_path) && ' Masih ada dokumen yang belum diunggah, lengkapi di bawah.'}
@@ -493,7 +558,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
             <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${
               sub.physical_status === 'Dikirim' ? 'bg-sky-50 text-[#0884c4] border-sky-200' : 'bg-amber-100 text-amber-800 border-amber-200'
             }`}>
-              {sub.physical_status === 'Dikirim' ? 'Sudah dikirim · menunggu approval Admin' : 'Belum dikirim'}
+              {sub.physical_status === 'Dikirim' ? 'Sudah dikirim · menunggu konfirmasi Admin' : 'Belum dikirim'}
             </span>
           </div>
           <div className="p-5 sm:p-7 grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -521,7 +586,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               <div className="panel-inner p-5 space-y-2 text-sm">
                 <p className="font-medium text-slate-800 flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-600" /> Berkas fisik sudah Anda kirim</p>
                 <p className="text-slate-600">Dikirim lewat <strong className="font-medium">{sub.physical_courier}</strong>{sub.physical_tracking_no && <> · No. resi <span className="font-mono">{sub.physical_tracking_no}</span></>}{sub.physical_sent_at && <> · {formatLongDate(sub.physical_sent_at)}</>}.</p>
-                <p className="text-slate-500 text-xs">Admin akan mengecek data pengiriman Anda. Setelah di-approve Admin, Anda otomatis menjadi anggota penerbit IKAPI Jawa Barat.</p>
+                <p className="text-slate-500 text-xs">Admin akan mengonfirmasi setelah berkas sampai di sekretariat, lalu mengirimkannya ke IKAPI Pusat. Anda resmi aktif setelah Nomor KTA terbit dari Pusat.</p>
               </div>
             ) : (
               <form onSubmit={handleShipSubmit} className="panel-inner p-5 space-y-3">
@@ -547,6 +612,101 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               </form>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ══ PROSES DI IKAPI PUSAT ══ */}
+      {(sub.status === 'Berkas Diterima' || sub.status === 'Dikirim ke Pusat') && (
+        <div className="card-surface px-5 sm:px-7 py-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <Truck className="w-5 h-5 text-violet-600" />
+              <h3 className="text-lg text-slate-800">
+                {sub.status === 'Berkas Diterima' ? 'Berkas fisik diterima sekretariat' : 'Berkas dikirim ke IKAPI Pusat'}
+              </h3>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-violet-50 text-violet-700 border-violet-200">
+              {sub.status === 'Berkas Diterima' ? 'Disiapkan untuk dikirim ke Pusat' : 'Menunggu Nomor KTA dari Pusat'}
+            </span>
+          </div>
+          {(() => {
+            const atPusat = sub.status === 'Dikirim ke Pusat';
+            const days = atPusat && sub.sent_to_central_at
+              ? Math.max(0, Math.floor((Date.now() - new Date(sub.sent_to_central_at).getTime()) / 86400000))
+              : null;
+            const late = days !== null && days > 30;
+            // Empat langkah setelah berkas diterima: siapa yang memegang berkas di tiap langkah
+            const steps = [
+              { label: 'Berkas diterima sekretariat', who: 'IKAPI Jawa Barat', at: sub.physical_received_at, done: true },
+              { label: 'Dikirim ke IKAPI Pusat', who: 'Admin IKAPI Jawa Barat', at: sub.sent_to_central_at, done: atPusat, current: !atPusat },
+              { label: 'Diproses IKAPI Pusat', who: 'Verifikasi & penerbitan No. KTA', current: atPusat },
+              { label: 'No. KTA dicatat, Anggota Aktif', who: 'Sekretaris IKAPI Jawa Barat' },
+            ];
+            return (
+              <>
+                {/* Posisi berkas sekarang */}
+                <div className={`rounded-2xl border p-4 flex items-start gap-3 ${late ? 'bg-amber-50 border-amber-200' : 'bg-violet-50 border-violet-200'}`}>
+                  <span className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${late ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700'}`}>
+                    {atPusat ? <Send className="w-5 h-5" /> : <Truck className="w-5 h-5" />}
+                  </span>
+                  <div className="min-w-0 text-sm">
+                    <p className="text-slate-800 font-medium">
+                      {atPusat ? 'Berkas Anda sedang diproses di IKAPI Pusat' : 'Sekretariat sedang menyiapkan pengiriman berkas ke IKAPI Pusat'}
+                    </p>
+                    <p className="text-slate-600 mt-0.5">
+                      {atPusat
+                        ? <>Dikirim {formatLongDate(sub.sent_to_central_at)}{days !== null && <> · <strong className="font-medium">{days === 0 ? 'menunggu sejak hari ini' : `sudah ${days} hari menunggu`}</strong></>}
+                            {(sub.central_courier || sub.central_tracking_no) && <> · {sub.central_courier || '-'}{sub.central_tracking_no && <> resi <span className="font-mono">{sub.central_tracking_no}</span></>}</>}</>
+                        : <>Berkas diterima {formatLongDate(sub.physical_received_at)}. Admin akan mengirim paket berkas ke IKAPI Pusat.</>}
+                    </p>
+                  </div>
+                </div>
+
+                <ol className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">
+                  {steps.map((s, i) => (
+                    <li key={s.label} className={`p-3 rounded-2xl border flex items-start gap-2 ${
+                      s.current ? 'bg-white border-violet-300 ring-2 ring-violet-100' : s.done ? 'panel-inner' : 'panel-inner opacity-60'
+                    }`}>
+                      {s.done
+                        ? <CheckCircle className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+                        : s.current
+                          ? <span className="relative mt-1 flex w-3 h-3 flex-shrink-0"><span className="absolute inline-flex w-full h-full rounded-full bg-violet-400 opacity-60 animate-ping" /><span className="relative inline-flex w-3 h-3 rounded-full bg-violet-600" /></span>
+                          : <Clock className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />}
+                      <span className="min-w-0">
+                        <span className={`block ${s.current ? 'text-violet-800 font-medium' : 'text-slate-800'}`}>{i + 1}. {s.label}</span>
+                        <span className="block text-xs text-slate-500">{s.done && s.at ? formatLongDate(s.at) : s.current ? 'Sedang berjalan' : 'Belum'}</span>
+                        <span className="block text-[11px] text-slate-400">{s.who}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+
+                {/* Yang perlu dilakukan pemohon */}
+                <div className="panel-inner p-4 text-sm space-y-1.5">
+                  <p className="flex items-center gap-2 text-slate-800 font-medium">
+                    <Info className="w-4 h-4 text-sky-600" /> Yang perlu Anda lakukan
+                  </p>
+                  <p className="text-slate-600">
+                    Tidak ada tindakan dari Anda. Penerbitan Nomor KTA dilakukan oleh IKAPI Pusat. Setelah terbit, Sekretaris IKAPI Jawa Barat
+                    mencatat Nomor KTA. Status Anda otomatis menjadi <strong className="font-medium">Anggota Aktif</strong> dan Anda menerima email.
+                  </p>
+                  {(settings.office_phone || settings.office_email) && (
+                    <p className={late ? 'text-amber-800' : 'text-slate-500'}>
+                      {late ? 'Sudah lebih dari 30 hari? ' : 'Ada pertanyaan? '}Hubungi sekretariat:{' '}
+                      {settings.office_phone && <span className="inline-flex items-center gap-1"><Phone className="w-3.5 h-3.5" />{settings.office_phone}</span>}
+                      {settings.office_phone && settings.office_email && ' · '}
+                      {settings.office_email && (
+                        <a href={`mailto:${settings.office_email}?subject=${encodeURIComponent(`Status No. KTA - ${sub.publisher_name || ''} (Pengajuan #${sub.id})`)}`}
+                          className="inline-flex items-center gap-1 text-sky-700 hover:underline">
+                          <Mail className="w-3.5 h-3.5" />{settings.office_email}
+                        </a>
+                      )}
+                    </p>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -580,22 +740,6 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         </div>
       )}
 
-      {/* ══ PENGAJUAN TIDAK DI-ACC: unggah ulang yang bertanda merah saja ══ */}
-      {isNeedRevision && (
-        <div className="rounded-[22px] p-5 bg-red-50 border border-red-200 flex items-start gap-3.5">
-          <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-red-900 space-y-1">
-            <p className="font-semibold">{rejectedDocs.length} dokumen tidak sesuai dan perlu diajukan ulang</p>
-            <ul className="list-disc pl-5 space-y-0.5">
-              {rejectedDocs.map((d) => (
-                <li key={d.id}><strong className="font-medium">{d.document_title}</strong>{d.revision_notes && <> — {d.revision_notes}</>}</li>
-              ))}
-            </ul>
-            <p>Cukup unggah ulang dokumen tersebut di daftar di bawah. Dokumen berlabel hijau sudah sesuai dan tidak perlu dikirim lagi. Setelah semua diganti, dokumen otomatis diperiksa ulang Admin.</p>
-            {sub.admin_notes && <p className="text-red-800/80">Catatan Admin: {sub.admin_notes}</p>}
-          </div>
-        </div>
-      )}
 
       {/* ══ INVOICE PEMBAYARAN (setelah bukti transfer diunggah) ══ */}
       {payment?.proof_file && (
@@ -769,103 +913,111 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         </div>
       )}
 
-      {/* ══ DOKUMEN YANG PERLU DIUNGGAH ULANG (hanya tampil bila ada revisi / dokumen kosong) ══ */}
+      {/* ══ DOKUMEN YANG PERLU DIREVISI (Hanya muncul jika ada revisi / belum lengkap) ══ */}
       {actionDocs.length > 0 && (
-      <div className="card-surface overflow-hidden">
-        <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <FileText className="w-5 h-5 text-[#0884c4]" />
-            <h3 className="text-lg text-slate-800">{rejectedDocs.length > 0 ? 'Dokumen yang perlu direvisi' : 'Dokumen yang belum diunggah'}</h3>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">
-              {docs.filter(d => d.screening_status === 'Sesuai').length}/{docs.length} sesuai
-            </span>
+        <div className="card-surface overflow-hidden">
+          <div className="px-5 sm:px-7 py-5 flex flex-wrap items-start justify-between gap-3 border-b border-slate-100">
+            <div className="flex items-start gap-3">
+              <span className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${rejectedDocs.length > 0 ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
+                <AlertCircle className="w-5 h-5" />
+              </span>
+              <div>
+                <h3 className="text-lg text-slate-800">
+                  {rejectedDocs.length > 0 ? 'Dokumen yang Perlu Direvisi' : 'Dokumen yang Belum Diunggah'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {rejectedDocs.length > 0
+                    ? 'Unggah ulang hanya dokumen di bawah ini sesuai catatan Admin. Dokumen lain dan pembayaran tidak perlu diulang.'
+                    : 'Lengkapi dokumen di bawah ini sebelum pengajuan diperiksa Admin.'}
+                </p>
+              </div>
+            </div>
             {rejectedDocs.length > 0 && (
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-red-50 text-red-700 border-red-200">
-                {rejectedDocs.length} tidak sesuai
+              <span className="px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-100 whitespace-nowrap">
+                {rejectedDocs.length} dokumen perlu diganti
               </span>
             )}
           </div>
-        </div>
 
-        <div className="divide-y divide-[#e2f2fd]">
-          {actionDocs.map((doc, idx) => {
-            const isRevisi  = doc.screening_status === 'Perlu Revisi';
-            const isSesuai  = doc.screening_status === 'Sesuai';
-            const hasFile   = Boolean(doc.file_path && doc.file_name && doc.file_name !== 'Belum diunggah');
-            // Setelah dikirim, hanya dokumen yang tidak sesuai (atau belum diunggah) yang bisa diganti
-            const canUpload = isDraf || (isNeedRevision && (isRevisi || !hasFile)) || (isScreening && !hasFile);
-            const label     = !hasFile && !isRevisi
-              ? { text: 'Belum diunggah', cls: 'bg-slate-50 text-slate-500 border-slate-200', dot: 'bg-slate-300' }
-              : SCREENING_LABEL[doc.screening_status] || SCREENING_LABEL.Menunggu;
+          <ol className="divide-y divide-slate-100">
+            {actionDocs.map((doc, idx) => {
+              const isRevisi  = doc.screening_status === 'Perlu Revisi';
+              const hasFile   = Boolean(doc.file_path && doc.file_name && doc.file_name !== 'Belum diunggah');
+              const canUpload = isDraf || isRevisi || ((isScreening || isNeedRevision) && !hasFile);
+              const label = !hasFile && !isRevisi
+                ? { text: 'Belum diunggah', cls: 'bg-slate-50 text-slate-500 border-slate-200', dot: 'bg-slate-300' }
+                : isRevisi
+                ? { text: 'Perlu revisi', cls: 'bg-red-50 text-red-700 border-red-100', dot: 'bg-red-500' }
+                : SCREENING_LABEL[doc.screening_status] || SCREENING_LABEL.Menunggu;
 
-            return (
-              <div
-                key={doc.id || idx}
-                className={`px-5 sm:px-7 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition ${
-                  isRevisi ? 'bg-red-50/50' : 'bg-white'
-                }`}
-              >
-                <div className="space-y-1 flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold text-slate-900">{doc.document_title}</span>
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${label.cls}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${label.dot}`} />
-                      {label.text}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 truncate">
-                    {hasFile ? doc.file_name : 'Belum diunggah'}
-                  </p>
-                  {isRevisi && doc.revision_notes && (
-                    <p className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-1.5">
-                      <strong>Alasan tidak sesuai:</strong> {doc.revision_notes}
-                    </p>
-                  )}
-                </div>
+              return (
+                <li
+                  key={doc.id || idx}
+                  className="px-5 sm:px-7 py-5 grid grid-cols-[auto,1fr] lg:grid-cols-[auto,1fr,auto] gap-x-4 gap-y-3 items-start"
+                >
+                  <span className="w-7 h-7 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center mt-0.5">
+                    {idx + 1}
+                  </span>
 
-                <div className="flex items-center gap-2.5 flex-shrink-0">
-                  {doc.file_path && (
-                    <a
-                      href={doc.file_path}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="soft-pill !px-3.5 !py-2 !text-xs"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Lihat</span>
-                    </a>
-                  )}
-                  {canUpload ? (
-                    <label className={`px-4 py-2 text-xs font-medium rounded-full cursor-pointer flex items-center gap-1.5 transition ${
-                      isRevisi
-                        ? 'bg-red-600 hover:bg-red-700 text-white shadow-sm'
-                        : doc.file_path
-                        ? 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/70 shadow-sm'
-                        : 'bg-[#3b82f6] hover:bg-[#2f6fe0] text-white shadow-sm'
-                    }`}>
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>
-                        {uploadingDocId === doc.id ? '...' : isRevisi ? 'Unggah ulang' : doc.file_path ? 'Ganti' : 'Unggah'}
+                  <div className="min-w-0 space-y-2">
+                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                      <span className="text-sm font-semibold text-slate-900">{doc.document_title}</span>
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${label.cls}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${label.dot}`} />
+                        {label.text}
                       </span>
-                      <input
-                        type="file"
-                        className="hidden"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        disabled={uploadingDocId === doc.id}
-                        onChange={(e) => handleDocUpload(doc, e.target.files[0])}
-                      />
-                    </label>
-                  ) : isSesuai ? (
-                    <CheckCircle className="w-5 h-5 text-emerald-600" />
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
+                    </div>
+
+                    {isRevisi && (
+                      <div className="border-l-2 border-red-300 bg-red-50/60 rounded-r-lg px-3 py-2 max-w-xl">
+                        <p className="text-[11px] font-medium text-red-600 uppercase tracking-wide">Catatan Admin</p>
+                        <p className="text-sm text-slate-800 leading-relaxed mt-0.5">
+                          {doc.revision_notes || 'Format atau berkas belum sesuai ketentuan. Silakan unggah dokumen pengganti.'}
+                        </p>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5 min-w-0">
+                      <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate">{hasFile ? `Berkas sebelumnya: ${doc.file_name}` : 'Belum ada berkas diunggah'}</span>
+                    </p>
+                  </div>
+
+                  <div className="col-start-2 lg:col-start-3 flex flex-wrap items-center gap-2 lg:justify-end lg:self-center">
+                    {doc.file_path && (
+                      <a
+                        href={fileUrl(doc.file_path)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3.5 py-2 text-xs font-medium rounded-full border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-800 flex items-center gap-1.5 transition"
+                        title="Buka dokumen sebelumnya di tab baru"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Lihat berkas</span>
+                      </a>
+                    )}
+
+                    {canUpload && (
+                      <label className="px-4 py-2 text-xs font-semibold rounded-full cursor-pointer flex items-center gap-1.5 transition bg-[#0da2e7] hover:bg-[#0884c4] text-white shadow-sm">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>
+                          {uploadingDocId === doc.id ? 'Mengunggah...' : isRevisi ? 'Unggah ulang' : 'Unggah'}
+                        </span>
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          disabled={uploadingDocId === doc.id}
+                          onChange={(e) => handleDocUpload(doc, e.target.files[0])}
+                        />
+                      </label>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
         </div>
-      </div>
       )}
 
       {/* ══ RIWAYAT ALUR BERKAS ══ */}
@@ -873,7 +1025,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
 
       {/* ══ POP UP: KIRIM BERKAS FISIK ══ */}
       {showShipNotice && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeShipNotice}>
+        createPortal(
+        <div className="fixed inset-0 z-50 modal-overlay flex items-center justify-center p-4" onClick={closeShipNotice}>
           <div role="dialog" aria-modal="true" aria-labelledby="ship-title" onClick={(e) => e.stopPropagation()}
             className="relative w-full max-w-md bg-white rounded-[28px] shadow-2xl overflow-hidden">
             <div className="bg-amber-400 px-6 pt-7 pb-9 text-center">
@@ -892,7 +1045,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               </p>
               <p className="text-xs text-slate-500 mt-3 flex gap-2">
                 <Info className="w-4 h-4 flex-shrink-0" />
-                Setelah berkas dikirim, Admin akan mengecek dan meng-approve. Anda lalu otomatis menjadi anggota penerbit IKAPI.
+                Setelah berkas diterima, Admin mengirimkannya ke IKAPI Pusat. Anda resmi menjadi anggota setelah Nomor KTA terbit.
               </p>
               <div className="flex flex-col sm:flex-row gap-2 mt-5">
                 <button onClick={() => { closeShipNotice(); setShowPacket(true); }}
@@ -907,11 +1060,13 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
             </div>
           </div>
         </div>
+        , document.body)
       )}
 
       {/* ══ UCAPAN SELAMAT: BARU SAJA AKTIF ══ */}
       {showWelcome && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeWelcome}>
+        createPortal(
+        <div className="fixed inset-0 z-50 modal-overlay flex items-center justify-center p-4" onClick={closeWelcome}>
           <div
             role="dialog"
             aria-modal="true"
@@ -927,12 +1082,13 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
             <div className="-mt-6 mx-4 mb-4 bg-white rounded-3xl px-5 pt-6 pb-5">
               <h3 id="welcome-title" className="text-xl font-medium text-slate-900">Selamat, tahap pendaftaran sudah selesai!</h3>
               <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-                Berkas fisik <strong className="font-medium text-slate-800">{sub.publisher_name}</strong> sudah diterima sekretariat.
+                Nomor KTA <strong className="font-medium text-slate-800">{sub.publisher_name}</strong> sudah terbit dari IKAPI Pusat.
                 Anda kini <strong className="font-medium text-emerald-700">resmi menjadi anggota IKAPI Jawa Barat</strong>
                 {sub.activated_at && <> sejak {formatLongDate(sub.activated_at)}</>}.
               </p>
               <p className="text-xs text-slate-500 mt-3">
-                Dokumen resmi (surat, formulir, berita acara & SK) sudah bisa diunduh. Nomor KTA akan tampil setelah dicatat pengurus.
+                {(sub.member_kta || sub.kta_number) ? <>Nomor KTA: <strong className="font-mono text-slate-700">{sub.member_kta || sub.kta_number}</strong>. </> : null}
+                Dokumen resmi (surat, formulir, berita acara & SK) bisa diunduh kapan saja.
               </p>
               <div className="flex flex-col sm:flex-row gap-2 mt-5">
                 <button
@@ -951,38 +1107,21 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
             </div>
           </div>
         </div>
+        , document.body)
       )}
 
       {/* ══ INVOICE MODAL ══ */}
       {showInvoice && payment && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto">
-            <div className="flex justify-end mb-2">
-              <button onClick={() => setShowInvoice(false)} className="soft-pill !py-2 !text-xs">
-                <X className="w-4 h-4" /> Tutup
-              </button>
-            </div>
-            <PaymentInvoice submission={sub} payment={payment} settings={settings} />
-          </div>
-        </div>
+        <ModalFrame maxWidth="max-w-3xl" onClose={() => setShowInvoice(false)}>
+          <PaymentInvoice submission={sub} payment={payment} settings={settings} />
+        </ModalFrame>
       )}
 
       {/* ══ PACKET MODAL ══ */}
       {showPacket && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-5xl max-h-[92vh] overflow-y-auto">
-            <div className="flex justify-end mb-2">
-              <button
-                onClick={() => setShowPacket(false)}
-                className="soft-pill !py-2 !text-xs"
-              >
-                <X className="w-4 h-4" />
-                <span>Tutup</span>
-              </button>
-            </div>
-            <CentralPacketExporter submission={sub} documents={docs} settings={settings} />
-          </div>
-        </div>
+        <ModalFrame onClose={() => setShowPacket(false)}>
+          <CentralPacketExporter submission={sub} documents={docs} settings={settings} />
+        </ModalFrame>
       )}
     </div>
   );

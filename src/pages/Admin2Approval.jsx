@@ -1,26 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import CentralPacketExporter from '../components/CentralPacketExporter';
+import ModalFrame from '../components/ModalFrame';
 import { useMySignature, MySignatureCard, SignLetterModal } from '../components/LetterSigning';
-import StatusStepper, { STATUS_LABEL } from '../components/StatusStepper';
+import StatusStepper, { STATUS_LABEL, POST_APPROVAL_STATUSES } from '../components/StatusStepper';
 import DocumentVerificationModal from '../components/DocumentVerificationModal';
 import {
   Award, CheckCircle, XCircle, FileText, Users,
   DollarSign, Eye, PenTool, RefreshCw, Search, Activity,
-  Clock, ShieldCheck, AlertCircle, ChevronDown, ChevronUp
+  Clock, ShieldCheck, AlertCircle, ChevronDown, ChevronUp, Info
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
 
 const STAGE_PROGRESS = {
-  'Draf':                    { step: 1, total: 6, label: 'Tahap 1/6 · Pengisian Formulir', color: 'bg-slate-400' },
-  'Menunggu Verifikasi':     { step: 2, total: 6, label: 'Tahap 2/6 · Screening Dokumen oleh Admin', color: 'bg-[#0da2e7]' },
-  'Perlu Revisi':            { step: 2, total: 6, label: 'Tahap 2/6 · Revisi Dokumen oleh Pemohon', color: 'bg-amber-500' },
-  'Menunggu Pembayaran':     { step: 3, total: 6, label: 'Tahap 3/6 · Pembayaran & Verifikasi Admin', color: 'bg-amber-500' },
-  'Menunggu TTD Sekretaris': { step: 4, total: 6, label: 'Tahap 4/6 · Menunggu TTD Sekretaris', color: 'bg-indigo-500' },
-  'Menunggu Approval':       { step: 5, total: 6, label: 'Tahap 5/6 · Menunggu Approval & TTD Ketua', color: 'bg-indigo-600' },
-  'Pengiriman Berkas':       { step: 6, total: 6, label: 'Tahap 6/6 · Menunggu Approval Admin', color: 'bg-orange-500' },
-  'Aktif':                   { step: 6, total: 6, label: 'Tahap 6/6 · Resmi Menjadi Anggota', color: 'bg-emerald-600' },
-  'Ditolak':                 { step: 0, total: 6, label: 'Pengajuan Ditolak oleh Pengurus', color: 'bg-red-500' },
+  'Draf':                    { step: 1, total: 8, label: 'Tahap 1/8 · Pengisian Formulir', color: 'bg-slate-400' },
+  'Menunggu Verifikasi':     { step: 2, total: 8, label: 'Tahap 2/8 · Screening Dokumen oleh Admin', color: 'bg-[#0da2e7]' },
+  'Perlu Revisi':            { step: 2, total: 8, label: 'Tahap 2/8 · Revisi Dokumen oleh Pemohon', color: 'bg-amber-500' },
+  'Menunggu Pembayaran':     { step: 3, total: 8, label: 'Tahap 3/8 · Pembayaran & Verifikasi Admin', color: 'bg-amber-500' },
+  'Menunggu TTD Sekretaris': { step: 4, total: 8, label: 'Tahap 4/8 · Menunggu TTD Sekretaris', color: 'bg-indigo-500' },
+  'Menunggu Approval':       { step: 5, total: 8, label: 'Tahap 5/8 · Menunggu Approval & TTD Ketua', color: 'bg-indigo-600' },
+  'Pengiriman Berkas':       { step: 6, total: 8, label: 'Tahap 6/8 · Pemohon Mengirim Berkas Fisik', color: 'bg-orange-500' },
+  'Berkas Diterima':         { step: 7, total: 8, label: 'Tahap 7/8 · Berkas Diterima, Siap ke Pusat', color: 'bg-violet-500' },
+  'Dikirim ke Pusat':        { step: 7, total: 8, label: 'Tahap 7/8 · Dikirim ke Pusat, Menunggu KTA', color: 'bg-violet-600' },
+  'Aktif':                   { step: 8, total: 8, label: 'Tahap 8/8 · KTA Terbit, Anggota Aktif', color: 'bg-emerald-600' },
+  'Ditolak':                 { step: 0, total: 8, label: 'Pengajuan Ditolak oleh Pengurus', color: 'bg-red-500' },
 };
 
 const STATUS_BADGE = {
@@ -31,6 +34,8 @@ const STATUS_BADGE = {
   'Menunggu TTD Sekretaris': 'bg-indigo-50 text-indigo-700 border-indigo-200',
   'Menunggu Approval':       'bg-indigo-50 text-indigo-800 border-indigo-200',
   'Pengiriman Berkas':       'bg-orange-50 text-orange-800 border-orange-200',
+  'Berkas Diterima':         'bg-violet-50 text-violet-700 border-violet-200',
+  'Dikirim ke Pusat':        'bg-violet-50 text-violet-800 border-violet-300',
   'Aktif':                   'bg-emerald-100 text-emerald-900 border-emerald-300',
   'Ditolak':                 'bg-red-50 text-red-800 border-red-200',
 };
@@ -83,7 +88,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
       const [resStats, resSubs, resSettings] = await Promise.all([
         fetch('/api/admin/dashboard-stats', { headers }),
         fetch('/api/submissions', { headers }),
-        fetch('/api/settings')
+        fetch('/api/settings', { headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` } })
       ]);
 
       const dataStats = await resStats.json();
@@ -153,7 +158,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
 
   // Filtered submissions
   const pendingApproval = submissions.filter(s => s.status === 'Menunggu Approval');
-  const signedList = submissions.filter(s => ['Pengiriman Berkas', 'Aktif'].includes(s.status));
+  const signedList = submissions.filter(s => POST_APPROVAL_STATUSES.includes(s.status));
 
   const filteredMonitoring = submissions.filter(s => {
     const matchStatus = monitorStatus === 'Semua' || s.status === monitorStatus;
@@ -291,10 +296,10 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
             </div>
           ) : (
             pendingApproval.map((sub) => (
-              <div key={sub.id} className="p-6 hover:bg-slate-50 transition flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="space-y-1.5">
+              <div key={sub.id} className="p-5 sm:p-6 hover:bg-slate-50/70 transition flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                <div className="space-y-2 min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="text-base font-medium text-slate-900">
+                    <h4 className="text-base font-bold text-slate-900">
                       {sub.publisher_name}
                     </h4>
                     <span className="text-xs bg-[#dff2fd] text-[#0884c4] px-2.5 py-0.5 rounded-full font-bold border border-[#b8e6fc]">
@@ -305,51 +310,56 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                     </span>
                   </div>
 
-                  <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <span>Pimpinan: <strong>{sub.leader_name}</strong></span>
-                    <span>•</span>
-                    <span>Kota: <strong>{sub.city}</strong></span>
-                    <span>•</span>
-                    <span>No. Surat Pengantar: <strong className="font-mono text-[#0884c4]">{sub.reference_number || 'Otomatis'}</strong></span>
+                  <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span>Pimpinan: <strong className="text-slate-700">{sub.leader_name}</strong></span>
+                    <span className="text-slate-300">•</span>
+                    <span>Kota: <strong className="text-slate-700">{sub.city}</strong></span>
+                    <span className="text-slate-300">•</span>
+                    <span>No. Surat Pengantar: <strong className="font-mono text-[#0884c4] bg-sky-50 px-2 py-0.5 rounded border border-sky-100">{sub.reference_number || 'Otomatis'}</strong></span>
                   </div>
 
                   {sub.admin_notes && (
-                    <p className="text-xs text-slate-600 bg-[#f0f9ff] border border-[#b8e6fc] px-3 py-1.5 rounded-lg mt-2 inline-block">
-                      <strong>Catatan:</strong> {sub.admin_notes}
-                    </p>
+                    <div className="text-xs text-slate-700 bg-sky-50/70 border border-sky-200/80 px-3 py-1.5 rounded-lg flex items-start gap-2 max-w-2xl">
+                      <Info className="w-3.5 h-3.5 text-[#0da2e7] flex-shrink-0 mt-0.5" />
+                      <span><strong className="font-semibold text-slate-800">Catatan:</strong> {sub.admin_notes}</span>
+                    </div>
                   )}
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap flex-shrink-0 pt-3 xl:pt-0 border-t xl:border-t-0 border-slate-100">
                   <button
                     onClick={() => openView(sub.id)}
-                    className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+                    className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-semibold rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                     title="Dokumen persyaratan, bukti transfer & riwayat"
                   >
-                    <ShieldCheck className="w-3.5 h-3.5" /> Dokumen & riwayat
+                    <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Dokumen & riwayat</span>
                   </button>
+
                   <button
                     onClick={() => openPacket(sub.id)}
-                    className="px-3.5 py-2 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+                    className="px-3 py-2 bg-[#f0f9ff] hover:bg-[#e0f2fe] text-[#0884c4] border border-[#b8e6fc] text-xs font-semibold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
                     title="Pratinjau Surat Pengantar & Berkas"
                   >
-                    <Eye className="w-3.5 h-3.5" /> Pratinjau Surat & Berkas
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Pratinjau Surat & Berkas</span>
                   </button>
 
                   <button
                     onClick={() => { setRejectingSub(sub); setRejectionReason(''); }}
-                    className="px-3.5 py-2 border border-red-300 hover:bg-red-50 text-red-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+                    className="px-3 py-2 border border-rose-200 hover:bg-rose-50 text-rose-700 text-xs font-semibold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
                   >
-                    <XCircle className="w-3.5 h-3.5" /> Tolak Pengajuan
+                    <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Tolak</span>
                   </button>
 
                   <button
                     onClick={() => setApprovingSub(sub)}
-                    className="px-4 py-2 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-1.5"
+                    className="px-4 py-2 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer hover:shadow"
                   >
                     <PenTool className="w-3.5 h-3.5" />
-                    Setujui & Bubuhkan TTD Surat
+                    <span>Setujui & TTD Surat</span>
                   </button>
                 </div>
               </div>
@@ -479,7 +489,9 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
               { label: 'Pembayaran', status: 'Menunggu Pembayaran', color: 'text-amber-800 bg-amber-50 border-amber-200' },
               { label: 'TTD Sekretaris', status: 'Menunggu TTD Sekretaris', color: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
               { label: 'TTD Ketua', status: 'Menunggu Approval', color: 'text-indigo-800 bg-indigo-50 border-indigo-200' },
-              { label: 'Approval Admin', status: 'Pengiriman Berkas', color: 'text-orange-800 bg-orange-50 border-orange-200' },
+              { label: 'Berkas Fisik', status: 'Pengiriman Berkas', color: 'text-orange-800 bg-orange-50 border-orange-200' },
+              { label: 'Berkas Diterima', status: 'Berkas Diterima', color: 'text-violet-700 bg-violet-50 border-violet-200' },
+              { label: 'Menunggu KTA Pusat', status: 'Dikirim ke Pusat', color: 'text-violet-800 bg-violet-50 border-violet-200' },
               { label: 'Anggota Aktif', status: 'Aktif', color: 'text-emerald-800 bg-emerald-50 border-emerald-200' },
               { label: 'Ditolak', status: 'Ditolak', color: 'text-red-800 bg-red-50 border-red-200' },
             ].map((pill) => {
@@ -559,7 +571,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                   </div>
                   {isExpanded && (
                     <div className="overflow-x-auto -mx-4 px-4 pt-2">
-                      <StatusStepper currentStatus={sub.status} />
+                      <StatusStepper currentStatus={sub.status} rejectionReason={sub.rejection_reason} rejectedAtStatus={sub.rejected_at_status} />
                     </div>
                   )}
                 </div>
@@ -668,7 +680,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                       {isExpanded && (
                         <tr className="bg-slate-50">
                           <td colSpan={5} className="px-6 py-4 border-t border-slate-100">
-                            <StatusStepper currentStatus={sub.status} />
+                            <StatusStepper currentStatus={sub.status} rejectionReason={sub.rejection_reason} rejectedAtStatus={sub.rejected_at_status} />
                           </td>
                         </tr>
                       )}
@@ -705,7 +717,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
           MODAL 2: PENOLAKAN PENGAJUAN BESERTA ALASAN PENOLAKAN
          ===================================================================== */}
       {rejectingSub && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 overflow-y-auto modal-overlay flex items-center justify-center p-4">
           <div className="modal-surface max-w-md w-full p-6 space-y-4">
             <div className="flex items-center space-x-3 text-red-600">
               <XCircle className="w-6 h-6" />
@@ -769,24 +781,14 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
       )}
 
       {isPacketOpen && packetDetail && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm p-4 flex items-center justify-center">
-          <div className="w-full max-w-5xl max-h-[92vh] overflow-y-auto">
-            <div className="flex justify-end mb-2">
-              <button
-                onClick={() => setIsPacketOpen(false)}
-                className="px-3.5 py-1.5 bg-white text-slate-800 rounded-xl font-bold text-xs shadow hover:bg-slate-100"
-              >
-                ✕ Tutup Pratinjau
-              </button>
-            </div>
-            <CentralPacketExporter
-              submission={packetDetail.submission}
-              documents={packetDetail.documents}
-              settings={packetDetail.settings}
-              payment={packetDetail.payment}
-            />
-          </div>
-        </div>
+        <ModalFrame onClose={() => setIsPacketOpen(false)} closeLabel="Tutup pratinjau">
+          <CentralPacketExporter
+            submission={packetDetail.submission}
+            documents={packetDetail.documents}
+            settings={packetDetail.settings}
+            payment={packetDetail.payment}
+          />
+        </ModalFrame>
       )}
 
     </div>

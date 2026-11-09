@@ -1,2 +1,4 @@
 node_modules
 .vite
+server/data/.jwt_secret
+.env

@@ -1,5 +1,5 @@
 import bcryptjs from 'bcryptjs';
-import { query, initDb } from './db.js';
+import { query, initDb, closeDb } from "./db.js";
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -29,7 +29,8 @@ export async function runSeed() {
   await initDb();
   console.log('Database initialized. Seeding default data...');
 
-  // 1. Seed Settings
+  // 1. Seed Settings: hanya mengisi kunci yang belum ada. Nilai yang sudah diubah Admin
+  //    (biaya, rekening, nomor surat, kontak) tidak ditimpa saat server dijalankan ulang.
   const defaultSettings = [
     { key: 'bank_name', value: 'Bank BNI', description: 'Nama Bank Resmi IKAPI Jabar' },
     { key: 'bank_account', value: '2089992087', description: 'Nomor Rekening Resmi' },
@@ -47,14 +48,15 @@ export async function runSeed() {
     { key: 'office_address', value: 'Jl. Ibu Inggit Garnasih No. 148, Ciateul, Kec. Regol, Kota Bandung, Jawa Barat 40252', description: 'Alamat Sekretariat IKAPI Jabar' },
     { key: 'office_phone', value: '(022) 5202684 / 0812-2345-6789', description: 'Telepon Sekretariat' },
     { key: 'office_email', value: 'sekretariat@ikapi-jabar.or.id', description: 'Email Resmi PD IKAPI Jabar' },
-    { key: 'office_website', value: 'https://ikapi-jabar.or.id', description: 'Website Resmi' }
+    { key: 'office_website', value: 'https://ikapi-jabar.or.id', description: 'Website Resmi' },
+    { key: 'admin_whatsapp', value: '0812-2345-6789', description: 'Nomor WhatsApp Admin (bantuan & lupa kata sandi)' }
   ];
 
   for (const s of defaultSettings) {
     await query.run(
-      `INSERT INTO settings (key, value, description)
+      `INSERT INTO settings (settings.key, value, description)
        VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, description = excluded.description`,
+       ON DUPLICATE KEY UPDATE description = VALUES(description)`,
       [s.key, s.value, s.description]
     );
   }
@@ -406,7 +408,7 @@ export async function runSeed() {
     await query.run(
       `INSERT INTO documents (
         submission_id, document_type, document_title, file_path, file_name, file_size, mime_type, screening_status, verified_by, verified_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         subB.lastID,
         doc.type,
@@ -461,7 +463,7 @@ export async function runSeed() {
     await query.run(
       `INSERT INTO documents (
         submission_id, document_type, document_title, file_path, file_name, file_size, mime_type, screening_status, revision_notes, verified_by, verified_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         subD.lastID,
         doc.type,
@@ -484,7 +486,7 @@ export async function runSeed() {
       submission_id, amount, fee_breakdown, proof_file, proof_filename,
       sender_bank, sender_account_name, sender_account_number, transfer_date,
       verification_status, verified_by, verified_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       subB.lastID,
       1700000,
@@ -537,7 +539,7 @@ export async function runSeed() {
       submission_id, amount, fee_breakdown, proof_file, proof_filename,
       sender_bank, sender_account_name, sender_account_number, transfer_date,
       verification_status, verified_by, verified_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       subD.lastID,
       1700000,
@@ -566,7 +568,7 @@ export async function runSeed() {
 
   await query.run(
     `UPDATE users SET
-       onboarded_at = datetime('now', 'localtime'),
+       onboarded_at = NOW(),
        member_type = CASE WHEN EXISTS (
          SELECT 1 FROM submissions s WHERE s.user_id = users.id AND s.submission_type = 'Heregistrasi'
        ) THEN 'Lama' ELSE 'Baru' END,
@@ -585,7 +587,7 @@ async function ensureAdminAccount() {
   const hashedPassword = await bcryptjs.hash('password123', salt);
   await query.run(
     `INSERT INTO users (name, email, password, role, phone, email_verified_at)
-     VALUES (?, ?, ?, 'Admin', ?, datetime('now', 'localtime'))`,
+     VALUES (?, ?, ?, 'Admin', ?, NOW())`,
     ['Administrator Sistem IKAPI Jabar', 'admin@ikapi-jabar.or.id', hashedPassword, '081234567890']
   );
   console.log('Akun Admin dibuat: admin@ikapi-jabar.or.id');
@@ -593,8 +595,10 @@ async function ensureAdminAccount() {
 
 // Run directly if called as a script
 if (process.argv[1] && process.argv[1].endsWith('seed.js')) {
-  runSeed().catch((err) => {
-    console.error('Seeding error:', err);
-    process.exit(1);
-  });
+  runSeed()
+    .catch((err) => {
+      console.error('Seeding error:', err);
+      process.exitCode = 1;
+    })
+    .finally(() => closeDb());
 }

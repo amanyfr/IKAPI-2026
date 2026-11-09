@@ -6,7 +6,7 @@ import {
   buildTrend, TrendChart, TrendLegend, RangeToggle
 } from '../components/DashboardWidgets';
 import {
-  ArrowUpRight, Users, UserPlus, UserCheck, RefreshCw, Lightbulb, Wallet,
+  ArrowUpRight, ArrowRight, Users, UserPlus, UserCheck, RefreshCw, Lightbulb, Wallet,
   FileSignature, Search, Sparkles, CheckCircle2, CircleDashed, KeyRound,
   ShieldCheck, CreditCard, Truck, Activity
 } from 'lucide-react';
@@ -48,6 +48,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   const [range, setRange] = useState('12m');
   const [search, setSearch] = useState('');
   const [taskFilter, setTaskFilter] = useState('Semua');
+  const [showAllTasks, setShowAllTasks] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -55,7 +56,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
       const [u, s, st] = await Promise.all([
         fetch('/api/admin/users', { headers: authHeaders() }).then((r) => r.json()),
         fetch('/api/submissions', { headers: authHeaders() }).then((r) => r.json()),
-        fetch('/api/settings').then((r) => r.json()),
+        fetch('/api/settings', { headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` } }).then((r) => r.json()),
       ]);
       setUsers(u.users || []);
       setSubmissions(s.submissions || []);
@@ -85,10 +86,12 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   ), [users, submissions, range]);
 
   // Tugas Admin: screening dokumen (Tahap 1), verifikasi bayar (Tahap 2), konfirmasi berkas fisik
+  // (setelah pemohon menandai sudah dikirim), dan mengirim paket ke IKAPI Pusat
   const TASKS = [
     { key: 'screening', label: 'Screening dokumen', dot: 'bg-[#0da2e7]', icon: ShieldCheck, test: (x) => x.status === 'Menunggu Verifikasi' },
     { key: 'bayar', label: 'Verifikasi bayar', dot: 'bg-amber-400', icon: CreditCard, test: (x) => x.status === 'Menunggu Pembayaran' && x.payment_status === 'Menunggu' && Boolean(x.payment_proof) },
-    { key: 'fisik', label: 'Approval anggota', dot: 'bg-orange-500', icon: Truck, test: (x) => x.status === 'Pengiriman Berkas' },
+    { key: 'fisik', label: 'Konfirmasi berkas', dot: 'bg-orange-500', icon: Truck, test: (x) => x.status === 'Pengiriman Berkas' && x.physical_status === 'Dikirim' },
+    { key: 'pusat', label: 'Kirim ke Pusat', dot: 'bg-violet-500', icon: Truck, test: (x) => x.status === 'Berkas Diterima' },
   ];
   const taskOf = (x) => TASKS.find((t) => t.test(x));
   const tasks = useMemo(
@@ -97,6 +100,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
       .sort((a, b) => (parseDate(a.updated_at) || 0) - (parseDate(b.updated_at) || 0)),
     [submissions, taskFilter]
   );
+  const displayTasks = showAllTasks ? tasks : tasks.slice(0, 6);
   const taskCount = (key) => submissions.filter((x) => taskOf(x)?.key === key).length;
 
   const { first: firstName } = greetingName(user?.name);
@@ -108,12 +112,12 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
 
   const openTask = (x) => {
     const t = taskOf(x)?.key;
-    if (t === 'fisik') onOpenMonitoring?.();
+    if (t === 'fisik' || t === 'pusat') onOpenMonitoring?.();
     else onOpenScreening?.(x.status);
   };
 
   return (
-    <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
+    <div className="flex flex-col gap-4 w-full">
 
       {/* ══ Sapaan + angka utama (satu baris) ══ */}
       <section className="flex-shrink-0 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -125,7 +129,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
         </div>
         <div className="grid grid-cols-3 gap-3 sm:flex sm:gap-8">
           {TASKS.map(({ key, label, icon: Icon }, i) => (
-            <button key={key} onClick={() => setTaskFilter(key)} className="flex items-center gap-2.5 text-left">
+            <button key={key} onClick={() => { setTaskFilter(key); setShowAllTasks(false); }} className="flex items-center gap-2.5 text-left">
               <span className={`w-8 h-8 flex-shrink-0 rounded-full flex items-center justify-center ring-4 ring-white/70 ${['bg-sky-100 text-[#0884c4]', 'bg-amber-100 text-amber-700', 'bg-orange-100 text-orange-700'][i]}`}>
                 <Icon className="w-4 h-4" />
               </span>
@@ -139,13 +143,13 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
       </section>
 
       {/* ══ Widget utama: tugas Admin + kesiapan sistem ══ */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-[6] lg:min-h-0">
-        <div className="card-surface p-4 sm:p-5 lg:col-span-9 flex flex-col min-h-0">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-3">
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="card-surface p-4 sm:p-5 lg:col-span-9 flex flex-col">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-3.5">
             <h2 className="text-lg text-slate-800 whitespace-nowrap">Tugas Admin</h2>
             <div className="flex flex-wrap items-center gap-1.5">
               {[...TASKS, { key: 'Semua', label: 'Semua', dot: 'bg-slate-400' }].map((f) => (
-                <button key={f.key} onClick={() => setTaskFilter(f.key)}
+                <button key={f.key} onClick={() => { setTaskFilter(f.key); setShowAllTasks(false); }}
                   className={`flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-full text-xs border transition ${
                     taskFilter === f.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-700 border-slate-200/70 hover:bg-white'}`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />
@@ -163,41 +167,85 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
           </div>
 
           {tasks.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-slate-500 py-8">
+            <div className="flex-1 flex items-center justify-center text-sm text-slate-500 py-10">
               {loading ? 'Memuat tugas...' : 'Tidak ada tugas di antrian ini.'}
             </div>
           ) : (
-            <div className="flex-1 min-h-0 flex gap-3 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 snap-x">
-              {tasks.map((x) => {
-                const t = taskOf(x);
-                return (
-                  <button key={x.id} onClick={() => openTask(x)}
-                    className="snap-start flex-shrink-0 w-60 text-left rounded-2xl bg-slate-50 hover:bg-white border border-slate-200/70 p-4 [@media(max-height:780px)]:p-3 flex flex-col transition">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-[11px] font-medium px-3 py-1 rounded-full bg-slate-900 text-white flex items-center gap-1.5">
-                        <span className={`w-1.5 h-1.5 rounded-full ${t.dot}`} /> {t.label}
-                      </span>
-                      <span className="text-[11px] text-slate-500">{timeAgo(x.updated_at)}</span>
-                    </div>
-                    <p className="text-sm text-slate-800 font-medium mt-3 [@media(max-height:780px)]:mt-2 truncate">{x.publisher_name || '-'}</p>
-                    <p className="text-xs text-slate-500 mt-0.5 truncate [@media(max-height:780px)]:hidden">{x.submission_type} · {x.member_category} · {STATUS_LABEL[x.status]}</p>
-                    {t.key === 'fisik' && (
-                      <p className="text-[11px] text-orange-700 mt-1 truncate">
-                        {x.physical_status === 'Dikirim' ? `Dikirim · ${x.physical_courier || '-'}` : 'Belum dikirim pemohon'}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2.5 mt-auto pt-3 [@media(max-height:780px)]:pt-2 border-t border-slate-900/5">
-                      <span className="w-8 h-8 flex-shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-blue-800 text-white text-xs font-semibold flex items-center justify-center">
-                        {initials(x.applicant_name)}
-                      </span>
-                      <span className="min-w-0 leading-tight">
-                        <span className="block text-sm text-slate-800 truncate">{x.applicant_name}</span>
-                        <span className="block text-[11px] text-slate-500 truncate">{x.applicant_email}</span>
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {displayTasks.map((x) => {
+                  const t = taskOf(x);
+                  return (
+                    <button
+                      key={x.id}
+                      onClick={() => openTask(x)}
+                      className="text-left rounded-2xl bg-slate-50 hover:bg-white hover:border-[#0da2e7] hover:shadow-md border border-slate-200/80 p-4 flex flex-col justify-between transition-all group min-h-[142px]"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-slate-900 text-white flex items-center gap-1.5 shadow-sm">
+                            <span className={`w-1.5 h-1.5 rounded-full ${t.dot}`} />
+                            {t.label}
+                          </span>
+                          <span className="text-[11px] text-slate-500 font-medium">{timeAgo(x.updated_at)}</span>
+                        </div>
+
+                        <p className="text-sm text-slate-900 font-bold mt-2.5 truncate group-hover:text-[#0884c4] transition-colors">
+                          {x.publisher_name || 'Tanpa Nama Penerbit'}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5 truncate">
+                          {x.submission_type} · {x.member_category} · {STATUS_LABEL[x.status] || x.status}
+                        </p>
+                        {t.key === 'fisik' && (
+                          <p className="text-[11px] text-orange-700 mt-1 truncate font-medium">
+                            Dikirim pemohon · {x.physical_courier || '-'}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-200/60">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-7 h-7 flex-shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-blue-800 text-white text-[11px] font-semibold flex items-center justify-center shadow-xs">
+                            {initials(x.applicant_name)}
+                          </span>
+                          <div className="min-w-0 leading-tight">
+                            <span className="block text-xs font-medium text-slate-800 truncate">{x.applicant_name}</span>
+                            <span className="block text-[10px] text-slate-500 truncate">{x.applicant_email}</span>
+                          </div>
+                        </div>
+                        <span className="text-xs font-semibold text-[#0884c4] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 flex-shrink-0">
+                          Periksa <ArrowRight className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {tasks.length > 6 && (
+                <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                  <span>
+                    Menampilkan {displayTasks.length} dari {tasks.length} tugas yang perlu ditindaklanjuti
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowAllTasks(!showAllTasks)}
+                      className="font-medium text-slate-700 hover:text-slate-900 underline cursor-pointer"
+                    >
+                      {showAllTasks ? 'Tampilkan ringkas (6)' : `Tampilkan semua (${tasks.length})`}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenScreening?.()}
+                      className="font-semibold text-[#0884c4] hover:text-[#066190] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Buka di menu Screening</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -236,8 +284,8 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
       </section>
 
       {/* ══ Baris bawah: grafik, akun per peran, aksi cepat ══ */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-[4] lg:min-h-0">
-        <div className="card-surface p-4 sm:p-5 lg:col-span-6 flex flex-col min-h-0 overflow-hidden">
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="card-surface p-4 sm:p-5 lg:col-span-6 flex flex-col overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
             <div>
               <h2 className="text-base text-slate-800">Akun baru & pengajuan masuk</h2>
@@ -245,7 +293,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
             </div>
             <RangeToggle value={range} onChange={setRange} />
           </div>
-          <div className="flex-1 min-h-0 h-44 lg:h-auto">
+          <div className="flex-1 min-h-0 h-48 sm:h-52">
             <TrendChart data={trend} series={TREND_SERIES} fill ariaLabel="Grafik akun baru dan pengajuan masuk" />
           </div>
         </div>

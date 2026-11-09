@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { PenLine, PenTool, CheckCircle, Check, X } from 'lucide-react';
+import { PenLine, PenTool, CheckCircle, Check, X, Paperclip, ExternalLink, Lock } from 'lucide-react';
 import SignaturePad from './SignaturePad';
 import OfficialLetterGenerator from './OfficialLetterGenerator';
 import OfficialApplicationFormPdf from './OfficialApplicationFormPdf';
 import { BeritaAcaraVerifikasi, SuratKeputusan } from './PengurusDocuments';
 import { DEFAULT_SIGNATURE_POS, SIGNABLE_DOCS } from './PengurusSignature';
 import { notify } from './AppDialog';
+import { fileUrl } from '../utils/fileUrl';
+
+// Tab tambahan di modal TTD: berkas unggahan pemohon (bukan dokumen yang ditandatangani)
+const FILES_TAB = 'berkas_pemohon';
 
 const DOC_COMPONENTS = {
   surat: OfficialLetterGenerator,
@@ -61,7 +65,7 @@ export function useMySignature(enabled = true) {
 
 function SignatureEditorModal({ title, signature, saving, onSave, onClose }) {
   return (
-    <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] overflow-y-auto modal-overlay flex items-center justify-center p-4">
       <div className="modal-surface max-w-lg w-full p-5 sm:p-6 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -166,10 +170,22 @@ export function SignLetterModal({
     setVisited((v) => new Set(v).add(key));
   };
 
+  // Berkas unggahan pemohon + bukti transfer wajib dibuka sebelum menandatangani
+  const [openedFiles, setOpenedFiles] = useState(() => new Set());
+  const files = detail ? [
+    ...(detail.documents || []).filter((d) => d.file_path).map((d) => ({ key: `doc-${d.id}`, title: d.document_title, name: d.file_name, path: d.file_path })),
+    ...(detail.payment?.proof_file ? [{ key: 'payment', title: 'Bukti transfer pembayaran', name: detail.payment.proof_filename, path: detail.payment.proof_file }] : []),
+  ] : [];
+  const docsSeen = SIGNABLE_DOCS.filter((d) => visited.has(d.key)).length;
+  const filesSeen = files.filter((f) => openedFiles.has(f.key)).length;
+  const totalToReview = SIGNABLE_DOCS.length + files.length;
+  const allReviewed = Boolean(detail) && docsSeen + filesSeen === totalToReview;
+  const isFilesTab = activeDoc === FILES_TAB;
+
   const ActiveDocument = DOC_COMPONENTS[activeDoc];
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-stretch sm:items-center justify-center sm:p-4">
+    <div className="fixed inset-0 z-50 modal-overlay flex items-stretch sm:items-center justify-center sm:p-4">
       <div className="modal-surface w-full max-w-4xl sm:max-h-[94vh] flex flex-col overflow-hidden !rounded-none sm:!rounded-3xl">
         <div className="bg-[#0da2e7] text-white px-4 sm:px-6 py-3.5 flex items-center gap-3">
           <div className="p-2 bg-white/20 rounded-xl">
@@ -210,24 +226,66 @@ export function SignLetterModal({
                     {d.label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setActiveDoc(FILES_TAB)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition ${
+                    isFilesTab ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {files.length > 0 && filesSeen === files.length && !isFilesTab ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Paperclip className="w-3.5 h-3.5" />}
+                  Berkas pemohon ({filesSeen}/{files.length})
+                </button>
               </div>
               <p className="text-[11px] text-slate-500 mt-1.5">
-                Tanda tangan dibubuhkan pada {SIGNABLE_DOCS.length} dokumen sekaligus. Buka tiap tab untuk mengatur posisinya.
+                Tanda tangan dibubuhkan pada {SIGNABLE_DOCS.length} dokumen sekaligus. Buka tiap tab dan setiap berkas pemohon sebelum menandatangani.
               </p>
             </div>
 
             <div className="flex-1 overflow-y-auto bg-slate-100 p-2 sm:p-5">
-              <ActiveDocument
-                key={activeDoc}
-                submission={fullSubmission}
-                settings={docSettings}
-                documents={detail?.documents || []}
-                payment={detail?.payment || null}
-                signing={{ role, img: signature, pos, onChange: setPos }}
-              />
+              {isFilesTab ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2 max-w-2xl mx-auto">
+                  <p className="text-xs text-slate-600">Buka setiap berkas persyaratan dan bukti transfer yang sudah diverifikasi Admin.</p>
+                  {!detail ? (
+                    <p className="text-xs text-slate-400">Memuat berkas...</p>
+                  ) : files.length === 0 ? (
+                    <p className="text-xs text-slate-400">Tidak ada berkas unggahan.</p>
+                  ) : files.map((f, i) => (
+                    <div key={f.key} className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-200">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-slate-800">{i + 1}. {f.title}</p>
+                        <p className="text-[11px] text-slate-500 font-mono truncate">{f.name || '-'}</p>
+                      </div>
+                      <a
+                        href={fileUrl(f.path)}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => setOpenedFiles((s) => new Set(s).add(f.key))}
+                        className={`flex-shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border flex items-center gap-1 transition ${
+                          openedFiles.has(f.key) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-[#f0f9ff] text-[#0884c4] border-[#b8e6fc] hover:bg-[#dff2fd]'
+                        }`}
+                      >
+                        {openedFiles.has(f.key) ? <><Check className="w-3.5 h-3.5" /> Sudah dibuka</> : <><ExternalLink className="w-3.5 h-3.5" /> Buka berkas</>}
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <ActiveDocument
+                  key={activeDoc}
+                  submission={fullSubmission}
+                  settings={docSettings}
+                  documents={detail?.documents || []}
+                  payment={detail?.payment || null}
+                  signing={{ role, img: signature, pos, onChange: setPos }}
+                />
+              )}
             </div>
 
             <div className="border-t border-slate-200 bg-white px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+              {isFilesTab ? (
+                <p className="flex-1 text-xs text-slate-500">Posisi TTD diatur di tab dokumen surat.</p>
+              ) : (
               <label className="flex items-center gap-3 text-xs text-slate-600 flex-1">
                 <span className="whitespace-nowrap">Ukuran TTD</span>
                 <input
@@ -246,6 +304,12 @@ export function SignLetterModal({
                   Reset posisi
                 </button>
               </label>
+              )}
+              {!allReviewed && (
+                <p className="text-[11px] text-amber-700 flex items-center gap-1">
+                  <Lock className="w-3.5 h-3.5" /> Buka semua dokumen dulu ({docsSeen + filesSeen}/{detail ? totalToReview : '…'})
+                </p>
+              )}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -257,7 +321,8 @@ export function SignLetterModal({
                 <button
                   type="button"
                   onClick={() => onConfirm(positions)}
-                  disabled={processing || !detail}
+                  disabled={processing || !allReviewed}
+                  title={allReviewed ? undefined : 'Buka semua dokumen surat dan berkas pemohon terlebih dahulu'}
                   className="flex-1 sm:flex-none px-5 py-2.5 bg-[#0da2e7] hover:bg-[#0884c4] text-white text-xs font-bold rounded-xl shadow transition flex items-center justify-center gap-1.5 disabled:opacity-60"
                 >
                   <CheckCircle className="w-4 h-4" />

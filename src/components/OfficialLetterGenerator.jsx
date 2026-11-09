@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { POST_APPROVAL_STATUSES } from './StatusStepper';
 import { Printer, Download, CheckCircle, FileText } from 'lucide-react';
 import { PengurusSignatureBlock, KopSurat } from './PengurusSignature';
 import { downloadElementPdf, printElement, safeFileName } from '../utils/exportDocument';
@@ -32,7 +33,7 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
 
   const isSigned =
     Boolean(submission.signed_by_chairman) ||
-    ['Pengiriman Berkas', 'Aktif'].includes(submission.status);
+    POST_APPROVAL_STATUSES.includes(submission.status);
 
   const fileName = `Surat_Pengantar_IKAPI_Jabar_${safeFileName(submission.publisher_name, 'Pemohon')}.pdf`;
   const handlePrint = () => printElement(paperRef.current, fileName.replace('.pdf', ''));

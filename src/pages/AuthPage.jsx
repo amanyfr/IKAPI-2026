@@ -1,10 +1,36 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Mail, User, Phone, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
+import { Lock, Mail, User, Phone, AlertCircle, CheckCircle2, Eye, EyeOff, ArrowLeft, MessageCircle } from 'lucide-react';
+import { waLink } from '../utils/whatsapp';
+
+// Tautan dari email: /?verify=<token> (verifikasi email) atau /?reset=<token> (atur ulang sandi)
+const urlParams = new URLSearchParams(window.location.search);
+const initialResetToken = urlParams.get('reset') || '';
+const initialVerifyToken = urlParams.get('verify') || '';
+
+function clearUrlToken() {
+  window.history.replaceState(null, '', window.location.pathname);
+}
+
+async function postJson(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Terjadi kesalahan. Silakan coba lagi.');
+  return data;
+}
 
 export default function AuthPage() {
   const { login, register } = useAuth();
-  const [activeTab, setActiveTab] = useState('login');
+  // login | register | forgot | reset
+  const [activeTab, setActiveTab] = useState(initialResetToken ? 'reset' : 'login');
+  const [resetToken] = useState(initialResetToken);
+  const [resetPassword, setResetPassword] = useState('');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [unverifiedEmail, setUnverifiedEmail] = useState('');
 
   /* ── Login state ── */
   const [loginEmail,    setLoginEmail]    = useState('');
@@ -22,17 +48,64 @@ export default function AuthPage() {
   const [error,   setError]   = useState('');
   const [success, setSuccess] = useState('');
 
-  const switchTab = (tab) => { setActiveTab(tab); setError(''); setSuccess(''); };
+  const switchTab = (tab) => { setActiveTab(tab); setError(''); setSuccess(''); setUnverifiedEmail(''); };
+
+  /* ── Nomor WhatsApp Admin dari Pengaturan Sistem (bisa diganti Admin) ── */
+  const [adminWa, setAdminWa] = useState('');
+  useEffect(() => {
+    fetch('/api/public/contact')
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((d) => setAdminWa(d.admin_whatsapp || ''))
+      .catch(() => {});
+  }, []);
+
+  /* ── Verifikasi email dari tautan ?verify= ── */
+  useEffect(() => {
+    if (!initialVerifyToken) return;
+    clearUrlToken();
+    postJson('/api/auth/verify-email', { token: initialVerifyToken })
+      .then((data) => setSuccess(data.message))
+      .catch((err) => setError(err.message));
+  }, []);
 
   /* ── Login handler ── */
   const handleLogin = async (e) => {
     e.preventDefault();
-    setError(''); setLoading(true);
+    setError(''); setSuccess(''); setUnverifiedEmail(''); setLoading(true);
     try {
       await login(loginEmail, loginPassword);
       // App.jsx otomatis mendeteksi role & mengarahkan ke dashboard yang sesuai
     } catch (err) {
       setError(err.message || 'Email atau kata sandi salah. Silakan periksa kembali.');
+      if (err.code === 'EMAIL_NOT_VERIFIED') setUnverifiedEmail(loginEmail);
+    } finally { setLoading(false); }
+  };
+
+  const handleResendVerification = async () => {
+    setLoading(true);
+    try {
+      const data = await postJson('/api/auth/resend-verification', { email: unverifiedEmail });
+      setError(''); setUnverifiedEmail('');
+      setSuccess(data.message);
+    } catch (err) {
+      setError(err.message);
+    } finally { setLoading(false); }
+  };
+
+  /* ── Atur kata sandi baru dari tautan ?reset= ── */
+  const handleReset = async (e) => {
+    e.preventDefault();
+    setError(''); setSuccess('');
+    if (resetPassword.length < 6) { setError('Kata sandi minimal 6 karakter.'); return; }
+    setLoading(true);
+    try {
+      const data = await postJson('/api/auth/reset-password', { token: resetToken, password: resetPassword });
+      clearUrlToken();
+      setResetPassword('');
+      setActiveTab('login');
+      setSuccess(data.message);
+    } catch (err) {
+      setError(err.message);
     } finally { setLoading(false); }
   };
 
@@ -44,7 +117,7 @@ export default function AuthPage() {
     if (regPassword.length < 6) { setError('Kata sandi minimal 6 karakter.'); return; }
     setLoading(true);
     try {
-      await register({
+      const data = await register({
         name:          regName,
         email:         regEmail,
         password:      regPassword,
@@ -60,7 +133,7 @@ export default function AuthPage() {
       setRegPassword('');
       setRegPhone('');
       setActiveTab('login');
-      setSuccess('Pendaftaran akun berhasil! Silakan masuk menggunakan email dan kata sandi Anda.');
+      setSuccess(data?.message || 'Pendaftaran akun berhasil! Silakan masuk menggunakan email dan kata sandi Anda.');
     } catch (err) {
       setError(err.message || 'Pendaftaran gagal. Silakan coba kembali.');
     } finally { setLoading(false); }
@@ -100,7 +173,15 @@ export default function AuthPage() {
       {error && (
         <div className="flex items-start gap-3 p-3.5 mb-5 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
           <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-500" />
-          <span>{error}</span>
+          <div>
+            <span>{error}</span>
+            {unverifiedEmail && (
+              <button type="button" onClick={handleResendVerification} disabled={loading}
+                className="block mt-1.5 text-xs font-semibold text-[#0884c4] hover:underline disabled:opacity-60">
+                Kirim ulang tautan verifikasi
+              </button>
+            )}
+          </div>
         </div>
       )}
     </>
@@ -167,7 +248,11 @@ export default function AuthPage() {
                   <div>
                     <div className="flex items-center justify-between">
                       <Label>Kata sandi</Label>
-                      <button type="button" className="text-xs text-[#0884c4] hover:underline -mt-1.5">
+                      <button
+                        type="button"
+                        onClick={() => { setForgotEmail(loginEmail); switchTab('forgot'); }}
+                        className="text-xs text-[#0884c4] hover:underline -mt-1.5"
+                      >
                         Lupa sandi?
                       </button>
                     </div>
@@ -302,6 +387,87 @@ export default function AuthPage() {
                 <p className="text-xs text-slate-400 text-center leading-relaxed mt-6">
                   Dengan mendaftar, Anda menyetujui bahwa data yang diisikan adalah benar dan sah untuk keperluan keanggotaan IKAPI Pengurus Daerah Jawa Barat.
                 </p>
+              </div>
+            )}
+
+            {/* ── LUPA SANDI ── */}
+            {activeTab === 'forgot' && (
+              <div>
+                <h1 className="text-3xl font-light tracking-tight">Lupa kata sandi</h1>
+                <p className="text-sm text-slate-500 mt-1.5 mb-7">
+                  Hubungi Admin sekretariat lewat WhatsApp untuk mengatur ulang kata sandi Anda.
+                </p>
+                <Alerts />
+
+                {waLink(adminWa) && (
+                  <a
+                    href={waLink(adminWa, `Halo Admin IKAPI Jawa Barat, saya lupa kata sandi akun${forgotEmail ? ` dengan email ${forgotEmail}` : ''}. Mohon dibantu atur ulang.`)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mb-5 flex items-center gap-3 p-3.5 rounded-2xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition"
+                  >
+                    <span className="w-9 h-9 rounded-full bg-[#25d366] text-white flex items-center justify-center flex-shrink-0">
+                      <MessageCircle className="w-5 h-5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-emerald-900">Hubungi Admin via WhatsApp</span>
+                      <span className="block text-xs text-emerald-700">{adminWa} · lebih cepat dibantu</span>
+                    </span>
+                  </a>
+                )}
+
+                {!waLink(adminWa) && (
+                  <p className="mb-5 p-3.5 rounded-2xl border border-slate-200 bg-slate-50 text-sm text-slate-600">
+                    Silakan hubungi Admin sekretariat IKAPI Jawa Barat untuk mengatur ulang kata sandi.
+                  </p>
+                )}
+
+                <button onClick={() => switchTab('login')} className="mt-7 mx-auto flex items-center gap-1.5 text-sm text-[#0884c4] font-semibold hover:underline">
+                  <ArrowLeft className="w-4 h-4" /> Kembali ke halaman masuk
+                </button>
+              </div>
+            )}
+
+            {/* ── ATUR ULANG SANDI (dari tautan email) ── */}
+            {activeTab === 'reset' && (
+              <div>
+                <h1 className="text-3xl font-light tracking-tight">Kata sandi baru</h1>
+                <p className="text-sm text-slate-500 mt-1.5 mb-7">
+                  Buat kata sandi baru untuk akun Anda.
+                </p>
+                <Alerts />
+
+                <form onSubmit={handleReset} className="space-y-4">
+                  <div>
+                    <Label>Kata sandi baru</Label>
+                    <div className="relative">
+                      <Lock className={iconBase} />
+                      <input
+                        type={showLoginPw ? 'text' : 'password'} required autoFocus
+                        minLength={6}
+                        value={resetPassword}
+                        onChange={(e) => setResetPassword(e.target.value)}
+                        placeholder="Minimal 6 karakter"
+                        className={inputWithEye}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginPw(!showLoginPw)}
+                        aria-label={showLoginPw ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'}
+                        className={eyeBtn}
+                      >
+                        {showLoginPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <button type="submit" disabled={loading} className={submitBtn}>
+                    {loading ? 'Menyimpan...' : 'Simpan kata sandi baru'}
+                  </button>
+                </form>
+
+                <button onClick={() => { clearUrlToken(); switchTab('login'); }} className="mt-7 mx-auto flex items-center gap-1.5 text-sm text-[#0884c4] font-semibold hover:underline">
+                  <ArrowLeft className="w-4 h-4" /> Kembali ke halaman masuk
+                </button>
               </div>
             )}
           </div>

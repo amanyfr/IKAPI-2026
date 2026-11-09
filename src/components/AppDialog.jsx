@@ -60,7 +60,7 @@ export function AppDialogHost() {
   const Icon = tone.icon;
 
   return (
-    <div className="fixed inset-0 z-[200] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={close}>
+    <div className="fixed inset-0 z-[200] modal-overlay flex items-center justify-center p-4" onClick={close}>
       <div
         role="alertdialog"
         aria-modal="true"

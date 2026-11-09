@@ -26,7 +26,7 @@ Aplikasi web sistem pendaftaran dan pendataan anggota IKAPI Jawa Barat dengan ha
 
 ### 1. Portal Anggota (Pemohon)
 - **Status & Pengajuan Saya:**
-  - Stepper visual 9 tahapan alur transparan (*Draf*, *Menunggu Pembayaran*, *Menunggu Verifikasi*, *Perlu Revisi*, *Menunggu Approval*, *Disetujui*, *Dikirim ke Pusat*, *Aktif*, *Ditolak*).
+  - Stepper visual 8 tahap alur transparan: Isi Formulir → Screening Dokumen (Tahap 1, Admin) → Pembayaran (Tahap 2) → TTD Sekretaris → TTD Ketua → Berkas Fisik (pemohon cetak sendiri & kirim ke IKAPI Jabar) → Proses di Pusat (berkas diterima, dikirim Admin ke IKAPI Pusat) → Anggota Aktif (No. KTA dari Pusat diinput Sekretaris).
   - Rincian tagihan resmi & informasi rekening tujuan (**Bank BNI 2089992087 a.n. Abdul Rasyid**).
   - Form unggah bukti transfer pembayaran.
   - Berkas persyaratan dinamis (Akta notaris, NIB/NPWP, Formulir pendaftaran, Sertifikat BNSP Editor, dll.).
@@ -48,8 +48,8 @@ Aplikasi web sistem pendaftaran dan pendataan anggota IKAPI Jawa Barat dengan ha
 - **Kelola Data Anggota (Input No. KTA):**
   - Direktori seluruh anggota penerbit terdaftar.
   - Tombol **Ekspor Data ke Format Excel (.xlsx)**.
-  - Tombol **Input KTA**: Memasukkan Nomor KTA resmi dari IKAPI Pusat untuk pengajuan berstatus *Dikirim ke Pusat* hingga status resmi menjadi **Aktif**.
-- **Bantu Formulir Pemohon:** Pengisian formulir langsung di tempat untuk penerbit yang mendaftar langsung di sekretariat.
+  - Tab **Menunggu KTA** dan tombol **Input KTA**: Nomor KTA dari IKAPI Pusat diinput untuk pengajuan berstatus *Dikirim ke Pusat*; pengajuan otomatis menjadi **Aktif** dan pemohon menerima email.
+- **TTD Sekretaris:** tombol tanda tangan baru aktif setelah keempat dokumen surat serta semua berkas pemohon dan bukti transfer dibuka.
 
 ---
 
@@ -61,9 +61,11 @@ Aplikasi web sistem pendaftaran dan pendataan anggota IKAPI Jawa Barat dengan ha
   - Review pengajuan yang telah lolos verifikasi berkas & pembayaran dari Sekretaris (*Menunggu Approval*).
   - Pembubuhan tanda tangan digital resmi (Ketua: *Dr. H. Mahpudi, M.T.* & Sekretaris: *Drs. H. Anwar Rosyid, M.Si.*) serta stempel resmi PD IKAPI Jawa Barat.
   - Keputusan: **Setujui** (menerbitkan surat pengantar resmi & paket 3 dokumen) atau **Tolak** (disertai alasan penolakan tertulis wajib).
-- **Ekspedisi Dokumen ke IKAPI Pusat:**
-  - Menandai dokumen yang telah disetujui untuk dikirim ke Pengurus Pusat di Jakarta.
-  - Generator Paket Lengkap 3 Dokumen (1. Surat Pengantar Rekomendasi Resmi, 2. Formulir PDF Isian Anggota 2026, 3. Berkas Persyaratan Terverifikasi).
+- **Monitoring ke IKAPI Pusat (Portal Admin → Monitoring & Berkas Fisik):**
+  - Admin mengonfirmasi berkas fisik diterima (hanya setelah pemohon menandai berkas sudah dikirim).
+  - Admin mencatat pengiriman paket ke IKAPI Pusat (jasa kirim, No. resi, catatan); daftar "Menunggu KTA dari Pusat" menampilkan lama menunggu (merah bila lebih dari 30 hari).
+  - Generator Paket Lengkap 3 Dokumen (1. Surat Pengantar Rekomendasi Resmi, 2. Formulir PDF Isian Anggota 2026, 3. Berkas Persyaratan Terverifikasi) dan PDF gabungan berkas.
+- **TTD Ketua:** tombol tanda tangan baru aktif setelah keempat dokumen surat serta semua berkas pemohon dan bukti transfer dibuka.
 - **Pengaturan Sistem, Biaya & Rekening:**
   - Konfigurasi rekening bank (Bank BNI 2089992087 a.n. Abdul Rasyid).
   - Konfigurasi struktur biaya: Uang pangkal (Rp 250rb), iuran bulanan (Rp 50rb/bln selama 24 bulan = Rp 1,2jt), biaya administrasi & verifikasi (Rp 250rb), total Baru Rp 1.700.000, total Heregistrasi Rp 1.200.000.
@@ -84,6 +86,12 @@ Aplikasi web sistem pendaftaran dan pendataan anggota IKAPI Jawa Barat dengan ha
 ---
 
 ## 🚀 Cara Menjalankan Aplikasi
+
+### Database (MySQL / Laragon)
+Aplikasi memakai **MySQL**. Default koneksi: `root` tanpa password di `localhost:3306`, database `ikapi_jabar` (dibuat otomatis saat server start). Untuk mengubahnya, salin `.env.example` ke `.env` lalu sesuaikan `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`.
+
+- Database kosong akan diisi data demo otomatis saat server pertama kali jalan.
+- Production: wajib isi `JWT_SECRET` di `.env`.
 
 ```bash
 # 1. Jalankan server aplikasi (Port 5000)

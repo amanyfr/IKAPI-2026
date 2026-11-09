@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from '../components/NotificationBell';
 import AnggotaDashboard from '../pages/AnggotaDashboard';
 import RegistrationForm from '../pages/RegistrationForm';
 import OnboardingPage from '../pages/OnboardingPage';
@@ -83,6 +84,7 @@ export default function AnggotaPortal() {
                   <div className="text-[10px] text-slate-500">{roleLabel}</div>
                 </div>
               </div>
+              <NotificationBell tone="light" />
               <button
                 onClick={logout}
                 aria-label="Keluar"

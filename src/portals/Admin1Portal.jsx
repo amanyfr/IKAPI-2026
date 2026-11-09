@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from '../components/NotificationBell';
 import Admin1Dashboard from '../pages/Admin1Dashboard';
 import Admin1Screening from '../pages/Admin1Screening';
 import MembersManagement from '../pages/MembersManagement';
@@ -16,9 +17,16 @@ export default function Admin1Portal() {
     setActiveTab('screening');
   };
 
+  // Data Anggota bisa dibuka langsung ke tab 'Menunggu KTA'
+  const [membersFilter, setMembersFilter] = useState({ key: 0 });
+  const openMembers = (f) => {
+    setMembersFilter({ status: typeof f?.status === 'string' ? f.status : undefined, key: Date.now() });
+    setActiveTab('members');
+  };
+
   const navBtn = (tab, icon, label, shortLabel = label) => (
     <button
-      onClick={() => (tab === 'screening' ? openScreening() : setActiveTab(tab))}
+      onClick={() => (tab === 'screening' ? openScreening() : tab === 'members' ? openMembers() : setActiveTab(tab))}
       className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition ${activeTab === tab
           ? 'bg-[#0da2e7] text-white shadow-sm shadow-[#0da2e7]/30'
           : 'text-white/70 hover:text-white hover:bg-white/10'
@@ -31,8 +39,7 @@ export default function Admin1Portal() {
   );
 
   return (
-    // Dashboard dibuat pas satu layar (laptop/desktop): tidak perlu scroll ke bawah
-    <div className={`relative min-h-screen portal-bg flex flex-col font-sans ${activeTab === 'dashboard' ? 'lg:h-screen lg:overflow-hidden' : ''}`}>
+    <div className="relative min-h-screen portal-bg flex flex-col font-sans">
 
 
       {/* ── Header Portal Sekretaris ── */}
@@ -66,6 +73,7 @@ export default function Admin1Portal() {
                   <div className="text-[10px] text-sky-300 font-semibold">Sekretaris PD IKAPI Jabar</div>
                 </div>
               </div>
+              <NotificationBell tone="dark" />
               <button
                 onClick={logout}
                 aria-label="Keluar"
@@ -88,11 +96,11 @@ export default function Admin1Portal() {
       </header>
 
       {/* Main */}
-      <main className={`relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 ${activeTab === 'dashboard' ? 'py-5 lg:py-4 lg:min-h-0' : 'py-6 sm:py-8'}`}>
+      <main className="relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {activeTab === 'dashboard' && (
           <Admin1Dashboard
             onOpenScreening={openScreening}
-            onOpenMembers={() => setActiveTab('members')}
+            onOpenMembers={() => openMembers({ status: 'Menunggu KTA' })}
           />
         )}
         {activeTab === 'screening' && (
@@ -100,10 +108,10 @@ export default function Admin1Portal() {
             key={screeningFilters.key}
             initialStatus={screeningFilters.status}
             initialSearch={screeningFilters.search}
-            onNavigateToMembers={() => setActiveTab('members')}
+            onNavigateToMembers={openMembers}
           />
         )}
-        {activeTab === 'members' && <MembersManagement />}
+        {activeTab === 'members' && <MembersManagement key={membersFilter.key} initialStatus={membersFilter.status || 'Semua'} />}
       </main>
 
       {/* Footer */}

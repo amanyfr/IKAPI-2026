@@ -6,19 +6,46 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import * as XLSX from 'xlsx';
-import db, { query, initDb } from './db.js';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import db, { query, initDb, nowSql } from './db.js';
 import { runSeed, formatSuratNumber, toRoman } from './seed.js';
+import { sendMail, MAIL_ENABLED, APP_URL } from './mailer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ikapi_jabar_super_secret_key_2026';
+// JWT secret: pakai env JWT_SECRET. Jika kosong, buat secret acak sekali lalu simpan di
+// server/data/.jwt_secret (tidak di-commit) agar token tetap valid setelah server restart.
+function loadJwtSecret() {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === 'production') {
+    console.error('JWT_SECRET wajib diisi di environment production.');
+    process.exit(1);
+  }
+  const secretFile = path.join(__dirname, 'data', '.jwt_secret');
+  try {
+    const existing = fs.readFileSync(secretFile, 'utf8').trim();
+    if (existing) return existing;
+  } catch { /* belum ada, buat baru */ }
+  const generated = crypto.randomBytes(48).toString('hex');
+  fs.mkdirSync(path.dirname(secretFile), { recursive: true });
+  fs.writeFileSync(secretFile, generated, { mode: 0o600 });
+  console.warn('JWT_SECRET tidak diset; secret acak dibuat di server/data/.jwt_secret');
+  return generated;
+}
+
+const JWT_SECRET = loadJwtSecret();
 const PORT = process.env.PORT || 5000;
+// Login cepat tanpa password hanya untuk demo lokal. Aktifkan dengan ENABLE_DEMO_SWITCH=true.
+const DEMO_SWITCH_ENABLED = process.env.ENABLE_DEMO_SWITCH === 'true' && process.env.NODE_ENV !== 'production';
 
 const app = express();
 
-app.use(cors());
+// Frontend disajikan dari origin yang sama (Vite proxy / dist), jadi CORS lintas origin
+// dimatikan kecuali CORS_ORIGIN diset (daftar dipisah koma).
+app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()) : false }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -27,7 +54,11 @@ const uploadsDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-app.use('/uploads', express.static(uploadsDir));
+// Catatan: /uploads TIDAK lagi disajikan publik. Lihat route GET /uploads/:filename di bawah
+// (butuh login + hak akses ke pengajuan pemilik file).
+
+const ALLOWED_UPLOAD_EXT = ['.pdf', '.png', '.jpg', '.jpeg', '.webp'];
+const ALLOWED_UPLOAD_MIME = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
 
 // Multer storage
 const storage = multer.diskStorage({
@@ -42,24 +73,142 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 15 * 1024 * 1024 } // 15MB
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ALLOWED_UPLOAD_EXT.includes(ext) && ALLOWED_UPLOAD_MIME.includes(file.mimetype)) {
+      return cb(null, true);
+    }
+    const err = new Error('Format file tidak didukung. Gunakan PDF, PNG, JPG, atau WEBP.');
+    err.code = 'INVALID_FILE_TYPE';
+    cb(err);
+  }
 });
 
 // Auth Middleware
-function authenticate(req, res, next) {
+function readToken(req) {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (authHeader && authHeader.startsWith('Bearer ')) return authHeader.split(' ')[1];
+  return null;
+}
+
+// Cookie sesi httpOnly, hanya dipakai untuk membuka file lewat <a>/<img>/<iframe>
+// (yang tidak bisa mengirim header). API tetap memakai header Authorization.
+const SESSION_COOKIE = 'ikapi_session';
+const SESSION_MAX_AGE = 7 * 24 * 60 * 60; // detik, sama dengan masa berlaku JWT
+
+function readCookie(req, name) {
+  const raw = req.headers.cookie;
+  if (!raw) return null;
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) {
+      try { return decodeURIComponent(part.slice(i + 1).trim()); } catch { return null; }
+    }
+  }
+  return null;
+}
+
+function setSessionCookie(res, token) {
+  if (!token) return;
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.append('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${SESSION_MAX_AGE}; HttpOnly; SameSite=Strict${secure}`);
+}
+
+function clearSessionCookie(res) {
+  res.append('Set-Cookie', `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict`);
+}
+
+// JWT membawa token_version (tv). Reset kata sandi, perubahan peran/email/kata sandi oleh Admin,
+// atau hapus akun menaikkan token_version sehingga semua token lama langsung tidak berlaku.
+function signToken(user, memberId = null) {
+  return jwt.sign(
+    { id: user.id, email: user.email, role: user.role, name: user.name, memberId, tv: user.token_version || 0 },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+}
+
+// Verifikasi JWT lalu cocokkan dengan database. Mengembalikan payload dengan peran terbaru, atau null.
+async function verifySession(token) {
+  if (!token) return null;
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+  const row = await query.get('SELECT id, email, name, role, token_version FROM users WHERE id = ?', [decoded.id]);
+  if (!row || (row.token_version || 0) !== (decoded.tv || 0)) return null;
+  return { ...decoded, email: row.email, name: row.name, role: row.role };
+}
+
+async function authenticate(req, res, next) {
+  const token = readToken(req);
+  if (!token) {
     return res.status(401).json({ error: 'Token autentikasi tidak ditemukan.' });
   }
-  const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
+    const user = await verifySession(token);
+    if (!user) return res.status(401).json({ error: 'Sesi login telah kedaluwarsa atau tidak valid.' });
+    req.user = user;
     next();
   } catch (err) {
-    return res.status(401).json({ error: 'Sesi login telah kedaluwarsa atau tidak valid.' });
+    console.error('Authenticate error:', err);
+    return res.status(500).json({ error: 'Gagal memeriksa sesi login.' });
   }
 }
+
+async function revokeSessions(userId) {
+  await query.run('UPDATE users SET token_version = token_version + 1 WHERE id = ?', [userId]);
+}
+
+// Pembatas percobaan sederhana di memori (per IP + rute). Cukup untuk satu proses server.
+// failuresOnly: hanya respons gagal (status >= 400) yang dihitung, supaya banyak pengguna
+// yang berbagi satu IP kantor tetap bisa masuk dengan normal.
+function rateLimit({ windowMs, max, message, failuresOnly = false }) {
+  const hits = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of hits) if (v.reset <= now) hits.delete(k);
+  }, windowMs).unref();
+  return (req, res, next) => {
+    const key = `${req.ip}|${req.path}`;
+    const now = Date.now();
+    let entry = hits.get(key);
+    if (!entry || entry.reset <= now) {
+      entry = { count: 0, reset: now + windowMs };
+      hits.set(key, entry);
+    }
+    if (entry.count >= max) {
+      res.set('Retry-After', String(Math.ceil((entry.reset - now) / 1000)));
+      return res.status(429).json({ error: message });
+    }
+    if (failuresOnly) {
+      res.on('finish', () => { if (res.statusCode >= 400) entry.count += 1; });
+    } else {
+      entry.count += 1;
+    }
+    next();
+  };
+}
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  failuresOnly: true,
+  message: 'Terlalu banyak percobaan gagal. Coba lagi dalam 15 menit.'
+});
+const registerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Terlalu banyak pendaftaran dari jaringan ini. Coba lagi dalam 15 menit.'
+});
+const authMailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'Terlalu banyak permintaan. Coba lagi dalam 15 menit.'
+});
 
 const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota'];
 
@@ -94,7 +243,7 @@ function authorize(...roles) {
 // ==========================================
 
 // Register
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', registerLimiter, async (req, res) => {
   try {
     const { name, email, password, phone, publisherName, category, legalEntity } = req.body;
     if (!name || !email || !password) {
@@ -109,11 +258,16 @@ app.post('/api/auth/register', async (req, res) => {
     const salt = await bcryptjs.genSalt(10);
     const hashedPassword = await bcryptjs.hash(password, salt);
 
-    // Default email_verified_at set for immediate demo accessibility, but verification simulated
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
+    }
+
+    // Verifikasi email wajib bila SMTP aktif. Tanpa SMTP (pengembangan lokal) akun langsung terverifikasi.
+    const verify = MAIL_ENABLED ? newToken() : null;
     const result = await query.run(
-      `INSERT INTO users (name, email, password, role, phone, email_verified_at)
-       VALUES (?, ?, ?, 'Anggota', ?, datetime('now', 'localtime'))`,
-      [name, email, hashedPassword, phone || null]
+      `INSERT INTO users (name, email, password, role, phone, email_verified_at, email_verify_token)
+       VALUES (?, ?, ?, 'Anggota', ?, ${verify ? 'NULL' : 'NOW()'}, ?)`,
+      [name, email, hashedPassword, phone || null, verify?.hash || null]
     );
 
     const userId = result.lastID;
@@ -143,14 +297,20 @@ app.post('/api/auth/register', async (req, res) => {
       memberId = mRes.lastID;
     }
 
-    const token = jwt.sign(
-      { id: userId, email, role: 'Anggota', name, memberId },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    if (verify) {
+      await sendVerificationEmail({ name, email }, verify.token);
+      return res.json({
+        message: `Pendaftaran berhasil. Kami mengirim tautan verifikasi ke ${email}. Buka email tersebut sebelum masuk.`,
+        verificationRequired: true
+      });
+    }
+
+    const token = signToken({ id: userId, email, role: 'Anggota', name, token_version: 0 }, memberId);
+    setSessionCookie(res, token);
 
     res.json({
-      message: 'Pendaftaran akun berhasil. Email Anda telah terverifikasi.',
+      message: 'Pendaftaran akun berhasil. Silakan masuk menggunakan email dan kata sandi Anda.',
+      verificationRequired: false,
       token,
       user: { id: userId, email, role: 'Anggota', name, memberId }
     });
@@ -161,7 +321,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // Login
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -178,14 +338,18 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Email atau password salah.' });
     }
 
+    if (MAIL_ENABLED && !user.email_verified_at) {
+      return res.status(403).json({
+        error: 'Email belum diverifikasi. Buka tautan verifikasi yang kami kirim ke email Anda, atau kirim ulang tautannya.',
+        code: 'EMAIL_NOT_VERIFIED'
+      });
+    }
+
     // Check member profile
     const member = await query.get('SELECT * FROM members WHERE user_id = ?', [user.id]);
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, name: user.name, memberId: member ? member.id : null },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    const token = signToken(user, member ? member.id : null);
+    setSessionCookie(res, token);
 
     res.json({
       message: 'Login berhasil.',
@@ -206,14 +370,159 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
     }
     const member = await query.get('SELECT * FROM members WHERE user_id = ?', [user.id]);
+    // Sesi lama (dibuat sebelum ada cookie) ikut mendapat cookie untuk membuka file
+    setSessionCookie(res, readToken(req));
     res.json({ user: publicUser(user, member) });
   } catch (err) {
     res.status(500).json({ error: 'Gagal mengambil data profil.' });
   }
 });
 
+app.post('/api/auth/logout', (req, res) => {
+  clearSessionCookie(res);
+  res.json({ message: 'Berhasil keluar.' });
+});
+
+// ---------- Verifikasi email & reset kata sandi ----------
+// Token mentah hanya dikirim lewat email; database menyimpan hash SHA-256-nya.
+function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+function newToken() {
+  const token = crypto.randomBytes(32).toString('hex');
+  return { token, hash: hashToken(token) };
+}
+const RESET_TOKEN_MINUTES = 60;
+
+async function sendVerificationEmail(user, token) {
+  await sendMail({
+    to: user.email,
+    subject: 'Verifikasi email akun IKAPI Jawa Barat',
+    title: 'Verifikasi email Anda',
+    lines: [
+      `Halo ${user.name},`,
+      'Terima kasih telah mendaftar di Sistem Keanggotaan IKAPI Jawa Barat. Klik tombol di bawah untuk memverifikasi email Anda.'
+    ],
+    action: { label: 'Verifikasi email', url: `${APP_URL}/?verify=${token}`, sensitive: true }
+  });
+}
+
+app.post('/api/auth/verify-email', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token verifikasi tidak ada.' });
+    const user = await query.get('SELECT id, email_verified_at FROM users WHERE email_verify_token = ?', [hashToken(token)]);
+    if (!user) {
+      return res.status(400).json({ error: 'Tautan verifikasi tidak valid atau sudah dipakai.' });
+    }
+    await query.run(
+      'UPDATE users SET email_verified_at = COALESCE(email_verified_at, NOW()), email_verify_token = NULL WHERE id = ?',
+      [user.id]
+    );
+    res.json({ message: 'Email berhasil diverifikasi. Silakan masuk.' });
+  } catch (err) {
+    console.error('Verify email error:', err);
+    res.status(500).json({ error: 'Gagal memverifikasi email.' });
+  }
+});
+
+// Jawaban selalu sama agar tidak membocorkan email mana yang terdaftar
+app.post('/api/auth/resend-verification', authMailLimiter, async (req, res) => {
+  const message = 'Jika email terdaftar dan belum diverifikasi, tautan verifikasi baru telah dikirim.';
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email wajib diisi.' });
+    const user = await query.get('SELECT id, name, email, email_verified_at FROM users WHERE email = ?', [email]);
+    if (user && !user.email_verified_at && MAIL_ENABLED) {
+      const verify = newToken();
+      await query.run('UPDATE users SET email_verify_token = ? WHERE id = ?', [verify.hash, user.id]);
+      await sendVerificationEmail(user, verify.token);
+    }
+    res.json({ message });
+  } catch (err) {
+    console.error('Resend verification error:', err);
+    res.status(500).json({ error: 'Gagal mengirim ulang verifikasi.' });
+  }
+});
+
+app.post('/api/auth/forgot-password', authMailLimiter, async (req, res) => {
+  // Tanpa SMTP, permintaan diteruskan ke Admin lewat notifikasi; Admin mengatur sandi baru di Kelola Akun.
+  const message = MAIL_ENABLED
+    ? 'Jika email terdaftar, tautan untuk mengatur ulang kata sandi telah dikirim. Tautan berlaku 60 menit.'
+    : 'Jika email terdaftar, permintaan Anda sudah diteruskan ke Admin sekretariat. Admin akan mengatur kata sandi baru dan menghubungi Anda.';
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email wajib diisi.' });
+    const user = await query.get('SELECT id, name, email, phone FROM users WHERE email = ?', [email]);
+    if (user && !MAIL_ENABLED) {
+      const title = 'Permintaan reset kata sandi';
+      const body = `${user.name} (${user.email}${user.phone ? `, ${user.phone}` : ''}) lupa kata sandi. Atur kata sandi baru di Kelola Akun, lalu sampaikan ke yang bersangkutan.`;
+      // Satu permintaan yang belum dibaca per akun sudah cukup; cegah lonceng Admin dibanjiri
+      const pending = await query.get(
+        "SELECT n.id FROM notifications n JOIN users a ON a.id = n.user_id WHERE a.role = 'Admin' AND n.title = ? AND n.body = ? AND n.read_at IS NULL LIMIT 1",
+        [title, body]
+      );
+      if (!pending) await addNotification({ role: 'Admin' }, title, body);
+    } else if (user) {
+      const reset = newToken();
+      await query.run(
+        `UPDATE users SET password_reset_token = ?, password_reset_expires = DATE_ADD(NOW(), INTERVAL ${RESET_TOKEN_MINUTES} MINUTE) WHERE id = ?`,
+        [reset.hash, user.id]
+      );
+      await sendMail({
+        to: user.email,
+        subject: 'Atur ulang kata sandi akun IKAPI Jawa Barat',
+        title: 'Atur ulang kata sandi',
+        lines: [
+          `Halo ${user.name},`,
+          `Kami menerima permintaan untuk mengatur ulang kata sandi akun Anda. Tautan berlaku ${RESET_TOKEN_MINUTES} menit.`,
+          'Abaikan email ini jika Anda tidak memintanya; kata sandi Anda tidak berubah.'
+        ],
+        action: { label: 'Atur ulang kata sandi', url: `${APP_URL}/?reset=${reset.token}`, sensitive: true }
+      });
+    }
+    res.json({ message, mailEnabled: MAIL_ENABLED });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ error: 'Gagal memproses permintaan reset kata sandi.' });
+  }
+});
+
+app.post('/api/auth/reset-password', loginLimiter, async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token reset tidak ada.' });
+    if (!password || String(password).length < 6) {
+      return res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
+    }
+    const user = await query.get(
+      'SELECT id FROM users WHERE password_reset_token = ? AND password_reset_expires > NOW()',
+      [hashToken(token)]
+    );
+    if (!user) {
+      return res.status(400).json({ error: 'Tautan reset tidak valid atau sudah kedaluwarsa. Minta tautan baru.' });
+    }
+    const hashed = await bcryptjs.hash(password, await bcryptjs.genSalt(10));
+    // Membuka tautan dari email sekaligus membuktikan kepemilikan email
+    await query.run(
+      `UPDATE users SET password = ?, password_reset_token = NULL, password_reset_expires = NULL,
+         email_verified_at = COALESCE(email_verified_at, NOW()), email_verify_token = NULL,
+         token_version = token_version + 1
+       WHERE id = ?`,
+      [hashed, user.id]
+    );
+    res.json({ message: 'Kata sandi berhasil diubah. Silakan masuk dengan kata sandi baru.' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: 'Gagal mengatur ulang kata sandi.' });
+  }
+});
+
 // Quick Switch (Demo Tool for Evaluator to easily test all 3 roles)
 app.post('/api/auth/quick-switch', async (req, res) => {
+  if (!DEMO_SWITCH_ENABLED) {
+    return res.status(404).json({ error: 'Fitur ganti akun demo tidak aktif.' });
+  }
   try {
     const { role, email } = req.body;
     let user;
@@ -228,11 +537,8 @@ app.post('/api/auth/quick-switch', async (req, res) => {
     }
 
     const member = await query.get('SELECT * FROM members WHERE user_id = ?', [user.id]);
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, name: user.name, memberId: member ? member.id : null },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    const token = signToken(user, member ? member.id : null);
+    setSessionCookie(res, token);
 
     res.json({
       message: `Beralih ke peran ${user.role} (${user.name})`,
@@ -271,12 +577,12 @@ app.put('/api/auth/onboarding', authenticate, authorize('Anggota'), async (req, 
 
     await query.run(
       `UPDATE users SET member_type = ?, member_category = ?, old_kta_number = ?,
-         onboarded_at = datetime('now', 'localtime')
+         onboarded_at = NOW()
        WHERE id = ?`,
       [memberType, category, kta, req.user.id]
     );
     await query.run(
-      `UPDATE members SET category = ?, updated_at = datetime('now', 'localtime')
+      `UPDATE members SET category = ?, updated_at = NOW()
        WHERE user_id = ? AND membership_status = 'Calon'`,
       [category, req.user.id]
     );
@@ -328,7 +634,7 @@ const FEE_KEYS = ['fee_uang_pangkal', 'fee_iuran_bulanan', 'fee_iuran_durasi_bul
 
 // Rincian tagihan dari pengaturan biaya terbaru
 async function computeFees(submissionType) {
-  const rows = await query.all(`SELECT key, value FROM settings WHERE key LIKE 'fee_%'`);
+  const rows = await query.all(`SELECT settings.key, settings.value FROM settings WHERE settings.key LIKE 'fee_%'`);
   const map = Object.fromEntries(rows.map((r) => [r.key, Number(r.value)]));
   const fee = (key, fallback) => (Number.isFinite(map[key]) && map[key] >= 0 ? map[key] : fallback);
   const durasiBulan = fee('fee_iuran_durasi_bulan', 24);
@@ -353,18 +659,152 @@ async function computeFees(submissionType) {
 
 // Tagihan yang belum dibayar (bukti transfer belum diunggah) ikut harga terbaru;
 // tagihan yang sudah dibayar tetap memakai harga saat dibayar.
-// Alur tanpa tahap "Dikirim ke Pusat": pengajuan yang sudah di-TTD Ketua langsung Aktif
+// Data lama berstatus 'Disetujui' (alur versi awal) dianggap sudah aktif.
+// 'Dikirim ke Pusat' kini tahap resmi (menunggu No. KTA) sehingga tidak diubah.
 async function activateApprovedSubmissions() {
-  const rows = await query.all(`SELECT id, member_id FROM submissions WHERE status IN ('Disetujui', 'Dikirim ke Pusat')`);
+  const rows = await query.all(`SELECT id, member_id FROM submissions WHERE status = 'Disetujui'`);
   for (const row of rows) {
     await query.run(
-      `UPDATE submissions SET status = 'Aktif', activated_at = COALESCE(activated_at, approved_at, datetime('now', 'localtime')),
-       updated_at = datetime('now', 'localtime') WHERE id = ?`,
+      `UPDATE submissions SET status = 'Aktif', activated_at = COALESCE(activated_at, approved_at, NOW()),
+       updated_at = NOW() WHERE id = ?`,
       [row.id]
     );
-    await query.run(`UPDATE members SET membership_status = 'Aktif', updated_at = datetime('now', 'localtime') WHERE id = ?`, [row.member_id]);
+    await query.run(`UPDATE members SET membership_status = 'Aktif', updated_at = NOW() WHERE id = ?`, [row.member_id]);
   }
   return rows.length;
+}
+
+// Penjelasan status untuk email ke pemohon
+const STATUS_EMAIL_TEXT = {
+  'Menunggu Verifikasi': 'Pengajuan Anda sudah kami terima dan dokumen sedang diperiksa Admin.',
+  'Perlu Revisi': 'Ada dokumen yang perlu diperbaiki. Masuk ke sistem untuk melihat catatan dan mengunggah ulang dokumen yang ditandai. Anda tidak perlu membayar ulang.',
+  'Menunggu Pembayaran': 'Dokumen Anda sudah sesuai. Silakan lakukan pembayaran sesuai tagihan dan unggah bukti transfer di sistem.',
+  'Menunggu TTD Sekretaris': 'Pembayaran Anda sudah diverifikasi. Pengajuan sedang menunggu tanda tangan Sekretaris.',
+  'Menunggu Approval': 'Pengajuan Anda sedang menunggu persetujuan dan tanda tangan Ketua.',
+  'Pengiriman Berkas': 'Pengajuan Anda disetujui Sekretaris dan Ketua. Silakan cetak sendiri berkas yang diminta lalu kirim ke sekretariat IKAPI Jawa Barat, kemudian tandai "sudah dikirim" di sistem.',
+  'Berkas Diterima': 'Berkas fisik Anda sudah diterima sekretariat IKAPI Jawa Barat dan sedang disiapkan untuk dikirim ke IKAPI Pusat.',
+  'Disetujui': 'Pengajuan Anda telah disetujui.',
+  'Dikirim ke Pusat': 'Berkas Anda telah dikirim ke IKAPI Pusat dan sedang menunggu penerbitan Nomor KTA.',
+  'Aktif': 'Selamat, Nomor KTA dari IKAPI Pusat sudah terbit dan keanggotaan Anda di IKAPI Jawa Barat sudah aktif.',
+  'Ditolak': 'Mohon maaf, pengajuan Anda ditolak.'
+};
+
+// Notifikasi dalam aplikasi (lonceng). `to` = id user, atau { role: 'Admin' } untuk semua akun peran itu.
+async function addNotification(to, title, body = null, submissionId = null) {
+  try {
+    const ids = typeof to === 'object'
+      ? (await query.all('SELECT id FROM users WHERE role = ?', [to.role])).map((r) => r.id)
+      : [to];
+    for (const id of ids) {
+      await query.run(
+        'INSERT INTO notifications (user_id, title, body, submission_id) VALUES (?, ?, ?, ?)',
+        [id, title, body, submissionId]
+      );
+    }
+  } catch (err) {
+    console.error('Gagal membuat notifikasi:', err.message);
+  }
+}
+
+app.get('/api/notifications', authenticate, async (req, res) => {
+  try {
+    const items = await query.all(
+      'SELECT id, title, body, submission_id, read_at, created_at FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 30',
+      [req.user.id]
+    );
+    const row = await query.get('SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL', [req.user.id]);
+    res.json({ items, unread: Number(row?.n || 0) });
+  } catch (err) {
+    console.error('Get notifications error:', err);
+    res.status(500).json({ error: 'Gagal mengambil notifikasi.' });
+  }
+});
+
+// Tandai dibaca: body { id } untuk satu notifikasi, tanpa id untuk semua
+app.post('/api/notifications/read', authenticate, async (req, res) => {
+  try {
+    const id = Number(req.body?.id);
+    if (id) {
+      await query.run('UPDATE notifications SET read_at = NOW() WHERE id = ? AND user_id = ? AND read_at IS NULL', [id, req.user.id]);
+    } else {
+      await query.run('UPDATE notifications SET read_at = NOW() WHERE user_id = ? AND read_at IS NULL', [req.user.id]);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Read notifications error:', err);
+    res.status(500).json({ error: 'Gagal memperbarui notifikasi.' });
+  }
+});
+
+// Kirim email bila status pengajuan berubah sejak notifikasi terakhir:
+// ke pemohon untuk setiap status baru, dan ke Admin saat ada pengajuan baru masuk.
+async function notifyStatusChange(submissionId) {
+  const sub = await query.get(
+    `SELECT s.id, s.status, s.last_notified_status, s.submission_type, s.admin_notes, s.rejection_reason,
+            s.reference_number, s.user_id, u.name AS applicant_name, u.email AS applicant_email,
+            m.publisher_name, m.kta_number
+     FROM submissions s
+     JOIN users u ON u.id = s.user_id
+     LEFT JOIN members m ON m.id = s.member_id
+     WHERE s.id = ?`,
+    [submissionId]
+  );
+  if (!sub || sub.status === sub.last_notified_status) return;
+
+  // Tandai dulu agar dua aksi beruntun tidak mengirim email ganda untuk status yang sama
+  const claimed = await query.run(
+    'UPDATE submissions SET last_notified_status = ? WHERE id = ? AND (last_notified_status IS NULL OR last_notified_status <> ?)',
+    [sub.status, sub.id, sub.status]
+  );
+  if (!claimed.changes || sub.status === 'Draf') return;
+
+  const publisher = sub.publisher_name || sub.applicant_name;
+  const extra = [];
+  if (sub.status === 'Perlu Revisi' && sub.admin_notes) extra.push(`Catatan Admin: ${sub.admin_notes}`);
+  if (sub.status === 'Ditolak' && sub.rejection_reason) extra.push(`Alasan: ${sub.rejection_reason}`);
+  if (sub.status === 'Aktif' && sub.kta_number) extra.push(`Nomor KTA: ${sub.kta_number}`);
+  if (sub.reference_number && ['Menunggu Approval', 'Pengiriman Berkas', 'Berkas Diterima', 'Dikirim ke Pusat', 'Aktif'].includes(sub.status)) {
+    extra.push(`Nomor surat: ${sub.reference_number}`);
+  }
+
+  // Notifikasi dalam aplikasi: pemohon untuk setiap status, pengurus saat giliran mereka bertindak
+  await addNotification(sub.user_id, `Status pengajuan: ${sub.status}`, [STATUS_EMAIL_TEXT[sub.status], ...extra].filter(Boolean).join('\n'), sub.id);
+  const label = `${sub.submission_type === 'Heregistrasi' ? 'Heregistrasi' : 'Anggota baru'} ${publisher} (#${sub.id})`;
+  const staffTask = {
+    'Menunggu Verifikasi': ['Admin', sub.last_notified_status === 'Perlu Revisi' ? 'Revisi dokumen masuk' : 'Pengajuan baru masuk', `${label} menunggu screening dokumen.`],
+    'Menunggu TTD Sekretaris': ['Sekretaris', 'Menunggu tanda tangan Sekretaris', `${label} sudah lunas dan menunggu TTD Anda.`],
+    'Menunggu Approval': ['Ketua', 'Menunggu persetujuan Ketua', `${label} menunggu persetujuan dan TTD Anda.`],
+    'Dikirim ke Pusat': ['Sekretaris', 'Menunggu No. KTA dari Pusat', `${label} sudah dikirim ke IKAPI Pusat. Input No. KTA setelah terbit.`]
+  }[sub.status];
+  if (staffTask) await addNotification({ role: staffTask[0] }, staffTask[1], staffTask[2], sub.id);
+
+  await sendMail({
+    to: sub.applicant_email,
+    subject: `Status pengajuan IKAPI Jabar: ${sub.status}`,
+    title: `Status pengajuan: ${sub.status}`,
+    lines: [
+      `Halo ${sub.applicant_name},`,
+      `Pengajuan ${sub.submission_type === 'Heregistrasi' ? 'heregistrasi' : 'anggota baru'} ${publisher} (#${sub.id}) kini berstatus "${sub.status}".`,
+      STATUS_EMAIL_TEXT[sub.status],
+      ...extra
+    ],
+    action: { label: 'Lihat pengajuan', url: APP_URL }
+  });
+
+  if (sub.status === 'Menunggu Verifikasi' && (!sub.last_notified_status || sub.last_notified_status === 'Draf')) {
+    const admins = await query.all("SELECT email FROM users WHERE role = 'Admin'");
+    for (const admin of admins) {
+      await sendMail({
+        to: admin.email,
+        subject: `Pengajuan baru: ${publisher}`,
+        title: 'Pengajuan baru masuk',
+        lines: [
+          `Pengajuan ${sub.submission_type === 'Heregistrasi' ? 'heregistrasi' : 'anggota baru'} dari ${publisher} (#${sub.id}) menunggu screening dokumen.`
+        ],
+        action: { label: 'Buka sistem', url: APP_URL }
+      });
+    }
+  }
 }
 
 // Riwayat alur berkas (terlihat oleh semua peran)
@@ -377,6 +817,9 @@ async function logEvent(submissionId, user, action, notes = null) {
   } catch (err) {
     console.error('Log event error:', err);
   }
+  // Setiap aksi pada pengajuan dicatat lewat logEvent, jadi di sini juga dicek perubahan status
+  // untuk notifikasi email. Dijalankan di latar agar respons API tidak menunggu SMTP.
+  notifyStatusChange(submissionId).catch((err) => console.error('Notifikasi status gagal:', err));
 }
 
 // Riwayat untuk pengajuan lama yang dibuat sebelum ada log
@@ -394,7 +837,7 @@ function legacyTimeline(sub) {
 
 // Sekali jalan: sesuaikan data lama ke alur baru (dokumen dulu, baru pembayaran)
 async function migrateFlowV2() {
-  const done = await query.get(`SELECT value FROM settings WHERE key = 'flow_version'`);
+  const done = await query.get(`SELECT value FROM settings WHERE settings.key = 'flow_version'`);
   if (done && Number(done.value) >= 2) return;
   // Dulu: submit -> bayar. Sekarang dokumen harus lolos screening dulu.
   await query.run(
@@ -412,8 +855,8 @@ async function migrateFlowV2() {
   );
   await query.run(`UPDATE submissions SET physical_status = 'Diterima' WHERE status = 'Aktif' AND physical_status IS NULL`);
   await query.run(
-    `INSERT INTO settings (key, value, description) VALUES ('flow_version', '2', 'Versi alur pengajuan')
-     ON CONFLICT(key) DO UPDATE SET value = '2'`
+    `INSERT INTO settings (settings.key, value, description) VALUES ('flow_version', '2', 'Versi alur pengajuan')
+     ON DUPLICATE KEY UPDATE value = '2'`
   );
 }
 
@@ -428,7 +871,7 @@ async function syncUnpaidBills() {
     feesByType[bill.submission_type] ||= await computeFees(bill.submission_type);
     const fees = feesByType[bill.submission_type];
     await query.run(
-      `UPDATE payments SET amount = ?, fee_breakdown = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`,
+      `UPDATE payments SET amount = ?, fee_breakdown = ?, updated_at = NOW() WHERE id = ?`,
       [fees.total, JSON.stringify(fees), bill.id]
     );
   }
@@ -512,7 +955,7 @@ app.post('/api/admin/users', authenticate, authorize('Admin'), async (req, res) 
     const hashed = await bcryptjs.hash(password, await bcryptjs.genSalt(10));
     const result = await query.run(
       `INSERT INTO users (name, email, password, role, phone, email_verified_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))`,
+       VALUES (?, ?, ?, ?, ?, NOW())`,
       [name, email, hashed, role, phone || null]
     );
     const user = await query.get('SELECT * FROM users WHERE id = ?', [result.lastID]);
@@ -554,11 +997,43 @@ app.put('/api/admin/users/:id', authenticate, authorize('Admin'), async (req, re
       const hashed = await bcryptjs.hash(password, await bcryptjs.genSalt(10));
       await query.run('UPDATE users SET password = ? WHERE id = ?', [hashed, id]);
     }
+    // Kata sandi, peran, atau email diganti: token lama akun itu tidak berlaku lagi
+    if (password || (role && role !== target.role) || (email && email !== target.email)) {
+      await revokeSessions(id);
+    }
     const user = await query.get('SELECT * FROM users WHERE id = ?', [id]);
     res.json({ message: `Akun ${user.name} berhasil diperbarui.`, user: publicUser(user) });
   } catch (err) {
     console.error('Update user error:', err);
     res.status(500).json({ error: 'Gagal memperbarui akun.' });
+  }
+});
+
+// Hapus akun. Akun yang sudah punya pengajuan tidak bisa dihapus (riwayat & berkas harus tetap ada).
+app.delete('/api/admin/users/:id', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const target = await query.get('SELECT id, name, role FROM users WHERE id = ?', [id]);
+    if (!target) return res.status(404).json({ error: 'Akun tidak ditemukan.' });
+    if (id === req.user.id) {
+      return res.status(400).json({ error: 'Anda tidak bisa menghapus akun Anda sendiri.' });
+    }
+    if (target.role === 'Admin') {
+      const admins = await query.get("SELECT COUNT(*) AS c FROM users WHERE role = 'Admin'");
+      if (admins.c <= 1) return res.status(400).json({ error: 'Minimal harus ada satu akun Admin.' });
+    }
+    const subs = await query.get('SELECT COUNT(*) AS c FROM submissions WHERE user_id = ?', [id]);
+    if (subs.c > 0) {
+      return res.status(400).json({
+        error: `Akun ${target.name} memiliki ${subs.c} pengajuan sehingga tidak dapat dihapus. Data anggota bisa dinonaktifkan dari menu Data Anggota.`
+      });
+    }
+    await query.run("DELETE FROM members WHERE user_id = ? AND membership_status = 'Calon'", [id]);
+    await query.run('DELETE FROM users WHERE id = ?', [id]);
+    res.json({ message: `Akun ${target.name} berhasil dihapus.` });
+  } catch (err) {
+    console.error('Delete user error:', err);
+    res.status(500).json({ error: 'Gagal menghapus akun.' });
   }
 });
 
@@ -664,7 +1139,7 @@ app.get('/api/submissions/:id', authenticate, async (req, res) => {
     );
 
     // Settings (for letter preview)
-    const settingsList = await query.all('SELECT key, value FROM settings');
+    const settingsList = await query.all('SELECT settings.key, settings.value FROM settings');
     const settings = {};
     settingsList.forEach(item => { settings[item.key] = item.value; });
 
@@ -758,7 +1233,7 @@ app.post('/api/submissions', authenticate, async (req, res) => {
           publisher_name = ?, category = ?, leader_name = ?, leader_title = ?, leader_phone = ?,
           legal_entity = ?, nib = ?, npwp = ?, address = ?, city = ?, postal_code = ?,
           phone = ?, fax = ?, email = ?, website = ?, person_in_charge = ?, bnsp_certificate_no = ?,
-          specialization = ?, updated_at = datetime('now', 'localtime')
+          specialization = ?, updated_at = NOW()
          WHERE id = ?`,
         [
           publisherName, category, leaderName || member.leader_name, leaderTitle || member.leader_title,
@@ -790,7 +1265,7 @@ app.post('/api/submissions', authenticate, async (req, res) => {
 
     const formData = JSON.stringify(req.body);
     const initialStatus = isDraft ? 'Draf' : 'Menunggu Verifikasi';
-    const submittedAt = isDraft ? null : new Date().toISOString();
+    const submittedAt = isDraft ? null : nowSql();
 
     const subRes = await query.run(
       `INSERT INTO submissions (
@@ -872,6 +1347,11 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
     if (req.user.role === 'Anggota' && !['Draf', 'Perlu Revisi'].includes(sub.status)) {
       return res.status(400).json({ error: 'Formulir tidak dapat diubah karena pengajuan sedang diproses.' });
     }
+    // Staf hanya boleh membantu mengoreksi isian sebelum dokumen disetujui; setelah itu
+    // isian sudah menjadi dasar tagihan, surat, dan TTD sehingga dikunci.
+    if (req.user.role !== 'Anggota' && !['Draf', 'Menunggu Verifikasi', 'Perlu Revisi'].includes(sub.status)) {
+      return res.status(400).json({ error: `Isian formulir terkunci karena pengajuan sudah berstatus ${sub.status}.` });
+    }
     if (isSubmit && sub.status === 'Draf') {
       const missing = await query.all(
         `SELECT document_title FROM documents WHERE submission_id = ? AND (file_path IS NULL OR file_path = '')`,
@@ -884,7 +1364,7 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
       }
     }
     const newStatus = isSubmit && sub.status === 'Draf' ? 'Menunggu Verifikasi' : sub.status;
-    const submittedAt = isSubmit ? new Date().toISOString() : sub.submitted_at;
+    const submittedAt = isSubmit ? nowSql() : sub.submitted_at;
     const subType = formData.submissionType || sub.submission_type;
     if (req.user.role === 'Anggota') {
       const expectedType = await profileSubmissionType(req.user.id);
@@ -895,7 +1375,7 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
     const oldKta = formData.oldKtaNumber !== undefined ? formData.oldKtaNumber : sub.old_kta_number;
 
     await query.run(
-      `UPDATE submissions SET submission_type = ?, old_kta_number = ?, form_data = ?, status = ?, submitted_at = ?, updated_at = datetime('now', 'localtime')
+      `UPDATE submissions SET submission_type = ?, old_kta_number = ?, form_data = ?, status = ?, submitted_at = ?, updated_at = NOW()
        WHERE id = ?`,
       [subType, oldKta || null, JSON.stringify(formData), newStatus, submittedAt, subId]
     );
@@ -909,7 +1389,7 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
           npwp = COALESCE(?, npwp), address = COALESCE(NULLIF(?, ''), address), city = COALESCE(NULLIF(?, ''), city), postal_code = COALESCE(?, postal_code),
           phone = COALESCE(NULLIF(?, ''), phone), fax = COALESCE(?, fax), email = COALESCE(NULLIF(?, ''), email), website = COALESCE(?, website),
           person_in_charge = COALESCE(NULLIF(?, ''), person_in_charge), bnsp_certificate_no = COALESCE(?, bnsp_certificate_no),
-          specialization = COALESCE(?, specialization), updated_at = datetime('now', 'localtime')
+          specialization = COALESCE(?, specialization), updated_at = NOW()
          WHERE id = ?`,
         [
           formData.publisherName, formData.category || null, formData.leaderName, formData.leaderTitle || null,
@@ -969,23 +1449,25 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
       [subId, documentType]
     );
 
-    // Setelah dikirim, pemohon hanya boleh mengganti dokumen yang dinyatakan tidak sesuai
+    // Setelah dikirim, pemohon hanya boleh mengganti dokumen yang dinyatakan tidak sesuai atau slot kosong
     if (req.user.role === 'Anggota' && owner.status !== 'Draf') {
       const isEmptySlot = existing && !existing.file_path;
+      const isRevisiDoc = existing && existing.screening_status === 'Perlu Revisi';
       const allowed =
-        (owner.status === 'Perlu Revisi' && existing && (existing.screening_status === 'Perlu Revisi' || isEmptySlot)) ||
-        (owner.status === 'Menunggu Verifikasi' && existing && isEmptySlot);
+        ((owner.status === 'Perlu Revisi' || owner.status === 'Menunggu Verifikasi') && (isRevisiDoc || isEmptySlot));
       if (!allowed) {
         return res.status(400).json({ error: 'Dokumen ini tidak perlu diunggah ulang. Hanya dokumen yang dinyatakan tidak sesuai yang dapat diganti.' });
       }
     }
+
+    const wasRevision = existing && (existing.screening_status === 'Perlu Revisi' || owner.status === 'Perlu Revisi');
 
     if (existing) {
       await query.run(
         `UPDATE documents SET
           file_path = ?, file_name = ?, file_size = ?, mime_type = ?,
           screening_status = 'Menunggu', revision_notes = NULL, opened_at = NULL, opened_by_name = NULL,
-          verified_at = NULL, verified_by = NULL, updated_at = datetime('now', 'localtime')
+          verified_at = NULL, verified_by = NULL, updated_at = NOW()
          WHERE id = ?`,
         [filePath, fileName, fileSize, mimeType, existing.id]
       );
@@ -1001,19 +1483,19 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
     const docTitle = existing?.document_title || documentTitle || documentType;
     let resubmitted = false;
     if (owner.status !== 'Draf') {
-      await logEvent(subId, req.user, owner.status === 'Perlu Revisi' ? `Revisi dokumen diunggah: ${docTitle}` : `Dokumen diunggah: ${docTitle}`);
+      await logEvent(subId, req.user, wasRevision ? `Revisi dokumen diunggah: ${docTitle}` : `Dokumen diunggah: ${docTitle}`);
     }
 
     // Semua dokumen yang tidak sesuai sudah diganti -> kembali ke screening Admin
-    if (owner.status === 'Perlu Revisi') {
+    if (owner.status === 'Perlu Revisi' || owner.status === 'Menunggu Verifikasi') {
       const stillNeedsRevision = await query.get(
         `SELECT COUNT(*) as count FROM documents WHERE submission_id = ? AND (screening_status = 'Perlu Revisi' OR file_path = '')`,
         [subId]
       );
-      if (stillNeedsRevision.count === 0) {
+      if (stillNeedsRevision.count === 0 && owner.status === 'Perlu Revisi') {
         await query.run(
           `UPDATE submissions SET status = 'Menunggu Verifikasi', admin_notes = 'Dokumen revisi telah diunggah kembali oleh pemohon.',
-             screened_at = NULL, screened_by_name = NULL, updated_at = datetime('now', 'localtime')
+             screened_at = NULL, screened_by_name = NULL, updated_at = NOW()
            WHERE id = ?`,
           [subId]
         );
@@ -1024,7 +1506,11 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
 
     res.json({
       resubmitted,
-      message: resubmitted ? 'Semua revisi terkirim. Dokumen akan diperiksa ulang oleh Admin.' : 'Berkas berhasil diunggah.',
+      message: resubmitted
+        ? 'Semua dokumen revisi berhasil dikirim. Menunggu screening ulang oleh Admin.'
+        : wasRevision
+        ? 'Dokumen revisi berhasil diunggah.'
+        : 'Berkas berhasil diunggah.',
       filePath,
       fileName
     });
@@ -1041,7 +1527,7 @@ app.post('/api/documents/:docId/opened', authenticate, authorize('Admin'), async
     if (!doc || !doc.file_path) return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
     if (!doc.opened_at) {
       await query.run(
-        `UPDATE documents SET opened_at = datetime('now', 'localtime'), opened_by_name = ? WHERE id = ?`,
+        `UPDATE documents SET opened_at = NOW(), opened_by_name = ? WHERE id = ?`,
         [req.user.name, doc.id]
       );
       await logEvent(doc.submission_id, req.user, `Dokumen dibuka: ${doc.document_title}`);
@@ -1060,7 +1546,7 @@ app.post('/api/submissions/:id/payment/opened', authenticate, authorize('Admin')
     if (!pay || !pay.proof_file) return res.status(404).json({ error: 'Bukti transfer tidak ditemukan.' });
     if (!pay.proof_opened_at) {
       await query.run(
-        `UPDATE payments SET proof_opened_at = datetime('now', 'localtime'), proof_opened_by_name = ? WHERE id = ?`,
+        `UPDATE payments SET proof_opened_at = NOW(), proof_opened_by_name = ? WHERE id = ?`,
         [req.user.name, pay.id]
       );
       await logEvent(req.params.id, req.user, 'Bukti transfer dibuka');
@@ -1093,7 +1579,7 @@ app.put('/api/documents/:docId/screen', authenticate, authorize('Admin'), async 
       return res.status(400).json({ error: 'Dokumen belum diunggah pemohon.' });
     }
     if (!doc.opened_at) {
-      return res.status(400).json({ error: 'Buka dokumen terlebih dahulu sebelum menilai.' });
+      await query.run('UPDATE documents SET opened_at = NOW(), opened_by_name = ? WHERE id = ?', [req.user.name, docId]);
     }
     if (status === 'Perlu Revisi' && !String(revisionNotes || '').trim()) {
       return res.status(400).json({ error: 'Tulis komentar alasan dokumen tidak sesuai agar pemohon tahu apa yang harus diperbaiki.' });
@@ -1101,7 +1587,7 @@ app.put('/api/documents/:docId/screen', authenticate, authorize('Admin'), async 
 
     await query.run(
       `UPDATE documents SET
-        screening_status = ?, revision_notes = ?, verified_by = ?, verified_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime')
+        screening_status = ?, revision_notes = ?, verified_by = ?, verified_at = NOW(), updated_at = NOW()
        WHERE id = ?`,
       [status, status === 'Sesuai' ? null : revisionNotes, req.user.id, docId]
     );
@@ -1148,13 +1634,14 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
       `UPDATE payments SET
         proof_file = ?, proof_filename = ?, sender_bank = ?, sender_account_name = ?,
         sender_account_number = ?, transfer_date = ?, verification_status = 'Menunggu',
-        verification_notes = NULL, proof_opened_at = NULL, proof_opened_by_name = NULL, updated_at = datetime('now', 'localtime')
+        verification_notes = NULL, proof_opened_at = NULL, proof_opened_by_name = NULL, updated_at = NOW()
        WHERE submission_id = ?`,
-      [filePath, fileName, senderBank, senderAccountName, senderAccountNumber, transferDate || new Date().toISOString().split('T')[0], subId]
+      [filePath, fileName, senderBank, senderAccountName, senderAccountNumber, transferDate || nowSql().slice(0, 10), subId]
     );
 
-    await query.run(`UPDATE submissions SET updated_at = datetime('now', 'localtime') WHERE id = ?`, [subId]);
+    await query.run(`UPDATE submissions SET updated_at = NOW() WHERE id = ?`, [subId]);
     await logEvent(subId, req.user, 'Bukti transfer diunggah', [senderBank, senderAccountName].filter(Boolean).join(' · ') || null);
+    await addNotification({ role: 'Admin' }, 'Bukti transfer masuk', `Pengajuan #${subId} mengunggah bukti transfer. Verifikasi pembayaran.`, Number(subId));
 
     res.json({
       message: 'Bukti pembayaran berhasil diunggah. Menunggu verifikasi Admin.',
@@ -1191,7 +1678,7 @@ app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin'),
     await query.run(
       `UPDATE payments SET
         verification_status = ?, verification_notes = ?, verified_by = ?,
-        verified_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime')
+        verified_at = NOW(), updated_at = NOW()
        WHERE submission_id = ?`,
       [status, notes || null, req.user.id, subId]
     );
@@ -1199,14 +1686,14 @@ app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin'),
     if (status === 'Valid') {
       // Tahap 1 & 2 selesai -> diteruskan ke Sekretaris untuk TTD
       await query.run(
-        `UPDATE submissions SET status = 'Menunggu TTD Sekretaris', updated_at = datetime('now', 'localtime') WHERE id = ?`,
+        `UPDATE submissions SET status = 'Menunggu TTD Sekretaris', updated_at = NOW() WHERE id = ?`,
         [subId]
       );
       await logEvent(subId, req.user, 'Pembayaran diverifikasi valid, diteruskan ke Sekretaris untuk TTD');
     } else {
       // Pemohon cukup mengunggah ulang bukti transfer, dokumen tidak perlu dikirim ulang
       await query.run(
-        `UPDATE submissions SET admin_notes = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`,
+        `UPDATE submissions SET admin_notes = ?, updated_at = NOW() WHERE id = ?`,
         [`Bukti transfer tidak sesuai: ${notes}`, subId]
       );
       await logEvent(subId, req.user, 'Bukti transfer tidak sesuai', notes);
@@ -1265,8 +1752,8 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin', 
       const payment = await query.get('SELECT verification_status FROM payments WHERE submission_id = ?', [subId]);
       const nextStatus = payment?.verification_status === 'Valid' ? 'Menunggu TTD Sekretaris' : 'Menunggu Pembayaran';
       await query.run(
-        `UPDATE submissions SET status = ?, screened_at = datetime('now', 'localtime'), screened_by_name = ?,
-           admin_notes = ?, updated_at = datetime('now', 'localtime')
+        `UPDATE submissions SET status = ?, screened_at = NOW(), screened_by_name = ?,
+           admin_notes = ?, updated_at = NOW()
          WHERE id = ?`,
         [nextStatus, req.user.name, notes || 'Semua dokumen persyaratan sesuai.', subId]
       );
@@ -1288,7 +1775,7 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin', 
       }
       await query.run(
         `UPDATE submissions SET status = 'Perlu Revisi', admin_notes = ?, screened_at = NULL, screened_by_name = NULL,
-           updated_at = datetime('now', 'localtime')
+           updated_at = NOW()
          WHERE id = ?`,
         [notes || 'Terdapat dokumen yang tidak sesuai. Unggah ulang dokumen yang ditandai.', subId]
       );
@@ -1328,30 +1815,30 @@ app.post('/api/submissions/:id/admin1-action', authenticate, authorize('Admin', 
         secretaryPos = JSON.stringify(positions.surat);
         positionsJson = mergeSignaturePositions(sub.signature_positions, 'secretary', positions);
       }
-      const secretaryNameRow = await query.get(`SELECT value FROM settings WHERE key = 'sekretaris_nama'`);
+      const secretaryNameRow = await query.get(`SELECT value FROM settings WHERE settings.key = 'sekretaris_nama'`);
 
       let refNumber = sub.reference_number;
       if (!refNumber) {
-        const counterSetting = await query.get(`SELECT value FROM settings WHERE key = 'surat_counter'`);
+        const counterSetting = await query.get(`SELECT value FROM settings WHERE settings.key = 'surat_counter'`);
         const nextCounter = parseInt(counterSetting ? counterSetting.value : '1', 10) + 1;
         refNumber = formatSuratNumber(nextCounter, new Date());
-        await query.run(`UPDATE settings SET value = ? WHERE key = 'surat_counter'`, [String(nextCounter)]);
+        await query.run(`UPDATE settings SET value = ? WHERE settings.key = 'surat_counter'`, [String(nextCounter)]);
       }
 
       await query.run(
         `UPDATE submissions SET
           status = 'Menunggu Approval',
           reference_number = ?,
-          letter_date = date('now', 'localtime'),
+          letter_date = CURDATE(),
           admin_notes = ?,
           secretary_signature_img = COALESCE(?, secretary_signature_img),
           secretary_signature_pos = COALESCE(?, secretary_signature_pos),
           signature_positions = ?,
-          screened_at = COALESCE(screened_at, datetime('now', 'localtime')),
+          screened_at = COALESCE(screened_at, NOW()),
           screened_by_name = COALESCE(screened_by_name, ?),
           signed_by_secretary = CASE WHEN ? IS NOT NULL THEN ? ELSE signed_by_secretary END,
-          secretary_signature_date = CASE WHEN ? IS NOT NULL THEN datetime('now', 'localtime') ELSE secretary_signature_date END,
-          updated_at = datetime('now', 'localtime')
+          secretary_signature_date = CASE WHEN ? IS NOT NULL THEN NOW() ELSE secretary_signature_date END,
+          updated_at = NOW()
          WHERE id = ?`,
         [
           refNumber,
@@ -1410,7 +1897,7 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
         return res.status(400).json({ error: 'Posisi tanda tangan pada dokumen tidak valid.' });
       }
 
-      const settingsList = await query.all(`SELECT key, value FROM settings WHERE key IN ('ketua_nama', 'sekretaris_nama')`);
+      const settingsList = await query.all(`SELECT settings.key, settings.value FROM settings WHERE settings.key IN ('ketua_nama', 'sekretaris_nama')`);
       const map = {};
       settingsList.forEach(s => { map[s.key] = s.value; });
 
@@ -1421,15 +1908,15 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
         `UPDATE submissions SET
           status = 'Pengiriman Berkas',
           physical_status = 'Belum Dikirim',
-          approved_at = datetime('now', 'localtime'),
+          approved_at = NOW(),
           signed_by_chairman = ?,
           signed_by_secretary = COALESCE(signed_by_secretary, ?),
-          chairman_signature_date = datetime('now', 'localtime'),
-          secretary_signature_date = COALESCE(secretary_signature_date, datetime('now', 'localtime')),
+          chairman_signature_date = NOW(),
+          secretary_signature_date = COALESCE(secretary_signature_date, NOW()),
           chairman_signature_img = ?,
           chairman_signature_pos = ?,
           signature_positions = ?,
-          updated_at = datetime('now', 'localtime')
+          updated_at = NOW()
          WHERE id = ?`,
         [
           chairmanName, secretaryName, ketua.signature_img,
@@ -1463,9 +1950,10 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
         `UPDATE submissions SET
           status = 'Ditolak',
           rejection_reason = ?,
-          updated_at = datetime('now', 'localtime')
+          rejected_at_status = ?,
+          updated_at = NOW()
          WHERE id = ?`,
-        [reason, subId]
+        [reason, sub.status, subId]
       );
 
       await logEvent(subId, req.user, `Pengajuan ditolak ${req.user.role}`, reason);
@@ -1496,13 +1984,15 @@ app.post('/api/submissions/:id/physical-sent', authenticate, authorize('Anggota'
       return res.status(400).json({ error: 'Isi cara pengiriman (mis. JNE, POS, atau diantar langsung).' });
     }
     await query.run(
-      `UPDATE submissions SET physical_status = 'Dikirim', physical_sent_at = datetime('now', 'localtime'),
-         physical_courier = ?, physical_tracking_no = ?, physical_notes = ?, updated_at = datetime('now', 'localtime')
+      `UPDATE submissions SET physical_status = 'Dikirim', physical_sent_at = NOW(),
+         physical_courier = ?, physical_tracking_no = ?, physical_notes = ?, updated_at = NOW()
        WHERE id = ?`,
       [courier.trim(), trackingNo || null, notes || null, subId]
     );
     await logEvent(subId, req.user, 'Berkas fisik dikirim ke sekretariat IKAPI Jawa Barat',
       [courier.trim(), trackingNo ? `No. resi ${trackingNo}` : null, notes].filter(Boolean).join(' · '));
+    await addNotification({ role: 'Admin' }, 'Berkas fisik dikirim pemohon',
+      `Pengajuan #${subId} mengirim berkas fisik via ${courier.trim()}${trackingNo ? ` (resi ${trackingNo})` : ''}. Konfirmasi saat diterima.`, Number(subId));
     res.json({ message: 'Terima kasih. Admin akan mengonfirmasi setelah berkas fisik diterima.' });
   } catch (err) {
     console.error('Physical sent error:', err);
@@ -1520,22 +2010,49 @@ app.post('/api/submissions/:id/physical-received', authenticate, authorize('Admi
     if (sub.status !== 'Pengiriman Berkas') {
       return res.status(400).json({ error: 'Pengajuan ini tidak sedang menunggu berkas fisik.' });
     }
+    // Berkas fisik hanya bisa dikonfirmasi diterima setelah pemohon menandainya sudah dikirim
+    if (sub.physical_status !== 'Dikirim') {
+      return res.status(400).json({ error: 'Pemohon belum menandai berkas fisik sudah dikirim.' });
+    }
     await query.run(
-      `UPDATE submissions SET status = 'Aktif', physical_status = 'Diterima',
-         physical_received_at = datetime('now', 'localtime'), physical_received_by = ?,
-         activated_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime')
+      `UPDATE submissions SET status = 'Berkas Diterima', physical_status = 'Diterima',
+         physical_received_at = NOW(), physical_received_by = ?, updated_at = NOW()
        WHERE id = ?`,
       [req.user.name, subId]
     );
-    await query.run(
-      `UPDATE members SET membership_status = 'Aktif', updated_at = datetime('now', 'localtime') WHERE id = ?`,
-      [sub.member_id]
-    );
-    await logEvent(subId, req.user, 'Disetujui Admin. Pemohon resmi menjadi anggota penerbit IKAPI Jawa Barat', notes || null);
-    res.json({ message: 'Pengajuan di-approve. Pemohon kini resmi menjadi anggota penerbit IKAPI Jawa Barat.', status: 'Aktif' });
+    await logEvent(subId, req.user, 'Berkas fisik diterima sekretariat IKAPI Jawa Barat, siap dikirim ke IKAPI Pusat', notes || null);
+    res.json({ message: 'Berkas fisik dikonfirmasi diterima. Langkah berikutnya: kirim paket ke IKAPI Pusat.', status: 'Berkas Diterima' });
   } catch (err) {
     console.error('Physical received error:', err);
     res.status(500).json({ error: 'Gagal mengonfirmasi berkas fisik.' });
+  }
+});
+
+// Admin mencatat paket berkas dikirim ke IKAPI Pusat; status menjadi menunggu No. KTA dari Pusat
+app.post('/api/submissions/:id/sent-to-central', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const subId = req.params.id;
+    const { courier, trackingNo, notes } = req.body;
+    const sub = await query.get('SELECT id, status FROM submissions WHERE id = ?', [subId]);
+    if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (sub.status !== 'Berkas Diterima') {
+      return res.status(400).json({ error: 'Hanya pengajuan yang berkas fisiknya sudah diterima yang bisa dikirim ke Pusat.' });
+    }
+    if (!String(courier || '').trim()) {
+      return res.status(400).json({ error: 'Isi jasa pengiriman / cara pengiriman ke IKAPI Pusat.' });
+    }
+    await query.run(
+      `UPDATE submissions SET status = 'Dikirim ke Pusat', sent_to_central_at = NOW(),
+         central_courier = ?, central_tracking_no = ?, central_notes = ?, central_sent_by = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [String(courier).trim(), trackingNo ? String(trackingNo).trim() : null, notes || null, req.user.name, subId]
+    );
+    const detail = [String(courier).trim(), trackingNo ? `resi ${String(trackingNo).trim()}` : null].filter(Boolean).join(' · ');
+    await logEvent(subId, req.user, `Berkas dikirim ke IKAPI Pusat (${detail}), menunggu Nomor KTA`, notes || null);
+    res.json({ message: 'Pengiriman ke IKAPI Pusat tercatat. Sekretaris menginput Nomor KTA setelah terbit dari Pusat.', status: 'Dikirim ke Pusat' });
+  } catch (err) {
+    console.error('Sent to central error:', err);
+    res.status(500).json({ error: 'Gagal mencatat pengiriman ke Pusat.' });
   }
 });
 
@@ -1550,6 +2067,8 @@ app.get('/api/admin/dashboard-stats', authenticate, authorize('Admin', 'Sekretar
     const pendingPayment = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu Pembayaran'`);
     const pendingSecretary = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu TTD Sekretaris'`);
     const pendingPhysical = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Pengiriman Berkas'`);
+    const pendingCentralSend = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Berkas Diterima'`);
+    const pendingKta = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Dikirim ke Pusat'`);
     const pendingApproval = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Menunggu Approval'`);
     const activeMembers = await query.get(`SELECT COUNT(*) as count FROM members WHERE membership_status = 'Aktif'`);
     const rejectedSubmissions = await query.get(`SELECT COUNT(*) as count FROM submissions WHERE status = 'Ditolak'`);
@@ -1591,6 +2110,8 @@ app.get('/api/admin/dashboard-stats', authenticate, authorize('Admin', 'Sekretar
         pendingPayment: pendingPayment.count,
         pendingSecretary: pendingSecretary.count,
         pendingPhysical: pendingPhysical.count,
+        pendingCentralSend: pendingCentralSend.count,
+        pendingKta: pendingKta.count,
         activeMembers: activeMembers.count,
         rejectedSubmissions: rejectedSubmissions.count,
         needRevision: needRevision.count,
@@ -1614,24 +2135,32 @@ app.get('/api/admin/dashboard-stats', authenticate, authorize('Admin', 'Sekretar
 app.get('/api/members', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
   try {
     const { category, status, search } = req.query;
-    let sql = 'SELECT * FROM members WHERE 1=1';
+    // Sertakan status pengajuan terakhir agar Sekretaris tahu siapa yang menunggu No. KTA dari Pusat
+    let sql = `SELECT m.*, (SELECT s.status FROM submissions s WHERE s.member_id = m.id ORDER BY s.id DESC LIMIT 1) AS submission_status,
+                 (SELECT s.sent_to_central_at FROM submissions s WHERE s.member_id = m.id ORDER BY s.id DESC LIMIT 1) AS sent_to_central_at,
+                 (SELECT s.central_courier FROM submissions s WHERE s.member_id = m.id ORDER BY s.id DESC LIMIT 1) AS central_courier,
+                 (SELECT s.central_tracking_no FROM submissions s WHERE s.member_id = m.id ORDER BY s.id DESC LIMIT 1) AS central_tracking_no,
+                 (SELECT s.submission_type FROM submissions s WHERE s.member_id = m.id ORDER BY s.id DESC LIMIT 1) AS submission_type
+               FROM members m
+               -- Calon dari pendaftaran akun tanpa pengajuan terkirim (data sementara) tidak ditampilkan
+               WHERE (m.membership_status <> 'Calon' OR EXISTS (SELECT 1 FROM submissions s WHERE s.member_id = m.id AND s.status <> 'Draf'))`;
     const params = [];
 
     if (category && category !== 'Semua') {
-      sql += ' AND category = ?';
+      sql += ' AND m.category = ?';
       params.push(category);
     }
     if (status && status !== 'Semua') {
-      sql += ' AND membership_status = ?';
+      sql += ' AND m.membership_status = ?';
       params.push(status);
     }
     if (search) {
-      sql += ' AND (publisher_name LIKE ? OR leader_name LIKE ? OR kta_number LIKE ? OR city LIKE ?)';
+      sql += ' AND (m.publisher_name LIKE ? OR m.leader_name LIKE ? OR m.kta_number LIKE ? OR m.city LIKE ?)';
       const s = `%${search}%`;
       params.push(s, s, s, s);
     }
 
-    sql += ' ORDER BY id DESC';
+    sql += ' ORDER BY m.id DESC';
     const members = await query.all(sql, params);
     res.json({ members });
   } catch (err) {
@@ -1640,25 +2169,81 @@ app.get('/api/members', authenticate, authorize('Sekretaris', 'Ketua'), async (r
   }
 });
 
-// Update KTA number for a member
-app.put('/api/members/:id/kta', authenticate, authorize('Sekretaris', 'Ketua'), async (req, res) => {
+// Input / koreksi No. KTA dari IKAPI Pusat (tugas Sekretaris).
+// Pengajuan berstatus 'Dikirim ke Pusat' otomatis menjadi Aktif saat KTA diinput.
+app.put('/api/members/:id/kta', authenticate, authorize('Sekretaris'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { kta_number } = req.body;
-    if (!kta_number || !kta_number.trim()) {
+    const kta = String(req.body.kta_number || '').trim().toUpperCase();
+    if (!kta) {
       return res.status(400).json({ error: 'Nomor KTA wajib diisi.' });
     }
-    const member = await query.get('SELECT id FROM members WHERE id = ?', [id]);
+    const member = await query.get('SELECT id, membership_status FROM members WHERE id = ?', [id]);
     if (!member) return res.status(404).json({ error: 'Data anggota tidak ditemukan.' });
 
-    await query.run(
-      `UPDATE members SET kta_number = ?, membership_status = 'Aktif', updated_at = datetime('now', 'localtime') WHERE id = ?`,
-      [kta_number.trim().toUpperCase(), id]
+    const dup = await query.get('SELECT publisher_name FROM members WHERE kta_number = ? AND id <> ?', [kta, member.id]);
+    if (dup) {
+      return res.status(400).json({ error: `Nomor KTA ${kta} sudah dipakai ${dup.publisher_name}.` });
+    }
+
+    const sub = await query.get(
+      'SELECT id, status FROM submissions WHERE member_id = ? ORDER BY id DESC LIMIT 1',
+      [member.id]
     );
-    res.json({ message: `Nomor KTA berhasil disimpan: ${kta_number.trim().toUpperCase()}` });
+
+    if (sub?.status === 'Dikirim ke Pusat') {
+      await query.run(
+        `UPDATE members SET kta_number = ?, membership_status = 'Aktif', updated_at = NOW() WHERE id = ?`,
+        [kta, member.id]
+      );
+      await query.run(
+        `UPDATE submissions SET status = 'Aktif', activated_at = NOW(), updated_at = NOW() WHERE id = ?`,
+        [sub.id]
+      );
+      await logEvent(sub.id, req.user, `Nomor KTA dari IKAPI Pusat diinput: ${kta}. Pemohon resmi menjadi anggota aktif`);
+      return res.json({ message: `Nomor KTA ${kta} tersimpan. Anggota kini aktif.`, activated: true });
+    }
+
+    // Koreksi KTA untuk anggota yang sudah aktif / data lama
+    const isExisting = sub ? sub.status === 'Aktif' : member.membership_status !== 'Calon';
+    if (!isExisting) {
+      return res.status(400).json({
+        error: sub
+          ? `Nomor KTA baru bisa diinput setelah berkas dikirim ke IKAPI Pusat (status pengajuan saat ini: ${sub.status}).`
+          : 'Calon anggota ini belum memiliki pengajuan.'
+      });
+    }
+    await query.run(
+      `UPDATE members SET kta_number = ?,
+         membership_status = CASE WHEN membership_status = 'Calon' THEN 'Aktif' ELSE membership_status END,
+         updated_at = NOW() WHERE id = ?`,
+      [kta, member.id]
+    );
+    if (sub) await logEvent(sub.id, req.user, `Nomor KTA diperbarui: ${kta}`);
+    res.json({ message: `Nomor KTA berhasil disimpan: ${kta}`, activated: false });
   } catch (err) {
     console.error('Update KTA error:', err);
     res.status(500).json({ error: 'Gagal menyimpan nomor KTA.' });
+  }
+});
+
+// Ubah status keanggotaan (mis. menonaktifkan anggota yang tidak memperpanjang)
+app.put('/api/members/:id/status', authenticate, authorize('Sekretaris'), async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!['Aktif', 'Nonaktif'].includes(status)) {
+      return res.status(400).json({ error: 'Status keanggotaan harus Aktif atau Nonaktif.' });
+    }
+    const member = await query.get('SELECT id, publisher_name, kta_number FROM members WHERE id = ?', [req.params.id]);
+    if (!member) return res.status(404).json({ error: 'Data anggota tidak ditemukan.' });
+    if (status === 'Aktif' && !member.kta_number) {
+      return res.status(400).json({ error: 'Isi Nomor KTA terlebih dahulu sebelum mengaktifkan anggota.' });
+    }
+    await query.run('UPDATE members SET membership_status = ?, updated_at = NOW() WHERE id = ?', [status, member.id]);
+    res.json({ message: `${member.publisher_name} kini berstatus ${status}.` });
+  } catch (err) {
+    console.error('Update member status error:', err);
+    res.status(500).json({ error: 'Gagal mengubah status keanggotaan.' });
   }
 });
 
@@ -1683,8 +2268,9 @@ app.get('/api/members/export', authenticate, authorize('Sekretaris', 'Ketua'), a
         specialization as 'Spesialisasi Buku',
         membership_status as 'Status Keanggotaan',
         created_at as 'Tanggal Terdaftar'
-      FROM members
-      ORDER BY id ASC
+      FROM members m
+      WHERE (m.membership_status <> 'Calon' OR EXISTS (SELECT 1 FROM submissions s WHERE s.member_id = m.id AND s.status <> 'Draf'))
+      ORDER BY m.id ASC
     `);
 
     const worksheet = XLSX.utils.json_to_sheet(members);
@@ -1706,9 +2292,23 @@ app.get('/api/members/export', authenticate, authorize('Sekretaris', 'Ketua'), a
 // 8. SETTINGS MANAGEMENT
 // ==========================================
 
-app.get('/api/settings', async (req, res) => {
+// Kontak publik untuk halaman login / lupa sandi (tanpa login). Hanya kunci kontak yang dibuka.
+app.get('/api/public/contact', async (req, res) => {
   try {
-    const settingsList = await query.all('SELECT key, value, description FROM settings');
+    const rows = await query.all(
+      "SELECT settings.key, settings.value FROM settings WHERE settings.key IN ('admin_whatsapp', 'office_phone')"
+    );
+    const out = { admin_whatsapp: '', office_phone: '' };
+    rows.forEach((r) => { out[r.key] = r.value; });
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal memuat kontak.' });
+  }
+});
+
+app.get('/api/settings', authenticate, async (req, res) => {
+  try {
+    const settingsList = await query.all('SELECT settings.key, settings.value, settings.description FROM settings');
     const settings = {};
     settingsList.forEach(s => { settings[s.key] = s.value; });
     res.json({ settings, list: settingsList });
@@ -1731,8 +2331,8 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
 
     for (const [key, value] of Object.entries(settings)) {
       await query.run(
-        `INSERT INTO settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        `INSERT INTO settings (settings.key, value) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE value = VALUES(value)`,
         [key, String(value)]
       );
     }
@@ -1745,6 +2345,218 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
     console.error('Save settings error:', err);
     res.status(500).json({ error: 'Gagal menyimpan pengaturan.' });
   }
+});
+
+// Sesi dari header Authorization atau cookie httpOnly (untuk tautan unduhan biasa); null bila tidak valid
+function tokenUser(req) {
+  return verifySession(readToken(req) || readCookie(req, SESSION_COOKIE));
+}
+
+// ==========================================
+// GABUNGAN BERKAS PERSYARATAN (satu PDF)
+// ==========================================
+// PRD bagian 6: semua berkas persyaratan digabung menjadi satu PDF untuk dikirim ke IKAPI Pusat.
+const A4 = [595.28, 841.89];
+// Font standar PDF hanya mendukung Latin-1
+const pdfText = (s) => String(s ?? '').replace(/[–—]/g, '-').replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
+
+function wrapText(text, font, size, maxWidth) {
+  const words = pdfText(text).split(/\s+/);
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    if (font.widthOfTextAtSize(next, size) > maxWidth && line) {
+      lines.push(line);
+      line = w;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+app.get('/api/submissions/:id/documents/merged', async (req, res) => {
+  let user;
+  try {
+    user = await tokenUser(req);
+  } catch {
+    return res.status(500).json({ error: 'Gagal memeriksa sesi login.' });
+  }
+  if (!user) return res.status(401).json({ error: 'Sesi login tidak valid. Silakan masuk kembali.' });
+  if (!ROLES.includes(user.role)) return res.status(403).json({ error: 'Akses ditolak.' });
+
+  try {
+    const sub = await query.get(
+      `SELECT s.id, s.user_id, s.submission_type, s.reference_number, s.status,
+              m.publisher_name, m.category, u.name AS applicant_name
+       FROM submissions s
+       JOIN users u ON u.id = s.user_id
+       LEFT JOIN members m ON m.id = s.member_id
+       WHERE s.id = ?`,
+      [req.params.id]
+    );
+    if (!sub || (user.role === 'Anggota' && sub.user_id !== user.id)) {
+      return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    }
+
+    const docs = await query.all(
+      `SELECT document_title AS title, file_path, file_name FROM documents
+       WHERE submission_id = ? AND file_path <> '' ORDER BY id`,
+      [sub.id]
+    );
+    const pay = await query.get('SELECT proof_file, proof_filename FROM payments WHERE submission_id = ?', [sub.id]);
+    if (pay?.proof_file) {
+      docs.push({ title: 'Bukti Transfer Pembayaran', file_path: pay.proof_file, file_name: pay.proof_filename });
+    }
+    if (!docs.length) {
+      return res.status(400).json({ error: 'Belum ada berkas yang diunggah untuk pengajuan ini.' });
+    }
+
+    const out = await PDFDocument.create();
+    const font = await out.embedFont(StandardFonts.Helvetica);
+    const bold = await out.embedFont(StandardFonts.HelveticaBold);
+
+    const notePage = (title, message) => {
+      const page = out.addPage(A4);
+      page.drawText(pdfText(title), { x: 50, y: A4[1] - 70, size: 14, font: bold });
+      wrapText(message, font, 11, A4[0] - 100).forEach((line, i) => {
+        page.drawText(line, { x: 50, y: A4[1] - 100 - i * 16, size: 11, font, color: rgb(0.4, 0.4, 0.4) });
+      });
+    };
+
+    const results = [];
+    for (const doc of docs) {
+      const fullPath = path.join(uploadsDir, path.basename(doc.file_path));
+      const ext = path.extname(fullPath).toLowerCase();
+      const startPage = out.getPageCount() + 2; // +1 sampul, +1 nomor halaman berbasis 1
+      try {
+        if (!fs.existsSync(fullPath)) throw new Error('file tidak ditemukan di server');
+        const bytes = fs.readFileSync(fullPath);
+        if (ext === '.pdf') {
+          const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+          const pages = await out.copyPages(src, src.getPageIndices());
+          pages.forEach((p) => out.addPage(p));
+        } else if (['.png', '.jpg', '.jpeg'].includes(ext)) {
+          const img = ext === '.png' ? await out.embedPng(bytes) : await out.embedJpg(bytes);
+          const page = out.addPage(A4);
+          page.drawText(pdfText(doc.title), { x: 40, y: A4[1] - 40, size: 11, font: bold });
+          const maxW = A4[0] - 80;
+          const maxH = A4[1] - 100;
+          const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+          const w = img.width * scale;
+          const h = img.height * scale;
+          page.drawImage(img, { x: (A4[0] - w) / 2, y: A4[1] - 60 - h, width: w, height: h });
+        } else {
+          throw new Error(`format ${ext || 'tanpa ekstensi'} tidak dapat digabung`);
+        }
+        results.push({ ...doc, ok: true, page: startPage });
+      } catch (err) {
+        notePage(doc.title, `Berkas "${doc.file_name || path.basename(doc.file_path)}" tidak dapat digabung (${err.message}). Unduh berkas aslinya secara terpisah dari sistem.`);
+        results.push({ ...doc, ok: false, page: startPage });
+      }
+    }
+
+    // Halaman sampul + daftar isi di depan
+    const cover = out.insertPage(0, A4);
+    let y = A4[1] - 70;
+    cover.drawText('GABUNGAN BERKAS PERSYARATAN', { x: 50, y, size: 16, font: bold });
+    y -= 22;
+    cover.drawText('IKAPI Pengurus Daerah Jawa Barat', { x: 50, y, size: 11, font, color: rgb(0.03, 0.52, 0.77) });
+    y -= 34;
+    const info = [
+      ['Penerbit', sub.publisher_name || sub.applicant_name],
+      ['Jenis pengajuan', sub.submission_type === 'Heregistrasi' ? 'Heregistrasi' : 'Anggota Baru'],
+      ['Kategori', sub.category || '-'],
+      ['No. surat pengantar', sub.reference_number || '-'],
+      ['No. pengajuan', `#${sub.id}`],
+      ['Dibuat', nowSql()]
+    ];
+    for (const [label, value] of info) {
+      cover.drawText(pdfText(label), { x: 50, y, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
+      cover.drawText(pdfText(value), { x: 190, y, size: 10, font: bold });
+      y -= 16;
+    }
+    y -= 18;
+    cover.drawText('Daftar berkas', { x: 50, y, size: 12, font: bold });
+    y -= 20;
+    results.forEach((r, i) => {
+      const label = `${i + 1}. ${r.title}`;
+      cover.drawText(pdfText(label).slice(0, 80), { x: 50, y, size: 10, font });
+      cover.drawText(r.ok ? `hlm. ${r.page}` : 'tidak tergabung', {
+        x: 470, y, size: 10, font, color: r.ok ? rgb(0, 0, 0) : rgb(0.75, 0.2, 0.2)
+      });
+      y -= 16;
+    });
+
+    const bytes = await out.save();
+    const safeName = pdfText(sub.publisher_name || `Pengajuan_${sub.id}`).replace(/[^A-Za-z0-9_-]+/g, '_');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Gabungan_Berkas_${safeName}.pdf"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(Buffer.from(bytes));
+  } catch (err) {
+    console.error('Merge documents error:', err);
+    res.status(500).json({ error: 'Gagal membuat gabungan berkas.' });
+  }
+});
+
+// ==========================================
+// FILE UNGGAHAN (dilindungi)
+// ==========================================
+// Browser membuka file lewat <a href>/<img>/<iframe> yang tidak bisa mengirim header,
+// jadi sesi juga dibaca dari cookie httpOnly. Anggota hanya boleh membuka file miliknya;
+// Admin/Sekretaris/Ketua boleh membuka semua file pengajuan.
+app.get('/uploads/:filename', async (req, res) => {
+  let user;
+  try {
+    user = await tokenUser(req);
+  } catch {
+    return res.status(500).json({ error: 'Gagal memeriksa sesi login.' });
+  }
+  if (!user) return res.status(401).json({ error: 'Sesi login telah kedaluwarsa atau tidak valid.' });
+
+  const filename = path.basename(req.params.filename);
+  const fullPath = path.join(uploadsDir, filename);
+  if (!fullPath.startsWith(uploadsDir + path.sep) || !fs.existsSync(fullPath)) {
+    return res.status(404).json({ error: 'File tidak ditemukan.' });
+  }
+
+  try {
+    if (user.role === 'Anggota') {
+      const publicPath = `/uploads/${filename}`;
+      const owned = await query.get(
+        `SELECT 1 FROM documents d JOIN submissions s ON s.id = d.submission_id
+           WHERE d.file_path = ? AND s.user_id = ?
+         UNION
+         SELECT 1 FROM payments p JOIN submissions s ON s.id = p.submission_id
+           WHERE p.proof_file = ? AND s.user_id = ?
+         LIMIT 1`,
+        [publicPath, user.id, publicPath, user.id]
+      );
+      if (!owned) return res.status(404).json({ error: 'File tidak ditemukan.' });
+    } else if (!ROLES.includes(user.role)) {
+      return res.status(403).json({ error: 'Akses ditolak.' });
+    }
+
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.sendFile(fullPath);
+  } catch (err) {
+    console.error('Serve upload error:', err);
+    res.status(500).json({ error: 'Gagal membuka file.' });
+  }
+});
+
+// Error dari multer (ukuran / tipe file) dikembalikan sebagai JSON 400
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError || err?.code === 'INVALID_FILE_TYPE') {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Ukuran file maksimal 15MB.' : err.message;
+    return res.status(400).json({ error: msg });
+  }
+  next(err);
 });
 
 // Serve built frontend if exists

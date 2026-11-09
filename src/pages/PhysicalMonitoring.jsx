@@ -2,16 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import DocumentVerificationModal from '../components/DocumentVerificationModal';
 import { STEPS, STATUS_LABEL } from '../components/StatusStepper';
-import { Activity, Truck, RefreshCw, CheckCircle, Clock, Search } from 'lucide-react';
+import {
+  Activity, Truck, RefreshCw, CheckCircle, Clock, Search, Send, PackageCheck, BadgeCheck, Eye,
+  AlertTriangle, Inbox, Hash, CalendarDays, User, ChevronRight,
+} from 'lucide-react';
 import { notify } from '../components/AppDialog';
 
 const token = () => localStorage.getItem('ikapi_token');
-
-const PHYSICAL_BADGE = {
-  'Belum Dikirim': 'bg-amber-50 text-amber-800 border-amber-200',
-  Dikirim: 'bg-sky-50 text-[#0884c4] border-sky-200',
-  Diterima: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-};
 
 const formatDate = (raw) => {
   if (!raw) return '-';
@@ -19,12 +16,60 @@ const formatDate = (raw) => {
   return Number.isNaN(d.getTime()) ? raw : d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-// Monitoring status pendaftaran (semua tahap) dan pengiriman berkas fisik ke sekretariat IKAPI Jawa Barat
+const daysSince = (raw) => {
+  if (!raw) return null;
+  const d = new Date(String(raw).replace(' ', 'T'));
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+};
+
+const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+
+// Tahap setelah surat ditandatangani: berkas fisik ke IKAPI Jabar -> dikirim ke IKAPI Pusat -> No. KTA terbit
+// Kelas warna ditulis lengkap supaya terbaca Tailwind.
+const SECTIONS = [
+  {
+    key: 'fisik', label: 'Berkas fisik dari pemohon', short: 'Berkas dari pemohon', icon: Truck, statuses: ['Pengiriman Berkas'],
+    hint: 'Pemohon mencetak & mengirim berkas ke sekretariat',
+    empty: 'Belum ada berkas fisik yang ditunggu dari pemohon.',
+    tone: { icon: 'bg-amber-100 text-amber-700', active: 'border-amber-300 bg-amber-50/70 ring-2 ring-amber-200', bar: 'bg-amber-400', text: 'text-amber-700' },
+  },
+  {
+    key: 'pusat', label: 'Siap dikirim ke Pusat', short: 'Siap ke Pusat', icon: PackageCheck, statuses: ['Berkas Diterima'],
+    hint: 'Berkas sudah di sekretariat, tinggal dikirim',
+    empty: 'Tidak ada berkas yang menunggu dikirim ke IKAPI Pusat.',
+    tone: { icon: 'bg-indigo-100 text-indigo-700', active: 'border-indigo-300 bg-indigo-50/70 ring-2 ring-indigo-200', bar: 'bg-indigo-400', text: 'text-indigo-700' },
+  },
+  {
+    key: 'kta', label: 'Menunggu KTA dari Pusat', short: 'Menunggu KTA', icon: Send, statuses: ['Dikirim ke Pusat'],
+    hint: 'Sudah dikirim, menunggu No. KTA terbit',
+    empty: 'Tidak ada pengajuan yang sedang diproses di IKAPI Pusat.',
+    tone: { icon: 'bg-violet-100 text-violet-700', active: 'border-violet-300 bg-violet-50/70 ring-2 ring-violet-200', bar: 'bg-violet-400', text: 'text-violet-700' },
+  },
+  {
+    key: 'selesai', label: 'Selesai · anggota aktif', short: 'Anggota aktif', icon: BadgeCheck, statuses: ['Aktif'],
+    hint: 'No. KTA terbit, keanggotaan aktif',
+    empty: 'Belum ada anggota yang aktif.',
+    tone: { icon: 'bg-emerald-100 text-emerald-700', active: 'border-emerald-300 bg-emerald-50/70 ring-2 ring-emerald-200', bar: 'bg-emerald-400', text: 'text-emerald-700' },
+  },
+];
+
+// Ringkasan tile per status (Berkas Diterima ditampilkan terpisah dari Dikirim ke Pusat)
+const TILES = [
+  ...STEPS.slice(0, 6),
+  { key: 'Berkas Diterima', label: 'Berkas diterima', icon: PackageCheck },
+  STEPS[6],
+  STEPS[7],
+];
+// Indeks tile pertama tahap fisik (Berkas Fisik) untuk pengelompokan visual
+const PHYSICAL_FROM = 5;
+
+// Monitoring status pendaftaran (semua tahap) sampai pengiriman ke IKAPI Pusat dan terbitnya No. KTA
 export default function PhysicalMonitoring({ onOpenScreening }) {
   const { user } = useAuth();
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('Menunggu');
+  const [section, setSection] = useState('fisik');
   const [search, setSearch] = useState('');
   const [detail, setDetail] = useState(null);
 
@@ -48,15 +93,25 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
     setDetail(await res.json());
   };
 
-  const handleReceive = async (id, notes) => {
-    const res = await fetch(`/api/submissions/${id}/physical-received`, {
+  const postAction = async (url, body) => {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     notify(data.message);
+  };
+
+  const handleReceive = async (id, notes) => {
+    await postAction(`/api/submissions/${id}/physical-received`, { notes });
+    await openDetail(id);
+    load();
+  };
+
+  const handleSendCentral = async (id, data) => {
+    await postAction(`/api/submissions/${id}/sent-to-central`, data);
     await openDetail(id);
     load();
   };
@@ -70,107 +125,270 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
     return map;
   }, [submissions]);
 
-  const physicalList = submissions
-    .filter((s) => s.status === 'Pengiriman Berkas' || (s.status === 'Aktif' && s.physical_received_at))
-    .filter((s) => filter === 'Semua' || (filter === 'Menunggu' ? s.status === 'Pengiriman Berkas' : s.status === 'Aktif'))
-    .filter((s) => !search.trim() || `${s.publisher_name} ${s.applicant_name} ${s.physical_tracking_no || ''}`.toLowerCase().includes(search.toLowerCase()));
+  const sectionCount = (sec) => submissions.filter((s) => sec.statuses.includes(s.status)).length;
+  const activeSection = SECTIONS.find((s) => s.key === section) || SECTIONS[0];
+  const q = search.trim().toLowerCase();
+  const list = submissions
+    .filter((s) => activeSection.statuses.includes(s.status))
+    .filter((s) => !q || `${s.publisher_name} ${s.applicant_name} ${s.physical_tracking_no || ''} ${s.central_tracking_no || ''} ${s.member_kta || ''}`.toLowerCase().includes(q));
 
-  const waitingSent = submissions.filter((s) => s.status === 'Pengiriman Berkas' && s.physical_status === 'Dikirim').length;
-  const notSent = submissions.filter((s) => s.status === 'Pengiriman Berkas' && s.physical_status !== 'Dikirim').length;
+  const shipped = submissions.filter((s) => s.status === 'Pengiriman Berkas' && s.physical_status === 'Dikirim').length;
+  const notShipped = submissions.filter((s) => s.status === 'Pengiriman Berkas' && s.physical_status !== 'Dikirim').length;
+  const readyCentral = stageCounts['Berkas Diterima'] || 0;
+  const waitingKta = submissions.filter((s) => s.status === 'Dikirim ke Pusat');
+  const overdueKta = waitingKta.filter((s) => (daysSince(s.sent_to_central_at) ?? 0) > 30).length;
+  const totalActive = stageCounts.Aktif || 0;
+  const needAction = shipped + readyCentral;
+
+  const rowInfo = (s) => {
+    if (s.status === 'Pengiriman Berkas') {
+      return s.physical_status === 'Dikirim'
+        ? { badge: 'Sudah dikirim · perlu dikonfirmasi', tone: 'bg-sky-50 text-[#0884c4] border-sky-200',
+            meta: [
+              s.physical_courier && { icon: Truck, text: s.physical_courier },
+              s.physical_tracking_no && { icon: Hash, text: `Resi ${s.physical_tracking_no}` },
+              { icon: CalendarDays, text: `Dikirim ${formatDate(s.physical_sent_at)}` },
+            ] }
+        : { badge: 'Belum dikirim pemohon', tone: 'bg-amber-50 text-amber-800 border-amber-200',
+            meta: [{ icon: CalendarDays, text: `Disetujui Ketua ${formatDate(s.approved_at)}` }] };
+    }
+    if (s.status === 'Berkas Diterima') {
+      return { badge: 'Di sekretariat · siap dikirim', tone: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+        meta: [
+          { icon: CalendarDays, text: `Diterima ${formatDate(s.physical_received_at)}` },
+          s.physical_received_by && { icon: User, text: `oleh ${s.physical_received_by}` },
+        ] };
+    }
+    if (s.status === 'Dikirim ke Pusat') {
+      const days = daysSince(s.sent_to_central_at);
+      return { badge: `Menunggu KTA${days !== null ? ` · ${days} hari` : ''}`, overdue: days > 30,
+        tone: days > 30 ? 'bg-red-50 text-red-700 border-red-200' : 'bg-violet-50 text-violet-700 border-violet-200',
+        meta: [
+          { icon: CalendarDays, text: `Dikirim ke Pusat ${formatDate(s.sent_to_central_at)}` },
+          s.central_courier && { icon: Truck, text: s.central_courier },
+          s.central_tracking_no && { icon: Hash, text: `Resi ${s.central_tracking_no}` },
+        ] };
+    }
+    return { badge: s.member_kta ? `KTA ${s.member_kta}` : 'Aktif', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      meta: [
+        { icon: CalendarDays, text: `Aktif ${formatDate(s.activated_at)}` },
+        s.sent_to_central_at && { icon: Send, text: `Dikirim ke Pusat ${formatDate(s.sent_to_central_at)}` },
+      ] };
+  };
+
+  // Posisi pengajuan di 4 tahap fisik (0..3) untuk progres kecil di kartu
+  const physicalStage = (s) => {
+    if (s.status === 'Pengiriman Berkas') return 0;
+    if (s.status === 'Berkas Diterima') return 1;
+    if (s.status === 'Dikirim ke Pusat') return 2;
+    return 3;
+  };
+
+  const actionFor = (s) => {
+    if (user?.role !== 'Admin') return { label: 'Lihat', icon: Eye, primary: false };
+    if (s.status === 'Pengiriman Berkas' && s.physical_status === 'Dikirim') return { label: 'Konfirmasi diterima', icon: CheckCircle, primary: true };
+    if (s.status === 'Berkas Diterima') return { label: 'Catat kirim ke Pusat', icon: Send, primary: true };
+    return { label: 'Lihat riwayat', icon: Clock, primary: false };
+  };
+
+  const modalRole = user?.role === 'Admin' && ['Pengiriman Berkas', 'Berkas Diterima'].includes(detail?.submission?.status) ? 'Admin' : 'Pengamat';
+
+  const kpis = [
+    { label: 'Perlu tindakan Admin', value: needAction, note: `${shipped} konfirmasi · ${readyCentral} kirim ke Pusat`, icon: AlertTriangle },
+    { label: 'Menunggu KTA Pusat', value: waitingKta.length, note: overdueKta ? `${overdueKta} lewat 30 hari` : 'Semua dalam batas wajar', icon: Send },
+    { label: 'Anggota aktif', value: totalActive, note: 'No. KTA sudah terbit', icon: BadgeCheck },
+  ];
 
   return (
     <div className="space-y-6">
-      {/* Ringkasan semua tahap */}
-      <div className="card-surface p-5 sm:p-6 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-[#0da2e7] rounded-xl text-white"><Activity className="w-6 h-6" /></div>
-            <div>
-              <h2 className="text-2xl font-light tracking-tight text-slate-900">Monitoring Status Pendaftaran</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Posisi setiap pengajuan di alur, sampai berkas fisik diterima sekretariat IKAPI Jawa Barat.</p>
+      {/* Hero ringkasan */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#075985] via-[#0884c4] to-[#0da2e7] text-white p-5 sm:p-7 shadow-[0_20px_40px_-20px_rgba(8,132,196,0.7)]">
+        <div className="pointer-events-none absolute -right-16 -top-20 w-72 h-72 rounded-full bg-white/10" />
+        <div className="pointer-events-none absolute right-24 -bottom-24 w-56 h-56 rounded-full bg-white/5" />
+        <div className="relative flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3 sm:gap-4 min-w-0">
+            <div className="p-3 rounded-2xl bg-white/15 backdrop-blur-sm ring-1 ring-white/25 flex-shrink-0">
+              <Activity className="w-6 h-6" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-2xl sm:text-3xl font-light tracking-tight">Monitoring Berkas Fisik</h2>
+              <p className="text-sm text-sky-100 mt-1 max-w-xl">
+                Pantau setiap pengajuan dari berkas fisik di sekretariat IKAPI Jawa Barat sampai No. KTA terbit dari IKAPI Pusat.
+              </p>
             </div>
           </div>
-          <button onClick={load} className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 flex items-center gap-1.5">
+          <button onClick={load}
+            className="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 ring-1 ring-white/30 text-xs font-semibold flex items-center gap-1.5 transition">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Muat ulang
           </button>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-          {[...STEPS.slice(0, 5), { key: 'Pengiriman Berkas', label: 'Menunggu approval Admin', icon: Truck }, STEPS[5]].map((step, i) => {
-            const n = stageCounts[step.key] || 0;
-            const Icon = step.icon;
+
+        <div className="relative mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {kpis.map((k) => {
+            const Icon = k.icon;
             return (
-              <button
-                key={step.key}
-                onClick={() => onOpenScreening?.(step.key)}
-                className="text-left rounded-xl border border-slate-200 bg-white p-3 hover:border-[#0da2e7] transition"
-                title={`Buka daftar: ${STATUS_LABEL[step.key]}`}
-              >
-                <div className="flex items-center justify-between">
-                  <Icon className="w-4 h-4 text-[#0884c4]" />
-                  <span className="text-[10px] text-slate-400">{i + 1}</span>
+              <div key={k.label} className="rounded-2xl bg-white/10 ring-1 ring-white/20 backdrop-blur-sm p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white text-[#0884c4] flex items-center justify-center flex-shrink-0">
+                  <Icon className="w-5 h-5" />
                 </div>
-                <p className="text-2xl font-light text-slate-900 mt-1">{n}</p>
-                <p className="text-[11px] text-slate-600 leading-tight">{step.label}</p>
-              </button>
+                <div className="min-w-0">
+                  <p className="text-[11px] uppercase tracking-wider text-sky-100">{k.label}</p>
+                  <p className="text-2xl font-semibold leading-tight">{k.value}</p>
+                  <p className="text-[11px] text-sky-100/90 truncate">{k.note}</p>
+                </div>
+              </div>
             );
           })}
         </div>
       </div>
 
-      {/* Berkas fisik */}
-      <div className="card-surface overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Truck className="w-5 h-5 text-orange-600" />
-            <h3 className="text-base text-slate-800">Approval Anggota & Data Pengiriman</h3>
-            <span className="text-xs text-slate-500">· {notSent} belum dikirim · {waitingSent} sudah dikirim, perlu dikonfirmasi</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari penerbit / resi"
-                className="text-xs pl-8 pr-3 py-2 border border-slate-200 rounded-lg w-48" />
-            </div>
-            {['Menunggu', 'Diterima', 'Semua'].map((f) => (
-              <button key={f} onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${filter === f ? 'bg-[#0da2e7] text-white border-[#0da2e7]' : 'bg-white text-slate-600 border-slate-200'}`}>
-                {f === 'Menunggu' ? 'Menunggu approval' : f === 'Diterima' ? 'Sudah di-approve' : 'Semua'}
-              </button>
-            ))}
-          </div>
+      {/* Alur semua tahap */}
+      <div className="card-surface overflow-hidden p-5 sm:p-6">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+          <h3 className="text-base font-medium text-slate-800">Alur pendaftaran</h3>
+          <p className="text-xs text-slate-400">Klik tahap untuk membuka daftarnya</p>
         </div>
-
-        {physicalList.length === 0 ? (
-          <p className="py-10 text-center text-sm text-slate-400">{loading ? 'Memuat...' : 'Tidak ada data.'}</p>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {physicalList.map((s) => {
-              const ph = s.physical_status || 'Belum Dikirim';
+        <div className="-mx-5 sm:mx-0 px-5 sm:px-0 overflow-x-auto pb-1">
+          <div className="min-w-[760px] grid grid-cols-9">
+            {TILES.map((step, i) => {
+              const n = stageCounts[step.key] || 0;
+              const Icon = step.icon;
+              const physical = i >= PHYSICAL_FROM;
+              const has = n > 0;
               return (
-                <div key={s.id} className="px-5 py-4 flex flex-col md:flex-row md:items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium text-slate-900">{s.publisher_name}</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${PHYSICAL_BADGE[ph]}`}>
-                        {ph === 'Belum Dikirim' ? 'Belum dikirim pemohon · menunggu approval' : ph === 'Dikirim' ? 'Dikirim · perlu approval Admin' : 'Disetujui · anggota aktif'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {s.submission_type === 'Heregistrasi' ? 'Registrasi' : 'Anggota Baru'} · Disetujui Ketua {formatDate(s.approved_at)}
-                      {s.physical_courier && <> · {s.physical_courier}{s.physical_tracking_no && <> · resi <span className="font-mono">{s.physical_tracking_no}</span></>}</>}
-                      {s.physical_received_at && <> · diterima {formatDate(s.physical_received_at)}</>}
-                    </p>
-                  </div>
-                  <button onClick={() => openDetail(s.id)}
-                    className={`self-start md:self-center px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 ${
-                      s.status === 'Pengiriman Berkas' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
-                    {s.status === 'Pengiriman Berkas' ? <><CheckCircle className="w-4 h-4" /> Cek & approve</> : <><Clock className="w-4 h-4" /> Lihat riwayat</>}
-                  </button>
-                </div>
+                <button
+                  key={step.key}
+                  onClick={() => onOpenScreening?.(step.key)}
+                  className={`group relative flex flex-col items-center text-center px-1 pt-3 pb-3 ${physical ? 'bg-sky-50/70' : ''} ${i === PHYSICAL_FROM ? 'rounded-l-2xl' : ''} ${i === TILES.length - 1 ? 'rounded-r-2xl' : ''}`}
+                  title={`Buka daftar: ${STATUS_LABEL[step.key] || step.label}`}
+                >
+                  {i < TILES.length - 1 && (
+                    <span className={`absolute top-[34px] left-1/2 w-full h-0.5 ${has ? 'bg-[#0da2e7]/60' : 'bg-slate-200'}`} />
+                  )}
+                  <span className={`relative z-10 w-11 h-11 rounded-full flex items-center justify-center transition group-hover:scale-110 ${
+                    has ? 'bg-[#0da2e7] text-white shadow-md shadow-sky-200' : 'bg-white text-slate-400 ring-1 ring-slate-200'}`}>
+                    <Icon className="w-5 h-5" />
+                    {has && (
+                      <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-slate-900 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white">{n}</span>
+                    )}
+                  </span>
+                  <span className={`mt-2 text-[11px] leading-tight font-medium ${has ? 'text-slate-800' : 'text-slate-400'}`}>
+                    {step.key === 'Dikirim ke Pusat' ? 'Menunggu KTA Pusat' : step.label}
+                  </span>
+                  <span className="text-[10px] text-slate-400 mt-0.5">Tahap {i + 1}</span>
+                </button>
               );
             })}
           </div>
-        )}
+          <div className="min-w-[760px] grid grid-cols-9 mt-2 text-[10px] uppercase tracking-wider font-semibold">
+            <span className="col-span-5 text-slate-400 text-center border-t border-dashed border-slate-200 pt-1.5">Verifikasi & tanda tangan</span>
+            <span className="col-span-4 text-[#0884c4] text-center border-t border-dashed border-sky-300 pt-1.5">Berkas fisik & IKAPI Pusat</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Berkas fisik -> IKAPI Pusat -> KTA */}
+      <div className="card-surface overflow-hidden">
+        <div className="p-5 sm:p-6 space-y-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-medium text-slate-800">Berkas Fisik & Pengiriman ke IKAPI Pusat</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {notShipped} belum dikirim pemohon · {shipped} perlu dikonfirmasi diterima
+              </p>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari penerbit / resi / KTA"
+                className="w-full text-sm pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-[#0da2e7]" />
+            </div>
+          </div>
+
+          {/* Tahap fisik sebagai kartu pilihan */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {SECTIONS.map((sec, i) => {
+              const Icon = sec.icon;
+              const active = section === sec.key;
+              const n = sectionCount(sec);
+              return (
+                <button key={sec.key} onClick={() => setSection(sec.key)}
+                  className={`relative text-left rounded-2xl border p-4 transition ${active ? sec.tone.active : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${sec.tone.icon}`}>
+                      <Icon className="w-[18px] h-[18px]" />
+                    </span>
+                    {i < SECTIONS.length - 1 && <ChevronRight className="hidden lg:block w-4 h-4 text-slate-300" />}
+                  </div>
+                  <p className="mt-3 text-3xl font-light text-slate-900 leading-none">{n}</p>
+                  <p className={`mt-1.5 text-sm font-semibold ${active ? sec.tone.text : 'text-slate-700'}`}>{sec.short}</p>
+                  <p className="hidden sm:block text-[11px] text-slate-500 leading-snug mt-0.5">{sec.hint}</p>
+                  {active && <span className={`absolute left-4 right-4 bottom-0 h-1 rounded-t-full ${sec.tone.bar}`} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="border-t border-slate-100 bg-slate-50/60 p-4 sm:p-6">
+          {list.length === 0 ? (
+            <div className="py-10 flex flex-col items-center text-center">
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${activeSection.tone.icon}`}>
+                {loading ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Inbox className="w-6 h-6" />}
+              </div>
+              <p className="mt-3 text-sm font-medium text-slate-700">{loading ? 'Memuat data...' : q ? 'Tidak ada hasil pencarian.' : activeSection.empty}</p>
+              {!loading && <p className="text-xs text-slate-400 mt-1">{activeSection.label}</p>}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {list.map((s) => {
+                const info = rowInfo(s);
+                const action = actionFor(s);
+                const Icon = action.icon;
+                const stage = physicalStage(s);
+                return (
+                  <div key={s.id}
+                    className={`rounded-2xl bg-white border p-4 flex flex-col gap-3 transition hover:shadow-md ${info.overdue ? 'border-red-200' : 'border-slate-200'}`}>
+                    <div className="flex items-start gap-3">
+                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0 ${activeSection.tone.icon}`}>
+                        {initials(s.publisher_name || s.applicant_name)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-900 truncate">{s.publisher_name || '-'}</p>
+                        <p className="text-xs text-slate-500 truncate">
+                          {[s.applicant_name, s.submission_type === 'Heregistrasi' ? 'Registrasi' : 'Anggota Baru'].filter(Boolean).join(' · ')}
+                        </p>
+                      </div>
+                      <span className={`text-[10px] px-2 py-1 rounded-full border font-semibold whitespace-nowrap ${info.tone}`}>{info.badge}</span>
+                    </div>
+
+                    {/* Progres 4 tahap fisik */}
+                    <div className="flex items-center gap-1.5" title={SECTIONS[stage].label}>
+                      {SECTIONS.map((sec, i) => (
+                        <span key={sec.key} className={`h-1.5 flex-1 rounded-full ${i <= stage ? sec.tone.bar : 'bg-slate-200'}`} />
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                      {s.reference_number && (
+                        <span className="flex items-center gap-1"><Hash className="w-3.5 h-3.5 text-slate-400" />{s.reference_number}</span>
+                      )}
+                      {info.meta.filter(Boolean).map((m) => {
+                        const MIcon = m.icon;
+                        return <span key={m.text} className="flex items-center gap-1"><MIcon className="w-3.5 h-3.5 text-slate-400" />{m.text}</span>;
+                      })}
+                    </div>
+
+                    <button onClick={() => openDetail(s.id)}
+                      className={`mt-auto w-full sm:w-auto sm:self-end px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                        action.primary ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-200' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                      <Icon className="w-4 h-4" /> {action.label}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {detail && (
@@ -181,8 +399,9 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
           documents={detail.documents}
           payment={detail.payment}
           timeline={detail.timeline}
-          role={user?.role === 'Admin' && detail.submission?.status === 'Pengiriman Berkas' ? 'Admin' : 'Pengamat'}
+          role={modalRole}
           onReceivePhysical={handleReceive}
+          onSendCentral={handleSendCentral}
         />
       )}
     </div>

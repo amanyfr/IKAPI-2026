@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X, CheckCircle, XCircle, FileText, CreditCard, ExternalLink, ShieldCheck, Eye, Lock,
   History, Truck, PenTool, Send, Clock
 } from 'lucide-react';
 import SubmissionTimeline, { formatTime } from './SubmissionTimeline';
-import { STATUS_LABEL } from './StatusStepper';
+import { STATUS_LABEL, POST_APPROVAL_STATUSES } from './StatusStepper';
 import { notify } from './AppDialog';
+import { fileUrl } from '../utils/fileUrl';
 
 // Label cepat alasan "Tidak sesuai" (mengisi komentar, tetap bisa diubah)
 const REASON_LABELS = [
@@ -30,15 +32,15 @@ function FilePreview({ file }) {
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 bg-white">
         <span className="text-xs font-mono text-slate-600 truncate">{file.file_name}</span>
-        <a href={file.file_path} target="_blank" rel="noreferrer" className="flex-shrink-0 text-xs text-[#0884c4] font-semibold flex items-center gap-1 hover:underline">
+        <a href={fileUrl(file.file_path)} target="_blank" rel="noreferrer" className="flex-shrink-0 text-xs text-[#0884c4] font-semibold flex items-center gap-1 hover:underline">
           <ExternalLink className="w-3.5 h-3.5" /> Tab baru
         </a>
       </div>
       <div className="flex-1 min-h-[320px] bg-slate-100">
         {isImage(file) ? (
-          <img src={file.file_path} alt={file.file_name} className="w-full h-full max-h-[60vh] object-contain" />
+          <img src={fileUrl(file.file_path)} alt={file.file_name} className="w-full h-full max-h-[60vh] object-contain" />
         ) : isPdf(file) ? (
-          <iframe title={file.file_name} src={file.file_path} className="w-full h-full min-h-[320px] lg:min-h-[52vh] bg-white" />
+          <iframe title={file.file_name} src={fileUrl(file.file_path)} className="w-full h-full min-h-[320px] lg:min-h-[52vh] bg-white" />
         ) : (
           <div className="h-full flex items-center justify-center text-xs text-slate-500 p-6 text-center">
             Pratinjau tidak tersedia untuk jenis file ini. Buka di tab baru untuk memeriksa.
@@ -70,9 +72,11 @@ export default function DocumentVerificationModal({
   onSignSecretary,
   onRejectSecretary,
   onReceivePhysical,
+  onSendCentral,
 }) {
   const status = submission?.status;
-  const initialTab = status === 'Menunggu Pembayaran' ? 'payment' : status === 'Pengiriman Berkas' ? 'physical' : 'documents';
+  const initialTab = status === 'Menunggu Pembayaran' ? 'payment'
+    : ['Pengiriman Berkas', 'Berkas Diterima', 'Dikirim ke Pusat'].includes(status) ? 'physical' : 'documents';
   const [activeTab, setActiveTab] = useState(initialTab);
   const [activeDocId, setActiveDocId] = useState(documents[0]?.id || null);
   const [opened, setOpened] = useState(() => new Set());   // dokumen yang sudah dibuka (pratinjau) di sesi ini
@@ -84,6 +88,17 @@ export default function DocumentVerificationModal({
   const [generalNotes, setGeneralNotes] = useState('');
   const [rejectingSub, setRejectingSub] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [central, setCentral] = useState({ courier: '', trackingNo: '', notes: '' });
+
+  useEffect(() => {
+    if (isOpen && submission) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
+  }, [isOpen, submission]);
 
   if (!isOpen || !submission) return null;
 
@@ -91,7 +106,10 @@ export default function DocumentVerificationModal({
   const canScreenDocs = isAdmin && status === 'Menunggu Verifikasi';
   const canVerifyPayment = isAdmin && status === 'Menunggu Pembayaran' && payment?.proof_file && payment?.verification_status === 'Menunggu';
   const canSign = role === 'Sekretaris' && status === 'Menunggu TTD Sekretaris';
-  const canReceive = isAdmin && status === 'Pengiriman Berkas';
+  // Berkas fisik baru bisa dikonfirmasi setelah pemohon menandainya sudah dikirim
+  const awaitingShipment = isAdmin && status === 'Pengiriman Berkas' && submission.physical_status !== 'Dikirim';
+  const canReceive = isAdmin && status === 'Pengiriman Berkas' && submission.physical_status === 'Dikirim';
+  const canSendCentral = isAdmin && status === 'Berkas Diterima' && Boolean(onSendCentral);
 
   const activeDoc = documents.find((d) => d.id === activeDocId) || documents[0];
   const paymentFile = payment?.proof_file ? { file_path: payment.proof_file, file_name: payment.proof_filename || 'Bukti transfer', mime_type: '' } : null;
@@ -157,12 +175,12 @@ export default function DocumentVerificationModal({
   const tabs = [
     { key: 'documents', icon: FileText, label: `Dokumen (${okCount}/${documents.length})` },
     { key: 'payment', icon: CreditCard, label: `Pembayaran${payment?.verification_status === 'Valid' ? ' · Valid' : ''}` },
-    ...(['Pengiriman Berkas', 'Aktif'].includes(status) ? [{ key: 'physical', icon: Truck, label: 'Pengiriman & Approval' }] : []),
+    ...(POST_APPROVAL_STATUSES.includes(status) ? [{ key: 'physical', icon: Truck, label: 'Berkas Fisik & Pusat' }] : []),
     { key: 'history', icon: History, label: 'Riwayat' },
   ];
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+  const modalContent = (
+    <div className="fixed inset-0 z-50 modal-overlay flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-6xl overflow-hidden flex flex-col max-h-[94vh]">
 
         {/* Header */}
@@ -178,6 +196,17 @@ export default function DocumentVerificationModal({
                 <strong className="font-semibold text-white">{STATUS_LABEL[status] || status}</strong>
                 {!isAdmin && !canSign && <span className="ml-1 opacity-90">· mode lihat</span>}
               </p>
+              {(submission.applicant_name || submission.applicant_email) && (
+                <p className="text-[11px] text-[#dff2fd] mt-1 flex flex-wrap items-center gap-x-1.5 min-w-0">
+                  <span className="opacity-80">Akun pemohon:</span>
+                  <span className="font-semibold text-white truncate">{submission.applicant_name || '-'}</span>
+                  {submission.applicant_email && (
+                    <a href={`mailto:${submission.applicant_email}`} className="underline decoration-white/40 hover:decoration-white truncate">
+                      {submission.applicant_email}
+                    </a>
+                  )}
+                </p>
+              )}
             </div>
           </div>
           <button onClick={onClose} aria-label="Tutup" className="p-1.5 rounded-lg text-[#dff2fd] hover:text-white hover:bg-[#0884c4] transition">
@@ -430,11 +459,13 @@ export default function DocumentVerificationModal({
           {/* ── BERKAS FISIK ── */}
           {activeTab === 'physical' && (
             <div className="p-5 sm:p-6 space-y-4 text-sm">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 {[
                   ['Disetujui Ketua', submission.approved_at, true],
                   ['Dikirim pemohon', submission.physical_sent_at, ['Dikirim', 'Diterima'].includes(submission.physical_status)],
                   ['Diterima sekretariat', submission.physical_received_at, submission.physical_status === 'Diterima'],
+                  ['Dikirim ke Pusat', submission.sent_to_central_at, Boolean(submission.sent_to_central_at)],
+                  ['No. KTA terbit', submission.activated_at, status === 'Aktif'],
                 ].map(([label, at, done]) => (
                   <div key={label} className={`rounded-xl border p-3 ${done ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
                     <p className={`text-xs font-semibold flex items-center gap-1.5 ${done ? 'text-emerald-800' : 'text-slate-500'}`}>
@@ -450,18 +481,54 @@ export default function DocumentVerificationModal({
                 <p><span className="text-slate-500">Catatan pemohon:</span> {submission.physical_notes || '-'}</p>
                 {submission.physical_received_by && <p><span className="text-slate-500">Dikonfirmasi oleh:</span> {submission.physical_received_by}</p>}
               </div>
+              {submission.sent_to_central_at && (
+                <div className="rounded-xl border border-slate-200 p-4 space-y-1 text-xs">
+                  <p className="font-semibold text-slate-700">Pengiriman ke IKAPI Pusat</p>
+                  <p><span className="text-slate-500">Dikirim lewat:</span> {submission.central_courier || '-'}</p>
+                  <p><span className="text-slate-500">No. resi:</span> <span className="font-mono">{submission.central_tracking_no || '-'}</span></p>
+                  {submission.central_notes && <p><span className="text-slate-500">Catatan:</span> {submission.central_notes}</p>}
+                  {submission.central_sent_by && <p><span className="text-slate-500">Dicatat oleh:</span> {submission.central_sent_by}</p>}
+                  <p><span className="text-slate-500">No. KTA:</span> <span className="font-mono">{submission.member_kta || 'Menunggu dari Pusat · diinput Sekretaris'}</span></p>
+                </div>
+              )}
+              {awaitingShipment && (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 flex-shrink-0" /> Pemohon belum menandai berkas fisik sudah dikirim. Konfirmasi penerimaan terbuka setelah pemohon mengirim berkas.
+                </p>
+              )}
               {canReceive && (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
                   <p className="text-xs text-emerald-900">
-                    Cek data pengiriman berkas fisik di atas, lalu approve. Pemohon langsung menjadi anggota aktif dan berganti label dari
-                    <strong> "Penerbit belum terverifikasi"</strong> menjadi <strong>"Anggota penerbit"</strong>.
+                    Cek berkas fisik yang diterima sesuai data pengiriman di atas, lalu konfirmasi. Langkah berikutnya: kirim paket ke IKAPI Pusat.
                   </p>
                   <textarea rows="2" value={generalNotes} onChange={(e) => setGeneralNotes(e.target.value)} placeholder="Catatan penerimaan (opsional)"
                     className="w-full text-xs p-2.5 border border-emerald-200 rounded-lg bg-white" />
                   <div className="flex justify-end">
                     <button disabled={busy} onClick={() => run(() => onReceivePhysical(submission.id, generalNotes))}
                       className="px-4 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5">
-                      <CheckCircle className="w-4 h-4" /> Approve · jadikan anggota penerbit
+                      <CheckCircle className="w-4 h-4" /> Konfirmasi berkas diterima
+                    </button>
+                  </div>
+                </div>
+              )}
+              {canSendCentral && (
+                <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-2">
+                  <p className="text-xs text-sky-900">
+                    Kirim paket berkas (surat pengantar, formulir, dan berkas persyaratan) ke IKAPI Pusat, lalu catat pengirimannya di sini.
+                    Status berubah menjadi <strong>Menunggu KTA dari Pusat</strong>; Sekretaris menginput No. KTA setelah terbit.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input value={central.courier} onChange={(e) => setCentral((c) => ({ ...c, courier: e.target.value }))}
+                      placeholder="Jasa pengiriman (wajib), mis. JNE / diantar langsung" className="text-xs p-2.5 border border-sky-200 rounded-lg bg-white" />
+                    <input value={central.trackingNo} onChange={(e) => setCentral((c) => ({ ...c, trackingNo: e.target.value }))}
+                      placeholder="No. resi (opsional)" className="text-xs p-2.5 border border-sky-200 rounded-lg bg-white font-mono" />
+                  </div>
+                  <textarea rows="2" value={central.notes} onChange={(e) => setCentral((c) => ({ ...c, notes: e.target.value }))}
+                    placeholder="Catatan (opsional)" className="w-full text-xs p-2.5 border border-sky-200 rounded-lg bg-white" />
+                  <div className="flex justify-end">
+                    <button disabled={busy || !central.courier.trim()} onClick={() => run(() => onSendCentral(submission.id, central))}
+                      className="px-4 py-2 text-xs font-bold rounded-lg bg-[#0da2e7] hover:bg-[#0884c4] disabled:opacity-60 text-white flex items-center gap-1.5">
+                      <Send className="w-4 h-4" /> Tandai dikirim ke IKAPI Pusat
                     </button>
                   </div>
                 </div>
@@ -491,8 +558,7 @@ export default function DocumentVerificationModal({
                   <div className="flex flex-col sm:flex-row gap-2 sm:items-center w-full sm:w-auto">
                     <input value={generalNotes} onChange={(e) => setGeneralNotes(e.target.value)} placeholder="Catatan umum untuk pemohon (opsional)"
                       className="text-xs px-3 py-2 border border-slate-200 rounded-lg sm:w-64" />
-                    <button disabled={busy || pendingCount > 0}
-                      title={pendingCount > 0 ? 'Periksa semua dokumen terlebih dahulu' : ''}
+                    <button disabled={busy || badCount === 0}
                       onClick={() => run(async () => { await onAdmin1Action(submission.id, 'request_revision', generalNotes); onClose(); })}
                       className="px-4 py-2 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-white disabled:bg-slate-200 disabled:text-slate-400 flex items-center justify-center gap-1.5">
                       <Send className="w-4 h-4" /> Kirim permintaan revisi ({badCount} dokumen)
@@ -541,4 +607,6 @@ export default function DocumentVerificationModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

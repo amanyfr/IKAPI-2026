@@ -18,6 +18,7 @@ const STATUS_DOT = {
   Aktif:    'bg-emerald-500',
   Calon:    'bg-amber-400',
   Nonaktif: 'bg-slate-300',
+  'Menunggu KTA': 'bg-violet-500',
 };
 const STATUS_LABEL = { Aktif: 'Aktif', Calon: 'Calon anggota', Nonaktif: 'Nonaktif' };
 
@@ -35,16 +36,23 @@ const initials = (name = '') =>
 const avatarTone = (name = '') =>
   AVATAR_TONES[[...name].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % AVATAR_TONES.length];
 
-const STATUS_TABS = ['Semua', 'Aktif', 'Calon', 'Nonaktif'];
+// 'Menunggu KTA' = berkas sudah dikirim ke IKAPI Pusat, No. KTA belum diinput
+const STATUS_TABS = ['Semua', 'Menunggu KTA', 'Aktif', 'Calon', 'Nonaktif'];
+const isWaitingKta = (m) => m.submission_status === 'Dikirim ke Pusat';
+const matchesStatus = (m, st) => st === 'Semua' || (st === 'Menunggu KTA' ? isWaitingKta(m) : m.membership_status === st);
 const CATEGORY_TABS = ['Semua', 'Biasa', 'Luar Biasa'];
 
 // canEditKta=false untuk Ketua: direktori hanya-lihat (input No. KTA tugas Sekretaris sesuai PRD)
-export default function MembersManagement({ canEditKta = true }) {
+export default function MembersManagement({ canEditKta = true, initialStatus = 'Semua' }) {
   const [members,  setMembers]  = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [search,   setSearch]   = useState('');
   const [category, setCategory] = useState('Semua');
-  const [status,   setStatus]   = useState('Semua');
+  const [status,   setStatus]   = useState(initialStatus);
+
+  // Panel "Input No. KTA": isian per anggota & anggota yang sedang dikonfirmasi
+  const [ktaDrafts,  setKtaDrafts]  = useState({});
+  const [confirmKta, setConfirmKta] = useState(null);
 
   // Detail Modal
   const [selectedMember, setSelectedMember] = useState(null);
@@ -78,24 +86,50 @@ export default function MembersManagement({ canEditKta = true }) {
     (!q || [m.publisher_name, m.leader_name, m.city, m.kta_number, m.email]
       .some((v) => (v || '').toLowerCase().includes(q)));
   const baseList = members.filter(matchesSearchAndCategory);
-  const visibleMembers = baseList.filter((m) => status === 'Semua' || m.membership_status === status);
-  const countFor = (st) => (st === 'Semua' ? baseList.length : baseList.filter((m) => m.membership_status === st).length);
+  const visibleMembers = baseList.filter((m) => matchesStatus(m, status));
+  const countFor = (st) => baseList.filter((m) => matchesStatus(m, st)).length;
+  // No. KTA diinput setelah berkas dikirim ke Pusat; anggota lama/aktif boleh dikoreksi
+  const canInputKta = (m) => canEditKta && (isWaitingKta(m) || m.membership_status !== 'Calon' || m.submission_status === 'Aktif');
+
+  /* ── Aktif / Nonaktif ── */
+  const [savingStatus, setSavingStatus] = useState(false);
+  const handleSetStatus = async (member, nextStatus) => {
+    setSavingStatus(true);
+    try {
+      const res = await fetch(`/api/members/${member.id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ status: nextStatus })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      notify(data.message);
+      setSelectedMember({ ...member, membership_status: nextStatus });
+      fetchMembers();
+    } catch (err) {
+      notify('Gagal mengubah status: ' + err.message);
+    } finally {
+      setSavingStatus(false);
+    }
+  };
 
   /* ── Save KTA ── */
-  const handleSaveKta = async (memberId) => {
-    if (!ktaInput.trim()) { notify('Nomor KTA wajib diisi.'); return; }
+  const handleSaveKta = async (memberId, value = ktaInput) => {
+    if (!value.trim()) { notify('Nomor KTA wajib diisi.'); return; }
     setSavingKta(true);
     try {
       const res = await fetch(`/api/members/${memberId}/kta`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ kta_number: ktaInput.trim() })
+        body: JSON.stringify({ kta_number: value.trim() })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      notify('Nomor KTA berhasil disimpan.');
+      notify(data.message || 'Nomor KTA berhasil disimpan.');
       setEditingKtaId(null);
       setKtaInput('');
+      setConfirmKta(null);
+      setKtaDrafts((d) => { const n = { ...d }; delete n[memberId]; return n; });
       fetchMembers();
     } catch (err) {
       notify('Gagal simpan KTA: ' + err.message);
@@ -126,7 +160,7 @@ export default function MembersManagement({ canEditKta = true }) {
 
   // Tampilan & edit inline No. KTA — di HP tombol edit selalu tampil (tidak ada hover)
   const renderKta = (m, alwaysShowEdit = false) =>
-    !canEditKta ? (
+    !canInputKta(m) ? (
       <span className={m.kta_number ? 'font-mono text-slate-800' : 'text-slate-400'}>
         {m.kta_number || 'Belum terbit'}
       </span>
@@ -156,14 +190,22 @@ export default function MembersManagement({ canEditKta = true }) {
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
+    ) : isWaitingKta(m) && !m.kta_number ? (
+      <button
+        type="button"
+        onClick={() => { setEditingKtaId(m.id); setKtaInput(''); }}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium whitespace-nowrap transition"
+      >
+        <KeyRound className="w-3.5 h-3.5" /> Input No. KTA
+      </button>
     ) : (
       <div className="flex items-center gap-1.5 group">
-        <span className={m.kta_number ? 'font-mono text-slate-800' : 'text-slate-400'}>
-          {m.kta_number || 'Belum terbit'}
+        <span className={m.kta_number ? 'font-mono text-slate-800' : isWaitingKta(m) ? 'text-violet-700 font-medium' : 'text-slate-400'}>
+          {m.kta_number || (isWaitingKta(m) ? 'Menunggu dari Pusat' : 'Belum terbit')}
         </span>
         <button
           onClick={() => { setEditingKtaId(m.id); setKtaInput(m.kta_number || ''); }}
-          className={`p-1 rounded text-slate-300 hover:text-[#0da2e7] hover:bg-[#f0f9ff] transition ${alwaysShowEdit ? 'text-slate-400' : 'opacity-0 group-hover:opacity-100'}`}
+          className={`p-1 rounded text-slate-300 hover:text-[#0da2e7] hover:bg-[#f0f9ff] transition ${alwaysShowEdit || isWaitingKta(m) ? 'text-slate-400' : 'opacity-0 group-hover:opacity-100'}`}
           title="Edit No. KTA"
           aria-label="Edit No. KTA"
         >
@@ -172,8 +214,99 @@ export default function MembersManagement({ canEditKta = true }) {
       </div>
     );
 
+  const waitingKta = members.filter(isWaitingKta);
+  const daysSince = (at) => (at ? Math.max(0, Math.floor((Date.now() - new Date(at).getTime()) / 86400000)) : null);
+  const fmtDate = (at) => (at ? new Date(at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-');
+
   return (
     <div className="space-y-6">
+
+      {/* ══ Input No. KTA dari IKAPI Pusat (tugas Sekretaris) ══ */}
+      {canEditKta && waitingKta.length > 0 && (
+        <div id="input-kta" className="card-surface overflow-hidden">
+          <div className="px-5 sm:px-6 pt-5 pb-4 flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="w-11 h-11 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center flex-shrink-0">
+                <KeyRound className="w-5 h-5" />
+              </span>
+              <div>
+                <h2 className="text-xl font-light tracking-tight text-slate-900">
+                  Input No. KTA dari IKAPI Pusat <span className="text-violet-600 tabular-nums">{waitingKta.length}</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+                  Berkas pemohon di bawah ini sudah dikirim ke IKAPI Pusat. Setelah Nomor KTA terbit, isi di sini.
+                  Status pemohon otomatis menjadi <strong className="font-medium text-slate-700">Anggota Aktif</strong> dan pemohon menerima email.
+                </p>
+              </div>
+            </div>
+          </div>
+          <ul className="bg-white border-t border-slate-100 divide-y divide-slate-100">
+            {waitingKta.map((m) => {
+              const days = daysSince(m.sent_to_central_at);
+              const draft = ktaDrafts[m.id] || '';
+              const confirming = confirmKta === m.id;
+              return (
+                <li key={m.id} className="px-4 sm:px-6 py-4 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-3 items-center">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center text-xs font-semibold ${avatarTone(m.publisher_name)}`}>
+                      {initials(m.publisher_name)}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-slate-900 truncate">{m.publisher_name}</div>
+                      <div className="text-xs text-slate-500">
+                        {m.city || '-'} · {m.category || 'Biasa'}{m.submission_type ? ` · ${m.submission_type}` : ''}
+                      </div>
+                      <div className={`text-xs mt-0.5 ${days > 30 ? 'text-amber-700' : 'text-violet-700'}`}>
+                        Dikirim ke Pusat {fmtDate(m.sent_to_central_at)}
+                        {days !== null && ` · ${days === 0 ? 'hari ini' : `${days} hari lalu`}`}
+                        {m.central_courier && <span className="text-slate-500"> · {m.central_courier}{m.central_tracking_no ? ` resi ${m.central_tracking_no}` : ''}</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {confirming ? (
+                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                      <span className="text-xs text-slate-600">
+                        Simpan <strong className="font-mono text-slate-900">{draft.trim().toUpperCase()}</strong> dan aktifkan anggota?
+                      </span>
+                      <button type="button" onClick={() => handleSaveKta(m.id, draft)} disabled={savingKta}
+                        className="px-3.5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium transition flex items-center gap-1.5 disabled:opacity-60">
+                        <CheckCircle className="w-4 h-4" /> {savingKta ? 'Menyimpan...' : 'Ya, aktifkan'}
+                      </button>
+                      <button type="button" onClick={() => setConfirmKta(null)}
+                        className="px-3.5 py-2 rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-xs font-medium transition">
+                        Batal
+                      </button>
+                    </div>
+                  ) : (
+                    <form
+                      className="flex items-center gap-2 lg:justify-end"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (!draft.trim()) { notify('Isi Nomor KTA dari IKAPI Pusat terlebih dahulu.'); return; }
+                        setConfirmKta(m.id);
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={draft}
+                        onChange={(e) => setKtaDrafts((d) => ({ ...d, [m.id]: e.target.value }))}
+                        placeholder="mis. 014/JBR/2026"
+                        aria-label={`Nomor KTA ${m.publisher_name}`}
+                        className="flex-1 lg:w-56 min-w-0 text-sm font-mono uppercase px-3.5 py-2 rounded-full border border-slate-200 bg-white focus:border-violet-400 focus:ring-2 focus:ring-violet-100 outline-none"
+                      />
+                      <button type="submit"
+                        className="px-4 py-2 rounded-full bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium whitespace-nowrap transition flex items-center gap-1.5">
+                        <KeyRound className="w-4 h-4" /> Simpan No. KTA
+                      </button>
+                    </form>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="card-surface overflow-hidden">
 
@@ -341,7 +474,7 @@ export default function MembersManagement({ canEditKta = true }) {
 
       {/* ── Member Detail Modal ── */}
       {selectedMember && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 overflow-y-auto modal-overlay flex items-center justify-center p-4">
           <div className="modal-surface max-w-2xl w-full p-0 overflow-hidden">
 
             {/* Modal Header */}
@@ -380,7 +513,7 @@ export default function MembersManagement({ canEditKta = true }) {
                   <span className={`px-3 py-1 rounded-full text-xs font-bold border ${BADGE[selectedMember.membership_status] || BADGE.Calon}`}>
                     {selectedMember.membership_status}
                   </span>
-                  {canEditKta && <button
+                  {canInputKta(selectedMember) && <button
                     onClick={() => {
                       setSelectedMember(null);
                       setEditingKtaId(selectedMember.id);
@@ -390,6 +523,24 @@ export default function MembersManagement({ canEditKta = true }) {
                   >
                     <KeyRound className="w-3.5 h-3.5" /> Edit KTA
                   </button>}
+                  {canEditKta && selectedMember.membership_status === 'Aktif' && (
+                    <button
+                      onClick={() => handleSetStatus(selectedMember, 'Nonaktif')}
+                      disabled={savingStatus}
+                      className="px-3 py-1 bg-slate-600 hover:bg-slate-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg transition"
+                    >
+                      Nonaktifkan
+                    </button>
+                  )}
+                  {canEditKta && selectedMember.membership_status === 'Nonaktif' && (
+                    <button
+                      onClick={() => handleSetStatus(selectedMember, 'Aktif')}
+                      disabled={savingStatus}
+                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg transition"
+                    >
+                      Aktifkan kembali
+                    </button>
+                  )}
                 </div>
               </div>
 

@@ -1,4 +1,4 @@
-import sqlite3 from 'sqlite3';
+import mysql from 'mysql2/promise';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -6,9 +6,14 @@ import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+// Muat .env di root proyek (opsional). Variabel yang sudah ada di environment tidak ditimpa.
+const envFile = path.join(__dirname, '..', '.env');
+if (fs.existsSync(envFile)) {
+  try {
+    process.loadEnvFile(envFile);
+  } catch (err) {
+    console.warn('Gagal membaca .env:', err.message);
+  }
 }
 
 const uploadsDir = path.join(__dirname, '..', 'uploads');
@@ -16,308 +21,346 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const dbPath = path.join(dbDir, 'ikapi.sqlite');
-const db = new sqlite3.Database(dbPath);
+// Default sesuai MySQL bawaan Laragon (root tanpa password di localhost:3306).
+export const DB_CONFIG = {
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'ikapi_jabar'
+};
 
-// Promisified database helpers
+if (!/^[A-Za-z0-9_]+$/.test(DB_CONFIG.database)) {
+  throw new Error(`Nama database tidak valid: ${DB_CONFIG.database}`);
+}
+
+const pool = mysql.createPool({
+  ...DB_CONFIG,
+  waitForConnections: true,
+  connectionLimit: 10,
+  charset: 'utf8mb4',
+  // DATETIME/DATE dikembalikan sebagai string 'YYYY-MM-DD HH:MM:SS' / 'YYYY-MM-DD'
+  // (format yang sama seperti versi SQLite, jadi frontend tidak perlu diubah).
+  dateStrings: true,
+  // SUM()/DECIMAL dikembalikan sebagai number, bukan string.
+  decimalNumbers: true,
+  multipleStatements: true
+});
+
+// Helper database. API sama seperti versi SQLite: run / get / all / exec.
+// run() mengembalikan { lastID, changes } agar kode lama tetap jalan.
 export const query = {
-  run(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      db.run(sql, params, function (err) {
-        if (err) reject(err);
-        else resolve({ lastID: this.lastID, changes: this.changes });
-      });
-    });
+  async run(sql, params = []) {
+    const [result] = await pool.query(sql, params);
+    return { lastID: result.insertId, changes: result.affectedRows };
   },
-  get(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      db.get(sql, params, (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+  async get(sql, params = []) {
+    const [rows] = await pool.query(sql, params);
+    return rows[0];
   },
-  all(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      db.all(sql, params, (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    });
+  async all(sql, params = []) {
+    const [rows] = await pool.query(sql, params);
+    return rows;
   },
-  exec(sql) {
-    return new Promise((resolve, reject) => {
-      db.exec(sql, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+  async exec(sql) {
+    await pool.query(sql);
   }
 };
+
+// Waktu lokal dalam format DATETIME MySQL: 'YYYY-MM-DD HH:MM:SS'
+export function nowSql(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
 
 // Alur pengajuan:
 // Draf -> Menunggu Verifikasi (Tahap 1: screening dokumen oleh Admin) <-> Perlu Revisi
 // -> Menunggu Pembayaran (Tahap 2: bayar & verifikasi bukti transfer oleh Admin)
 // -> Menunggu TTD Sekretaris -> Menunggu Approval (TTD Ketua)
-// -> Pengiriman Berkas (pemohon kirim berkas fisik ke IKAPI Jabar) -> Aktif (dikonfirmasi Admin)
-// 'Disetujui' & 'Dikirim ke Pusat' hanya untuk data lama.
+// -> Pengiriman Berkas (pemohon cetak & kirim berkas fisik ke IKAPI Jabar)
+// -> Berkas Diterima (Admin konfirmasi berkas fisik sampai di sekretariat)
+// -> Dikirim ke Pusat (Admin kirim paket ke IKAPI Pusat, menunggu No. KTA)
+// -> Aktif (Sekretaris input No. KTA dari Pusat)
+// 'Disetujui' hanya untuk data lama.
 export const SUBMISSION_STATUSES = [
   'Draf', 'Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris',
-  'Menunggu Approval', 'Pengiriman Berkas', 'Ditolak', 'Disetujui', 'Dikirim ke Pusat', 'Aktif'
+  'Menunggu Approval', 'Pengiriman Berkas', 'Berkas Diterima', 'Dikirim ke Pusat', 'Ditolak', 'Disetujui', 'Aktif'
 ];
 const STATUS_SQL = SUBMISSION_STATUSES.map((st) => `'${st}'`).join(', ');
 
-// Definisi tabel users. Peran: Admin (kelola sistem & akun), Sekretaris (screening & verifikasi),
-// Ketua (approval & TTD), Anggota (penerbit). member_type/member_category/old_kta_number diisi
-// lewat pertanyaan saat login pertama anggota; onboarded_at menandai pertanyaan sudah dijawab.
-function usersTableSql(name) {
-  return `CREATE TABLE IF NOT EXISTS ${name} (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('Admin', 'Sekretaris', 'Ketua', 'Anggota')),
-      phone TEXT,
-      email_verified_at TEXT,
-      member_type TEXT CHECK(member_type IN ('Lama', 'Baru')),
-      member_category TEXT CHECK(member_category IN ('Biasa', 'Luar Biasa')),
-      old_kta_number TEXT,
-      onboarded_at TEXT,
-      signature_img TEXT, -- TTD tersimpan (PNG data URL), dipakai berulang oleh Ketua
-      created_at TEXT DEFAULT (datetime('now', 'localtime'))
-    );`;
+// Skema MySQL. Catatan: kolom settings.`key` memakai kata tercadang MySQL; di query
+// ditulis sebagai `settings.key` (nama berkualifikasi tidak perlu backtick).
+export const SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('Admin', 'Sekretaris', 'Ketua', 'Anggota')),
+    phone VARCHAR(50),
+    email_verified_at DATETIME NULL,
+    member_type VARCHAR(10) NULL CHECK (member_type IN ('Lama', 'Baru')),
+    member_category VARCHAR(20) NULL CHECK (member_category IN ('Biasa', 'Luar Biasa')),
+    old_kta_number VARCHAR(100),
+    onboarded_at DATETIME NULL,
+    signature_img MEDIUMTEXT, -- TTD tersimpan (PNG data URL), dipakai berulang oleh Ketua/Sekretaris
+    email_verify_token CHAR(64) NULL, -- SHA-256 dari token verifikasi email
+    password_reset_token CHAR(64) NULL, -- SHA-256 dari token reset kata sandi
+    password_reset_expires DATETIME NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  CREATE TABLE IF NOT EXISTS members (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    publisher_name VARCHAR(255) NOT NULL,
+    category VARCHAR(20) NOT NULL CHECK (category IN ('Biasa', 'Luar Biasa')),
+    leader_name VARCHAR(255) NOT NULL,
+    leader_title VARCHAR(255),
+    leader_phone VARCHAR(50),
+    legal_entity VARCHAR(100), -- PT, CV, Yayasan, Perguruan Tinggi
+    nib VARCHAR(100),
+    npwp VARCHAR(100),
+    address TEXT NOT NULL,
+    city VARCHAR(150) NOT NULL,
+    postal_code VARCHAR(20),
+    phone VARCHAR(50) NOT NULL,
+    fax VARCHAR(50),
+    email VARCHAR(255) NOT NULL,
+    website VARCHAR(255),
+    person_in_charge VARCHAR(255) NOT NULL,
+    bnsp_certificate_no VARCHAR(150),
+    specialization TEXT,
+    kta_number VARCHAR(100),
+    membership_status VARCHAR(20) NOT NULL DEFAULT 'Calon' CHECK (membership_status IN ('Calon', 'Aktif', 'Nonaktif')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_members_user (user_id),
+    CONSTRAINT fk_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  CREATE TABLE IF NOT EXISTS submissions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    member_id INT NULL,
+    user_id INT NOT NULL,
+    submission_type VARCHAR(20) NOT NULL CHECK (submission_type IN ('Baru', 'Heregistrasi')),
+    status VARCHAR(40) NOT NULL CHECK (status IN (${STATUS_SQL})),
+    old_kta_number VARCHAR(100),
+    form_data LONGTEXT, -- JSON lengkap isian formulir
+    admin_notes TEXT,
+    rejection_reason TEXT,
+    reference_number VARCHAR(100), -- Format: 012/PD-Ikapi Jabar/IV/2026
+    letter_date DATE NULL,
+    signed_by_chairman VARCHAR(255),
+    signed_by_secretary VARCHAR(255),
+    chairman_signature_date DATETIME NULL,
+    secretary_signature_date DATETIME NULL,
+    chairman_signature_img MEDIUMTEXT, -- salinan TTD Ketua saat dibubuhkan
+    chairman_signature_pos TEXT, -- JSON {x, y, w}
+    secretary_signature_img MEDIUMTEXT, -- salinan TTD Sekretaris saat diteruskan ke Ketua
+    secretary_signature_pos TEXT,
+    signature_positions TEXT, -- JSON { dokumen: { chairman: {x,y,w}, secretary: {x,y,w} } }
+    screened_at DATETIME NULL, -- berkas & pembayaran lolos screening
+    screened_by_name VARCHAR(255),
+    submitted_at DATETIME NULL,
+    approved_at DATETIME NULL,
+    sent_to_central_at DATETIME NULL,
+    activated_at DATETIME NULL,
+    physical_status VARCHAR(20) NULL, -- Belum Dikirim | Dikirim | Diterima
+    physical_sent_at DATETIME NULL,
+    physical_courier VARCHAR(150),
+    physical_tracking_no VARCHAR(150),
+    physical_notes TEXT,
+    physical_received_at DATETIME NULL,
+    physical_received_by VARCHAR(255),
+    central_courier VARCHAR(150), -- pengiriman paket ke IKAPI Pusat
+    central_tracking_no VARCHAR(150),
+    central_notes TEXT,
+    central_sent_by VARCHAR(255),
+    last_notified_status VARCHAR(40) NULL, -- status terakhir yang sudah diemailkan ke pemohon
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_submissions_user (user_id),
+    INDEX idx_submissions_member (member_id),
+    INDEX idx_submissions_status (status),
+    CONSTRAINT fk_submissions_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
+    CONSTRAINT fk_submissions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  CREATE TABLE IF NOT EXISTS documents (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    submission_id INT NOT NULL,
+    document_type VARCHAR(100) NOT NULL,
+    document_title VARCHAR(255) NOT NULL,
+    file_path VARCHAR(500) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_size INT,
+    mime_type VARCHAR(100),
+    screening_status VARCHAR(20) NOT NULL DEFAULT 'Menunggu' CHECK (screening_status IN ('Menunggu', 'Sesuai', 'Perlu Revisi')),
+    revision_notes TEXT,
+    verified_by INT NULL,
+    verified_at DATETIME NULL,
+    opened_at DATETIME NULL, -- log waktu Admin membuka dokumen saat screening
+    opened_by_name VARCHAR(255),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_documents_sub (submission_id),
+    INDEX idx_documents_path (file_path),
+    CONSTRAINT fk_documents_sub FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_documents_verifier FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  CREATE TABLE IF NOT EXISTS payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    submission_id INT NOT NULL UNIQUE,
+    amount INT NOT NULL,
+    fee_breakdown TEXT, -- JSON
+    proof_file VARCHAR(500),
+    proof_filename VARCHAR(255),
+    sender_bank VARCHAR(150),
+    sender_account_name VARCHAR(255),
+    sender_account_number VARCHAR(100),
+    transfer_date DATE NULL,
+    verification_status VARCHAR(20) NOT NULL DEFAULT 'Menunggu' CHECK (verification_status IN ('Menunggu', 'Valid', 'Perlu Revisi')),
+    verification_notes TEXT,
+    verified_by INT NULL,
+    verified_at DATETIME NULL,
+    proof_opened_at DATETIME NULL,
+    proof_opened_by_name VARCHAR(255),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_payments_proof (proof_file),
+    CONSTRAINT fk_payments_sub FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_payments_verifier FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  CREATE TABLE IF NOT EXISTS settings (
+    \`key\` VARCHAR(100) PRIMARY KEY,
+    value MEDIUMTEXT NOT NULL, -- bisa berisi gambar TTD / stempel (data URL)
+    description VARCHAR(255)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  CREATE TABLE IF NOT EXISTS submission_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    submission_id INT NOT NULL,
+    actor_id INT NULL,
+    actor_name VARCHAR(255),
+    actor_role VARCHAR(50),
+    action VARCHAR(500) NOT NULL,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_submission_logs_sub (submission_id),
+    CONSTRAINT fk_logs_sub FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  CREATE TABLE IF NOT EXISTS email_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    to_email VARCHAR(255) NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    body TEXT,
+    status VARCHAR(20) NOT NULL, -- sent | failed | skipped (SMTP belum diatur)
+    error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  -- Notifikasi di dalam aplikasi (ikon lonceng), tetap jalan walau email/SMTP belum aktif
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    body TEXT,
+    submission_id INT NULL,
+    read_at DATETIME NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_notifications_user (user_id, read_at),
+    CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`;
+
+// Perubahan skema untuk database yang sudah ada (CREATE TABLE IF NOT EXISTS tidak mengubah tabel lama).
+async function columnInfo(table, column) {
+  return query.get(
+    `SELECT DATA_TYPE AS type FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [DB_CONFIG.database, table, column]
+  );
 }
 
+async function addColumnIfMissing(table, column, definition) {
+  if (await columnInfo(table, column)) return false;
+  await query.exec(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+  return true;
+}
+
+// Samakan CHECK constraint kolom submissions.status dengan SUBMISSION_STATUSES (status baru ditambahkan).
+async function syncStatusCheck() {
+  const checks = await query.all(
+    `SELECT cc.CONSTRAINT_NAME AS name, cc.CHECK_CLAUSE AS clause
+     FROM information_schema.CHECK_CONSTRAINTS cc
+     JOIN information_schema.TABLE_CONSTRAINTS tc
+       ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+     WHERE cc.CONSTRAINT_SCHEMA = ? AND tc.TABLE_NAME = 'submissions' AND cc.CHECK_CLAUSE LIKE '%Menunggu Verifikasi%'`,
+    [DB_CONFIG.database]
+  );
+  const upToDate = checks.length === 1 && SUBMISSION_STATUSES.every((s) => checks[0].clause.includes(s));
+  if (upToDate) return;
+  for (const c of checks) {
+    await query.exec(`ALTER TABLE submissions DROP CHECK \`${c.name}\``);
+  }
+  await query.exec(`ALTER TABLE submissions ADD CONSTRAINT chk_submissions_status CHECK (status IN (${STATUS_SQL}))`);
+}
+
+async function upgradeSchema() {
+  const settingsValue = await columnInfo('settings', 'value');
+  if (settingsValue && settingsValue.type === 'text') {
+    await query.exec('ALTER TABLE settings MODIFY value MEDIUMTEXT NOT NULL');
+  }
+  await addColumnIfMissing('users', 'email_verify_token', 'CHAR(64) NULL AFTER signature_img');
+  await addColumnIfMissing('users', 'password_reset_token', 'CHAR(64) NULL AFTER email_verify_token');
+  await addColumnIfMissing('users', 'password_reset_expires', 'DATETIME NULL AFTER password_reset_token');
+  await addColumnIfMissing('users', 'token_version', 'INT NOT NULL DEFAULT 0 AFTER password_reset_expires');
+  await addColumnIfMissing('submissions', 'central_courier', 'VARCHAR(150) NULL AFTER physical_received_by');
+  await addColumnIfMissing('submissions', 'central_tracking_no', 'VARCHAR(150) NULL AFTER central_courier');
+  await addColumnIfMissing('submissions', 'central_notes', 'TEXT NULL AFTER central_tracking_no');
+  await addColumnIfMissing('submissions', 'central_sent_by', 'VARCHAR(255) NULL AFTER central_notes');
+  await syncStatusCheck();
+  if (await addColumnIfMissing('submissions', 'rejected_at_status', 'VARCHAR(40) NULL AFTER rejection_reason')) {
+    // Pengajuan lama yang sudah ditolak: tentukan tahapnya dari riwayat
+    await query.exec(
+      `UPDATE submissions s SET rejected_at_status = CASE
+         WHEN EXISTS (SELECT 1 FROM submission_logs l WHERE l.submission_id = s.id AND l.action LIKE '%ditolak Sekretaris%')
+         THEN 'Menunggu TTD Sekretaris' ELSE 'Menunggu Approval' END
+       WHERE s.status = 'Ditolak'`
+    );
+  }
+  if (await addColumnIfMissing('submissions', 'last_notified_status', 'VARCHAR(40) NULL AFTER physical_received_by')) {
+    // Pengajuan lama dianggap sudah diberi tahu status saat ini (tidak mengirim email susulan)
+    await query.exec('UPDATE submissions SET last_notified_status = status');
+  }
+}
+
+// Buat database (jika belum ada) lalu semua tabel.
 export async function initDb() {
-  await query.exec(`
-    PRAGMA foreign_keys = ON;
-
-    ${usersTableSql('users')}
-
-    CREATE TABLE IF NOT EXISTS members (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      publisher_name TEXT NOT NULL,
-      category TEXT NOT NULL CHECK(category IN ('Biasa', 'Luar Biasa')),
-      leader_name TEXT NOT NULL,
-      leader_title TEXT,
-      leader_phone TEXT,
-      legal_entity TEXT, -- PT, CV, Yayasan, Perguruan Tinggi
-      nib TEXT,
-      npwp TEXT,
-      address TEXT NOT NULL,
-      city TEXT NOT NULL,
-      postal_code TEXT,
-      phone TEXT NOT NULL,
-      fax TEXT,
-      email TEXT NOT NULL,
-      website TEXT,
-      person_in_charge TEXT NOT NULL,
-      bnsp_certificate_no TEXT,
-      specialization TEXT, -- JSON or string list
-      kta_number TEXT,
-      membership_status TEXT NOT NULL DEFAULT 'Calon' CHECK(membership_status IN ('Calon', 'Aktif', 'Nonaktif')),
-      created_at TEXT DEFAULT (datetime('now', 'localtime')),
-      updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS submissions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      member_id INTEGER,
-      user_id INTEGER NOT NULL,
-      submission_type TEXT NOT NULL CHECK(submission_type IN ('Baru', 'Heregistrasi')),
-      status TEXT NOT NULL CHECK(status IN (${STATUS_SQL})),
-      old_kta_number TEXT,
-      form_data TEXT, -- Full JSON payload of form
-      admin_notes TEXT,
-      rejection_reason TEXT,
-      reference_number TEXT, -- Format: 012/PD-Ikapi Jabar/IV/2026
-      letter_date TEXT,
-      signed_by_chairman TEXT,
-      signed_by_secretary TEXT,
-      chairman_signature_date TEXT,
-      secretary_signature_date TEXT,
-      chairman_signature_img TEXT, -- salinan TTD Ketua saat dibubuhkan
-      chairman_signature_pos TEXT, -- JSON {x, y, w}: posisi relatif di area tanda tangan surat
-      secretary_signature_img TEXT, -- salinan TTD Sekretaris saat diteruskan ke Ketua
-      secretary_signature_pos TEXT,
-      signature_positions TEXT, -- JSON { dokumen: { chairman: {x,y,w}, secretary: {x,y,w} } }
-      screened_at TEXT, -- berkas & pembayaran lolos screening (Admin / Sekretaris)
-      screened_by_name TEXT,
-      submitted_at TEXT,
-      approved_at TEXT,
-      sent_to_central_at TEXT,
-      activated_at TEXT,
-      created_at TEXT DEFAULT (datetime('now', 'localtime')),
-      updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-      FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS documents (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      submission_id INTEGER NOT NULL,
-      document_type TEXT NOT NULL,
-      document_title TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      file_name TEXT NOT NULL,
-      file_size INTEGER,
-      mime_type TEXT,
-      screening_status TEXT NOT NULL DEFAULT 'Menunggu' CHECK(screening_status IN ('Menunggu', 'Sesuai', 'Perlu Revisi')),
-      revision_notes TEXT,
-      verified_by INTEGER,
-      verified_at TEXT,
-      created_at TEXT DEFAULT (datetime('now', 'localtime')),
-      updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
-      FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS payments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      submission_id INTEGER NOT NULL UNIQUE,
-      amount INTEGER NOT NULL,
-      fee_breakdown TEXT, -- JSON
-      proof_file TEXT,
-      proof_filename TEXT,
-      sender_bank TEXT,
-      sender_account_name TEXT,
-      sender_account_number TEXT,
-      transfer_date TEXT,
-      verification_status TEXT NOT NULL DEFAULT 'Menunggu' CHECK(verification_status IN ('Menunggu', 'Valid', 'Perlu Revisi')),
-      verification_notes TEXT,
-      verified_by INTEGER,
-      verified_at TEXT,
-      created_at TEXT DEFAULT (datetime('now', 'localtime')),
-      updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
-      FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      description TEXT
-    );
-  `);
-
-  await migrateUserRoles();
-  await addColumnIfMissing('users', 'signature_img', 'TEXT');
-  await addColumnIfMissing('submissions', 'chairman_signature_img', 'TEXT');
-  await addColumnIfMissing('submissions', 'chairman_signature_pos', 'TEXT');
-  await addColumnIfMissing('submissions', 'secretary_signature_img', 'TEXT');
-  await addColumnIfMissing('submissions', 'secretary_signature_pos', 'TEXT');
-  await addColumnIfMissing('submissions', 'signature_positions', 'TEXT');
-  await addColumnIfMissing('submissions', 'screened_at', 'TEXT');
-  await addColumnIfMissing('submissions', 'screened_by_name', 'TEXT');
-  await migrateSubmissionStatuses();
-  // Pengiriman berkas fisik ke sekretariat IKAPI Jawa Barat
-  // Log waktu Admin membuka dokumen / bukti transfer saat screening
-  await addColumnIfMissing('documents', 'opened_at', 'TEXT');
-  await addColumnIfMissing('documents', 'opened_by_name', 'TEXT');
-  await addColumnIfMissing('payments', 'proof_opened_at', 'TEXT');
-  await addColumnIfMissing('payments', 'proof_opened_by_name', 'TEXT');
-  await addColumnIfMissing('submissions', 'physical_status', 'TEXT'); // Belum Dikirim | Dikirim | Diterima
-  await addColumnIfMissing('submissions', 'physical_sent_at', 'TEXT');
-  await addColumnIfMissing('submissions', 'physical_courier', 'TEXT');
-  await addColumnIfMissing('submissions', 'physical_tracking_no', 'TEXT');
-  await addColumnIfMissing('submissions', 'physical_notes', 'TEXT');
-  await addColumnIfMissing('submissions', 'physical_received_at', 'TEXT');
-  await addColumnIfMissing('submissions', 'physical_received_by', 'TEXT');
-  await query.exec(`
-    CREATE TABLE IF NOT EXISTS submission_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      submission_id INTEGER NOT NULL,
-      actor_id INTEGER,
-      actor_name TEXT,
-      actor_role TEXT,
-      action TEXT NOT NULL,
-      notes TEXT,
-      created_at TEXT DEFAULT (datetime('now', 'localtime')),
-      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_submission_logs_sub ON submission_logs(submission_id);
-  `);
-}
-
-// Tambah status baru ke CHECK constraint tabel submissions (SQLite perlu bangun ulang tabel).
-async function migrateSubmissionStatuses() {
-  const table = await query.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'submissions'");
-  if (!table || table.sql.includes("'Menunggu TTD Sekretaris'")) return;
-  const newSql = table.sql
-    .replace(/CREATE TABLE\s+"?submissions"?/i, 'CREATE TABLE submissions_new')
-    .replace(/status TEXT NOT NULL CHECK\(status IN \([^)]*\)\)/, `status TEXT NOT NULL CHECK(status IN (${STATUS_SQL}))`);
-  if (!newSql.includes('submissions_new') || !newSql.includes("'Pengiriman Berkas'")) {
-    throw new Error('Migrasi status pengajuan gagal: struktur tabel tidak dikenali.');
-  }
+  const admin = await mysql.createConnection({
+    host: DB_CONFIG.host,
+    port: DB_CONFIG.port,
+    user: DB_CONFIG.user,
+    password: DB_CONFIG.password
+  });
   try {
-    await query.exec(`
-      PRAGMA foreign_keys = OFF;
-      BEGIN;
-      ${newSql};
-      INSERT INTO submissions_new SELECT * FROM submissions;
-      DROP TABLE submissions;
-      ALTER TABLE submissions_new RENAME TO submissions;
-      COMMIT;
-      PRAGMA foreign_keys = ON;
-    `);
-    console.log('Migrasi status pengajuan selesai (alur screening dokumen -> pembayaran -> TTD -> berkas fisik).');
-  } catch (err) {
-    await query.exec('ROLLBACK; PRAGMA foreign_keys = ON;').catch(() => {});
-    throw err;
+    await admin.query(
+      `CREATE DATABASE IF NOT EXISTS \`${DB_CONFIG.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+    );
+  } finally {
+    await admin.end();
   }
+  await query.exec(SCHEMA_SQL);
+  await upgradeSchema();
 }
 
-async function addColumnIfMissing(table, column, type) {
-  const cols = await query.all(`PRAGMA table_info(${table})`);
-  if (!cols.some((c) => c.name === column)) {
-    await query.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-  }
+export async function closeDb() {
+  await pool.end();
 }
 
-// Migrasi sekali jalan dari peran lama ('Admin 1' / 'Admin 2') ke peran baru.
-// SQLite tidak bisa mengubah CHECK constraint, jadi tabel users dibangun ulang.
-// foreign_keys dimatikan sementara agar DROP TABLE tidak memicu ON DELETE CASCADE.
-async function migrateUserRoles() {
-  const table = await query.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'");
-  if (!table || !table.sql.includes("'Admin 1'")) return;
-
-  try {
-    await query.exec(`
-      PRAGMA foreign_keys = OFF;
-      BEGIN;
-      ${usersTableSql('users_new')}
-      INSERT INTO users_new (id, name, email, password, role, phone, email_verified_at, created_at)
-        SELECT id, name, email, password,
-               CASE role WHEN 'Admin 1' THEN 'Sekretaris' WHEN 'Admin 2' THEN 'Ketua' ELSE role END,
-               phone, email_verified_at, created_at
-        FROM users;
-      DROP TABLE users;
-      ALTER TABLE users_new RENAME TO users;
-
-      UPDATE users SET email = 'sekretaris@ikapi-jabar.or.id', name = 'Drs. H. Anwar Rosyid, M.Si. (Sekretaris)'
-        WHERE email = 'admin1@ikapi-jabar.or.id';
-      UPDATE users SET email = 'ketua@ikapi-jabar.or.id'
-        WHERE email = 'admin2@ikapi-jabar.or.id';
-
-      -- Anggota yang sudah ada dianggap sudah menjawab pertanyaan login pertama
-      UPDATE users SET
-        onboarded_at = datetime('now', 'localtime'),
-        member_type = CASE WHEN EXISTS (
-          SELECT 1 FROM submissions s WHERE s.user_id = users.id AND s.submission_type = 'Heregistrasi'
-        ) THEN 'Lama' ELSE 'Baru' END,
-        member_category = COALESCE((SELECT m.category FROM members m WHERE m.user_id = users.id LIMIT 1), 'Biasa')
-      WHERE role = 'Anggota';
-      COMMIT;
-      PRAGMA foreign_keys = ON;
-    `);
-    console.log('Migrasi peran pengguna selesai: Admin 1 -> Sekretaris, Admin 2 -> Ketua.');
-  } catch (err) {
-    await query.exec('ROLLBACK; PRAGMA foreign_keys = ON;').catch(() => {});
-    throw err;
-  }
-}
-
-export default db;
-
+export default pool;

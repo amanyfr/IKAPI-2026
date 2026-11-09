@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Settings, Save, Building, CreditCard, Award, FileText,
-  CheckCircle, Upload, Trash2, Image, RotateCcw, PenTool, Receipt
+  CheckCircle, Upload, Trash2, Image, RotateCcw, PenTool, Receipt, Phone
 } from 'lucide-react';
 import { INVOICE_DEFAULTS } from '../components/PaymentInvoice';
+import { waLink } from '../utils/whatsapp';
 import { notify } from '../components/AppDialog';
 
 const DEFAULT_TEMPLATES = {
@@ -38,16 +39,20 @@ export default function SystemSettings() {
   });
 
   const [loading, setLoading] = useState(true);
+  // Salinan nilai terakhir dari server: hanya kunci yang berubah yang dikirim saat simpan,
+  // supaya nilai yang berubah di server (mis. surat_counter) tidak tertimpa nilai lama.
+  const savedRef = useRef({});
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
   useEffect(() => {
     async function loadSettings() {
       try {
-        const res = await fetch('/api/settings');
+        const res = await fetch('/api/settings', { headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` } });
         const data = await res.json();
         if (data.settings) {
           setSettings(prev => ({ ...prev, ...data.settings }));
+          savedRef.current = { ...data.settings };
         }
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -90,6 +95,9 @@ export default function SystemSettings() {
     e.preventDefault();
     setSaving(true);
     setSuccessMsg('');
+    const changed = Object.fromEntries(
+      Object.entries(settings).filter(([k, v]) => String(v ?? '') !== String(savedRef.current[k] ?? '') || !(k in savedRef.current))
+    );
     try {
       const res = await fetch('/api/settings', {
         method: 'PUT',
@@ -97,10 +105,11 @@ export default function SystemSettings() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('ikapi_token')}`
         },
-        body: JSON.stringify({ settings })
+        body: JSON.stringify({ settings: changed })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+      savedRef.current = { ...savedRef.current, ...changed };
 
       setSuccessMsg('Seluruh pengaturan sistem, template surat, dan tanda tangan resmi berhasil disimpan.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -526,6 +535,61 @@ export default function SystemSettings() {
             Contoh nomor: <span className="font-mono text-[#0884c4]">{settings.invoice_prefix}/{new Date().getFullYear()}/0012</span> ·
             rekening & rincian biaya mengikuti bagian 1 dan 2 di atas.
           </p>
+        </div>
+
+        {/* 6. KONTAK ADMIN & SEKRETARIAT */}
+        <div className="card-surface p-6 space-y-4">
+          <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
+            <Phone className="w-5 h-5 text-[#0da2e7]" />
+            <div>
+              <h3 className="text-lg text-slate-800">6. Kontak Admin & Sekretariat</h3>
+              <p className="text-[11px] text-slate-500">
+                Nomor WhatsApp Admin tampil di halaman Lupa Sandi sebagai tombol chat. Telepon & email sekretariat tampil di dashboard anggota.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1">Nomor WhatsApp Admin</label>
+              <input
+                type="tel"
+                name="admin_whatsapp"
+                value={settings.admin_whatsapp || ''}
+                onChange={handleChange}
+                placeholder="mis. 0812-3456-7890"
+                className="w-full text-xs p-2.5 font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
+              />
+              {settings.admin_whatsapp && !waLink(settings.admin_whatsapp) && (
+                <p className="text-[11px] text-red-600 mt-1">Nomor belum valid; tombol WhatsApp tidak akan tampil.</p>
+              )}
+              {waLink(settings.admin_whatsapp) && (
+                <a href={waLink(settings.admin_whatsapp)} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[#0884c4] hover:underline mt-1 inline-block">
+                  Uji tautan: {waLink(settings.admin_whatsapp).replace('https://', '')}
+                </a>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1">Telepon Sekretariat</label>
+              <input
+                type="text"
+                name="office_phone"
+                value={settings.office_phone || ''}
+                onChange={handleChange}
+                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1">Email Sekretariat</label>
+              <input
+                type="email"
+                name="office_email"
+                value={settings.office_email || ''}
+                onChange={handleChange}
+                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
+              />
+            </div>
+          </div>
         </div>
 
         {/* Bottom Save Action */}

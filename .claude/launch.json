@@ -1,0 +1,42 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ikapi-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "server"
+      ],
+      "port": 5000,
+      "autoPort": false
+    },
+    {
+      "name": "ikapi-web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "3002",
+        "--strictPort"
+      ],
+      "port": 3002,
+      "autoPort": false
+    },
+    {
+      "name": "ikapi-web-test",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "3003",
+        "--strictPort"
+      ],
+      "env": {
+        "API_TARGET": "http://localhost:5055"
+      },
+      "port": 3003,
+      "autoPort": false
+    }
+  ]
+}

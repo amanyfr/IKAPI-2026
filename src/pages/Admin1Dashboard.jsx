@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { exportMembersExcel } from '../utils/exportMembers';
-import { STATUS_LABEL } from '../components/StatusStepper';
+import { STATUS_LABEL, POST_APPROVAL_STATUSES } from '../components/StatusStepper';
 import {
   parseDate, submittedDate, timeAgo, initials, pct, greetingName,
   buildTrend, TrendChart, TrendLegend, PositionBubbles, RangeToggle
 } from '../components/DashboardWidgets';
 import {
-  ArrowUpRight, ShieldCheck, Users, Download, KeyRound, Search, Sparkles,
+  ArrowUpRight, ArrowRight, ShieldCheck, Users, Download, KeyRound, Search, Sparkles,
   FileStack, Send, BadgeCheck, RefreshCw, ChevronDown, Lightbulb
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
@@ -16,7 +16,7 @@ import { notify } from '../components/AppDialog';
 // Antrean sebelum Ketua: TTD Sekretaris + tahap yang dikerjakan Admin (dipantau Sekretaris)
 const ADMIN1_QUEUE = ['Menunggu TTD Sekretaris', 'Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran'];
 const AT_ADMIN2    = ['Menunggu Approval'];
-const FINISHED     = ['Pengiriman Berkas', 'Aktif', 'Ditolak'];
+const FINISHED     = [...POST_APPROVAL_STATUSES, 'Ditolak'];
 
 const STATUS_CHIP = {
   'Menunggu TTD Sekretaris': 'bg-indigo-600 text-white',
@@ -39,6 +39,7 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
   const [range, setRange] = useState('12m');
   const [sortOrder, setSortOrder] = useState('newest');
   const [queueFilter, setQueueFilter] = useState('Semua');
+  const [showAllQueue, setShowAllQueue] = useState(false);
   const [search, setSearch] = useState('');
 
   const fetchSubmissions = async () => {
@@ -64,7 +65,8 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
   const needRevision  = count(['Perlu Revisi']);
   const needPayment   = count(['Menunggu Pembayaran']);
   // Anggota yang sudah aktif tapi nomor KTA-nya belum dicatat di Data Anggota
-  const needKta       = submissions.filter((s) => s.status === 'Aktif' && !s.member_kta).length;
+  // Berkas sudah dikirim ke IKAPI Pusat, No. KTA belum diinput (data lama: Aktif tanpa KTA)
+  const needKta       = submissions.filter((s) => s.status === 'Dikirim ke Pusat' || (s.status === 'Aktif' && !s.member_kta)).length;
   const atAdmin1      = count(ADMIN1_QUEUE);
   const atAdmin2      = count(AT_ADMIN2);
   const finished      = count(FINISHED);
@@ -81,6 +83,10 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
       return sortOrder === 'newest' ? diff : -diff;
     });
   }, [submissions, queueFilter, sortOrder]);
+
+  const displayQueue = useMemo(() => {
+    return showAllQueue ? queue : queue.slice(0, 6);
+  }, [queue, showAllQueue]);
 
   const { first: firstName, rest: restName } = greetingName(user?.name);
 
@@ -103,7 +109,7 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
   ];
 
   return (
-    <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
+    <div className="flex flex-col gap-4 pb-8">
 
       {/* ══ Sapaan + angka utama (satu baris) ══ */}
       <section className="flex-shrink-0 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -136,8 +142,8 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
       </section>
 
       {/* ══ Widget utama: antrian + prioritas ══ */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-[6] lg:min-h-0">
-        <div className="card-surface p-4 sm:p-5 lg:col-span-9 flex flex-col min-h-0">
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="card-surface p-4 sm:p-5 lg:col-span-9 flex flex-col">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-3">
             <h2 className="text-lg text-slate-800 whitespace-nowrap">Antrian pengajuan</h2>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -162,62 +168,104 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
           </div>
 
           {queue.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-slate-500 py-8">
+            <div className="flex-1 flex items-center justify-center text-sm text-slate-500 py-10">
               {loading ? 'Memuat antrian...' : 'Tidak ada pengajuan di antrian ini.'}
             </div>
           ) : (
-            <div className="flex-1 min-h-0 flex gap-3 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 snap-x">
-              {queue.map((s) => (
-                <button key={s.id}
-                  onClick={() => onOpenScreening(s.status === 'Menunggu TTD Sekretaris' ? { status: s.status } : { search: s.publisher_name || '' })}
-                  className="snap-start flex-shrink-0 w-60 text-left rounded-2xl bg-slate-50 hover:bg-white border border-slate-200/70 p-4 [@media(max-height:780px)]:p-3 flex flex-col transition">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className={`text-[11px] font-medium px-3 py-1 rounded-full ${STATUS_CHIP[s.status] || 'bg-slate-100 text-slate-700'}`}>
-                      {STATUS_LABEL[s.status] || s.status}
-                    </span>
-                    <span className="text-right text-[11px] text-slate-500 leading-tight">
-                      PGJ-{String(s.id).padStart(4, '0')}<br />{timeAgo(s.updated_at)}
-                    </span>
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {displayQueue.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => onOpenScreening(s.status === 'Menunggu TTD Sekretaris' ? { status: s.status } : { search: s.publisher_name || '' })}
+                    className="text-left rounded-2xl bg-slate-50 hover:bg-white hover:border-[#0da2e7] hover:shadow-md border border-slate-200/80 p-4 flex flex-col justify-between transition-all group min-h-[142px]"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${STATUS_CHIP[s.status] || 'bg-slate-100 text-slate-700'}`}>
+                          {STATUS_LABEL[s.status] || s.status}
+                        </span>
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {timeAgo(s.updated_at)}
+                        </span>
+                      </div>
+
+                      <p className="text-sm text-slate-900 font-bold mt-2.5 truncate group-hover:text-[#0884c4] transition-colors">
+                        {s.publisher_name || '-'}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5 truncate">
+                        {s.submission_type} · {s.member_category} · {s.city || '-'}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-200/60">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-7 h-7 flex-shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-blue-700 text-white text-[11px] font-semibold flex items-center justify-center shadow-xs">
+                          {initials(s.applicant_name)}
+                        </span>
+                        <div className="min-w-0 leading-tight">
+                          <span className="block text-xs font-medium text-slate-800 truncate">{s.applicant_name}</span>
+                          <span className="block text-[10px] text-slate-500 truncate">{s.applicant_email}</span>
+                        </div>
+                      </div>
+                      <span className="text-xs font-semibold text-[#0884c4] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 flex-shrink-0">
+                        Tinjau <ArrowRight className="w-3.5 h-3.5" />
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {queue.length > 6 && (
+                <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                  <span>
+                    Menampilkan {displayQueue.length} dari {queue.length} antrian pengajuan
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowAllQueue(!showAllQueue)}
+                      className="font-medium text-slate-700 hover:text-slate-900 underline cursor-pointer"
+                    >
+                      {showAllQueue ? 'Tampilkan ringkas (6)' : `Tampilkan semua (${queue.length})`}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenScreening?.({})}
+                      className="font-semibold text-[#0884c4] hover:text-[#066190] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Buka di menu Screening</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <p className="text-sm text-slate-800 font-medium mt-3 [@media(max-height:780px)]:mt-2 truncate">{s.publisher_name || '-'}</p>
-                  <p className="text-xs text-slate-500 mt-0.5 truncate [@media(max-height:780px)]:hidden">
-                    {s.submission_type} · {s.member_category} · {s.city || '-'}
-                  </p>
-                  <div className="flex items-center gap-2.5 mt-auto pt-3 [@media(max-height:780px)]:pt-2 border-t border-slate-900/5">
-                    <span className="w-8 h-8 flex-shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 text-white text-xs font-semibold flex items-center justify-center">
-                      {initials(s.applicant_name)}
-                    </span>
-                    <span className="min-w-0 leading-tight">
-                      <span className="block text-sm text-slate-800 truncate">{s.applicant_name}</span>
-                      <span className="block text-[11px] text-slate-500 truncate">{s.applicant_email}</span>
-                    </span>
-                  </div>
-                </button>
-              ))}
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Kartu prioritas */}
-        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-[#0884c4] to-blue-700 shadow-xl shadow-sky-700/25 flex flex-col min-h-0 overflow-hidden">
-          <div className="flex items-start justify-between">
-            <h2 className="text-lg">Prioritas hari ini</h2>
-            <button onClick={() => onOpenScreening({ status: 'Menunggu TTD Sekretaris' })} title="Buka antrean tanda tangan"
-              className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition">
-              <ArrowUpRight className="w-5 h-5" />
-            </button>
+        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-[#0884c4] to-blue-700 shadow-xl shadow-sky-700/25 flex flex-col justify-between overflow-hidden min-h-[220px]">
+          <div>
+            <div className="flex items-start justify-between">
+              <h2 className="text-lg">Prioritas hari ini</h2>
+              <button onClick={() => onOpenScreening({ status: 'Menunggu TTD Sekretaris' })} title="Buka antrean tanda tangan"
+                className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition">
+                <ArrowUpRight className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-xs text-white/85 mt-2 leading-relaxed">
+              Lihat semua dokumen & bukti transfer yang sudah disetujui Admin, lalu putuskan: setujui & tanda tangani, atau tolak.
+            </p>
           </div>
-          <p className="text-xs text-white/85 mt-2 leading-relaxed [@media(max-height:780px)]:hidden">
-            Lihat semua dokumen & bukti transfer yang sudah disetujui Admin, lalu putuskan: setujui & tanda tangani, atau tolak.
-          </p>
-          <div className="mt-auto pt-4 space-y-2">
+          <div className="pt-4 space-y-2">
             <button onClick={() => onOpenScreening({ status: 'Menunggu TTD Sekretaris' })}
-              className="w-full flex items-center justify-between gap-3 text-left bg-white text-slate-800 rounded-2xl px-4 py-3 [@media(max-height:780px)]:py-2 shadow-lg hover:-translate-y-0.5 transition">
+              className="w-full flex items-center justify-between gap-3 text-left bg-white text-slate-800 rounded-2xl px-4 py-3 shadow-lg hover:-translate-y-0.5 transition cursor-pointer">
               <span className="text-sm font-medium">Persetujuan & TTD</span>
               <span className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center">{needScreening}</span>
             </button>
             <button onClick={onOpenMembers}
-              className="w-full flex items-center justify-between gap-3 text-left bg-sky-100/90 text-slate-800 rounded-2xl px-4 py-3 [@media(max-height:780px)]:py-2 shadow-md hover:-translate-y-0.5 transition">
+              className="w-full flex items-center justify-between gap-3 text-left bg-sky-100/90 text-slate-800 rounded-2xl px-4 py-3 shadow-md hover:-translate-y-0.5 transition cursor-pointer">
               <span className="text-sm font-medium">Input No. KTA</span>
               <span className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center">{needKta}</span>
             </button>
@@ -226,8 +274,8 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
       </section>
 
       {/* ══ Baris bawah: grafik, posisi, aksi cepat ══ */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-[4] lg:min-h-0">
-        <div className="card-surface p-4 sm:p-5 lg:col-span-6 flex flex-col min-h-0 overflow-hidden">
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="card-surface p-4 sm:p-5 lg:col-span-6 flex flex-col overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
             <div>
               <h2 className="text-base text-slate-800">Tren pengajuan masuk</h2>
@@ -235,12 +283,12 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
             </div>
             <RangeToggle value={range} onChange={setRange} />
           </div>
-          <div className="flex-1 min-h-0 h-44 lg:h-auto">
+          <div className="h-52">
             <TrendChart data={trend} series={TREND_SERIES} fill ariaLabel="Grafik tren pengajuan masuk" />
           </div>
         </div>
 
-        <div className="card-surface p-4 sm:p-5 lg:col-span-3 flex flex-col min-h-0 overflow-hidden">
+        <div className="card-surface p-4 sm:p-5 lg:col-span-3 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between">
             <h2 className="text-base text-slate-800">Posisi pengajuan</h2>
             <button onClick={() => onOpenScreening({})} title="Lihat semua pengajuan"
@@ -255,9 +303,9 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers }) {
           ]} />
         </div>
 
-        <div className="card-surface p-4 sm:p-5 lg:col-span-3 flex flex-col min-h-0">
-          <p className="text-base text-slate-800 [@media(max-height:780px)]:hidden">Halo, {firstName} 👋</p>
-          <div className="grid grid-cols-2 gap-2 mt-3 [@media(max-height:780px)]:mt-0">
+        <div className="card-surface p-4 sm:p-5 lg:col-span-3 flex flex-col">
+          <p className="text-base text-slate-800">Halo, {firstName} 👋</p>
+          <div className="grid grid-cols-2 gap-2 mt-3">
             {[
               { label: 'Tanda tangan', icon: ShieldCheck, tone: 'bg-sky-100 text-[#0884c4]',       onClick: () => onOpenScreening({ status: 'Menunggu TTD Sekretaris' }) },
               { label: 'Data anggota', icon: Users,       tone: 'bg-violet-100 text-violet-700',   onClick: onOpenMembers },

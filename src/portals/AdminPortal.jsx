@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from '../components/NotificationBell';
 import AdminDashboard from '../pages/AdminDashboard';
 import UserManagement from '../pages/UserManagement';
 import SystemSettings from '../pages/SystemSettings';
@@ -39,8 +40,7 @@ export default function AdminPortal() {
   );
 
   return (
-    // Dashboard dibuat pas satu layar (laptop/desktop): tidak perlu scroll ke bawah
-    <div className={`relative min-h-screen portal-bg flex flex-col font-sans ${activeTab === 'dashboard' ? 'lg:h-screen lg:overflow-hidden' : ''}`}>
+    <div className="relative min-h-screen portal-bg flex flex-col font-sans">
 
       {/* ── Header Portal Admin ── */}
       <header className="brand-header sticky top-0 z-40">
@@ -73,6 +73,7 @@ export default function AdminPortal() {
                   <div className="text-[10px] text-blue-200 font-semibold">Administrator Sistem</div>
                 </div>
               </div>
+              <NotificationBell tone="dark" />
               <button
                 onClick={logout}
                 aria-label="Keluar"
@@ -97,7 +98,7 @@ export default function AdminPortal() {
       </header>
 
       {/* Main */}
-      <main className={`relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 ${activeTab === 'dashboard' ? 'py-5 lg:py-4 lg:min-h-0' : 'py-6 sm:py-8'}`}>
+      <main className="relative flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {activeTab === 'dashboard' && (
           <AdminDashboard
             onOpenUsers={openUsers}

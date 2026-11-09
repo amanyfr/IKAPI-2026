@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import DocumentVerificationModal from '../components/DocumentVerificationModal';
 import CentralPacketExporter from '../components/CentralPacketExporter';
+import ModalFrame from '../components/ModalFrame';
 import { useMySignature, MySignatureCard, SignLetterModal } from '../components/LetterSigning';
 import { exportMembersExcel } from '../utils/exportMembers';
-import { STATUS_LABEL } from '../components/StatusStepper';
+import { STATUS_LABEL, POST_APPROVAL_STATUSES } from '../components/StatusStepper';
 import {
   ShieldCheck,
   Search,
@@ -17,7 +18,8 @@ import {
   RefreshCw,
   Download,
   Users,
-  PenTool
+  PenTool,
+  KeyRound
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
 
@@ -173,6 +175,19 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     fetchSubmissions();
   };
 
+  const handleSendCentral = async (submissionId, payload) => {
+    const res = await fetch(`/api/submissions/${submissionId}/sent-to-central`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    notify(data.message);
+    openVerificationModal(submissionId);
+    fetchSubmissions();
+  };
+
   // Sekretaris action (request_revision / pass_to_admin2 / update_kta)
   const handleAdmin1Action = async (submissionId, action, notes, extra = {}) => {
     const res = await fetch(`/api/submissions/${submissionId}/admin1-action`, {
@@ -219,6 +234,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
   const statusChipClass = (status) =>
     status === 'Aktif'             ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
     : status === 'Pengiriman Berkas' ? 'bg-orange-100 text-orange-800 border border-orange-200'
+    : status === 'Berkas Diterima' || status === 'Dikirim ke Pusat' ? 'bg-violet-100 text-violet-800 border border-violet-200'
     : status === 'Menunggu Approval' || status === 'Menunggu TTD Sekretaris' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
     : status === 'Perlu Revisi'      ? 'bg-amber-100 text-amber-800 border border-amber-200'
     : status === 'Ditolak'           ? 'bg-red-100 text-red-800 border border-red-200'
@@ -229,6 +245,8 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
   const waitingText = (sub) => {
     if (sub.status === 'Menunggu Pembayaran') return sub.payment_status === 'Perlu Revisi' ? 'Bukti transfer dikembalikan' : 'Menunggu pembayaran pemohon';
     if (sub.status === 'Pengiriman Berkas') return sub.physical_status === 'Dikirim' ? `Berkas dikirim (${sub.physical_courier || '-'})` : 'Berkas fisik belum dikirim';
+    if (sub.status === 'Berkas Diterima') return 'Siap dikirim ke IKAPI Pusat';
+    if (sub.status === 'Dikirim ke Pusat') return `Menunggu KTA Pusat${sub.central_courier ? ` (${sub.central_courier})` : ''}`;
     if (sub.status === 'Perlu Revisi') return 'Menunggu revisi pemohon';
     return null;
   };
@@ -237,13 +255,14 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
   const primaryLabel = (sub) => {
     if (isAdmin && sub.status === 'Menunggu Verifikasi') return 'Screening dokumen';
     if (isAdmin && sub.status === 'Menunggu Pembayaran' && sub.payment_status === 'Menunggu' && sub.payment_proof) return 'Verifikasi bayar';
-    if (isAdmin && sub.status === 'Pengiriman Berkas') return 'Approval anggota';
+    if (isAdmin && sub.status === 'Pengiriman Berkas' && sub.physical_status === 'Dikirim') return 'Konfirmasi berkas';
+    if (isAdmin && sub.status === 'Berkas Diterima') return 'Kirim ke Pusat';
     return null;
   };
 
   // Tombol aksi per pengajuan — dipakai di tabel (layar lebar) dan kartu (HP)
   const renderActions = (sub) => {
-    const isApproved = ['Pengiriman Berkas', 'Aktif'].includes(sub.status);
+    const isApproved = POST_APPROVAL_STATUSES.includes(sub.status);
     const readyToSign = isSekretaris && sub.status === 'Menunggu TTD Sekretaris';
     const primary = primaryLabel(sub);
     return (
@@ -257,6 +276,18 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           >
             <PenTool className="w-3.5 h-3.5" />
             <span>Tanda tangani</span>
+          </button>
+        )}
+
+        {/* Berkas sudah di IKAPI Pusat: Sekretaris mencatat No. KTA */}
+        {isSekretaris && sub.status === 'Dikirim ke Pusat' && onNavigateToMembers && (
+          <button
+            onClick={() => onNavigateToMembers({ status: 'Menunggu KTA' })}
+            className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold shadow transition flex items-center gap-1"
+            title="Catat Nomor KTA dari IKAPI Pusat"
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+            <span>Input No. KTA</span>
           </button>
         )}
 
@@ -365,7 +396,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
               className="w-full text-xs py-2 px-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
             >
               <option value="Semua">Semua Status</option>
-              {['Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris', 'Menunggu Approval', 'Pengiriman Berkas', 'Aktif', 'Ditolak'].map((st) => (
+              {['Draf', 'Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris', 'Menunggu Approval', 'Pengiriman Berkas', 'Berkas Diterima', 'Dikirim ke Pusat', 'Aktif', 'Ditolak'].map((st) => (
                 <option key={st} value={st}>{STATUS_LABEL[st]}</option>
               ))}
             </select>
@@ -569,6 +600,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           onSignSecretary={() => startSignScreened(selectedSubDetail.submission, selectedSubDetail.settings)}
           onRejectSecretary={isSekretaris ? handleRejectSecretary : undefined}
           onReceivePhysical={handleReceivePhysical}
+          onSendCentral={handleSendCentral}
         />
       )}
 
@@ -592,24 +624,14 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
 
       {/* MODAL 2: DOKUMEN RESMI */}
       {isPacketModalOpen && packetSubDetail && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm p-4 flex items-center justify-center">
-          <div className="w-full max-w-5xl max-h-[92vh] overflow-y-auto">
-            <div className="flex justify-end mb-2">
-              <button
-                onClick={() => setIsPacketModalOpen(false)}
-                className="px-3 py-1 bg-white text-slate-800 rounded-lg font-bold text-xs shadow hover:bg-slate-100"
-              >
-                ✕ Tutup
-              </button>
-            </div>
-            <CentralPacketExporter
-              submission={packetSubDetail.submission}
-              documents={packetSubDetail.documents}
-              settings={packetSubDetail.settings}
-              payment={packetSubDetail.payment}
-            />
-          </div>
-        </div>
+        <ModalFrame onClose={() => setIsPacketModalOpen(false)}>
+          <CentralPacketExporter
+            submission={packetSubDetail.submission}
+            documents={packetSubDetail.documents}
+            settings={packetSubDetail.settings}
+            payment={packetSubDetail.payment}
+          />
+        </ModalFrame>
       )}
 
     </div>

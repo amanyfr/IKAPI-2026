@@ -46,7 +46,9 @@ export function AuthProvider({ children }) {
     });
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || 'Login gagal.');
+      const err = new Error(data.error || 'Login gagal.');
+      err.code = data.code; // mis. EMAIL_NOT_VERIFIED
+      throw err;
     }
     localStorage.setItem('ikapi_token', data.token);
     setToken(data.token);
@@ -93,6 +95,8 @@ export function AuthProvider({ children }) {
 
   // Logout
   const logout = () => {
+    // Hapus cookie sesi (dipakai untuk membuka file) di server
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     localStorage.removeItem('ikapi_token');
     setToken(null);
     setUser(null);
