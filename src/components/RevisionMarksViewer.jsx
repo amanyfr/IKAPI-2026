@@ -9,12 +9,12 @@ import { fileUrl } from '../utils/fileUrl';
  * dokumen dengan sorotan kuning di kiri, daftar bagian yang perlu diperbaiki di kanan.
  * Klik nomor di daftar atau kotak di dokumen untuk berpindah sorotan.
  */
-export default function RevisionMarksViewer({ doc, onClose }) {
+export default function RevisionMarksViewer({ doc, round: roundProp, onClose }) {
   const marks = parseMarks(doc?.revision_marks);
   const [active, setActive] = useState(marks.length ? 0 : null);
   const listRef = useRef(null);
   const total = marks.length;
-  const round = (Number(doc?.revision_count) || 0) + 1;
+  const round = roundProp || (Number(doc?.revision_count) || 0) + 1;
 
   // Catatan umum disembunyikan bila hanya gabungan otomatis dari catatan sorotan
   const general = adminGeneralNote(doc, marks);
@@ -82,36 +82,43 @@ export default function RevisionMarksViewer({ doc, onClose }) {
           </div>
 
           <aside className="lg:w-80 flex-shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200 bg-slate-50 flex flex-col lg:min-h-0">
-            <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-              <p className="text-sm font-semibold text-slate-800">Yang perlu diperbaiki</p>
+            <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <p className="text-sm font-semibold text-slate-800 truncate">Yang perlu diperbaiki</p>
+                <span className="flex-shrink-0 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-semibold tabular-nums">
+                  {total}
+                </span>
+              </div>
               {total > 1 && (
-                <div className="flex items-center gap-1">
+                <div className="flex-shrink-0 flex items-center rounded-full bg-slate-100 p-0.5">
                   <button type="button" onClick={() => go(-1)} aria-label="Sorotan sebelumnya"
-                    className="w-7 h-7 rounded-full bg-white ring-1 ring-slate-200 hover:bg-slate-100 flex items-center justify-center">
+                    className="w-7 h-7 rounded-full text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm flex items-center justify-center transition">
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <span className="text-[11px] text-slate-500 tabular-nums w-10 text-center">{(active ?? 0) + 1}/{total}</span>
+                  <span className="px-1.5 text-xs font-medium text-slate-600 tabular-nums min-w-[2.5rem] text-center">
+                    {(active ?? 0) + 1} / {total}
+                  </span>
                   <button type="button" onClick={() => go(1)} aria-label="Sorotan berikutnya"
-                    className="w-7 h-7 rounded-full bg-white ring-1 ring-slate-200 hover:bg-slate-100 flex items-center justify-center">
+                    className="w-7 h-7 rounded-full text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm flex items-center justify-center transition">
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
               )}
             </div>
 
-            <div ref={listRef} className="lg:flex-1 lg:min-h-0 lg:overflow-auto px-4 pb-4 space-y-2">
+            <div ref={listRef} className="lg:flex-1 lg:min-h-0 lg:overflow-auto p-4 space-y-2">
               {marks.map((m, i) => {
                 const on = active === i;
                 return (
                   <button key={i} type="button" data-item={i} onClick={() => setActive(i)}
-                    className={`w-full text-left flex items-start gap-3 p-3 rounded-2xl transition ${on
-                      ? 'bg-amber-50 ring-2 ring-amber-400 shadow-sm'
-                      : 'bg-white ring-1 ring-slate-200 hover:ring-amber-300'}`}>
-                    <span className={`flex-shrink-0 w-7 h-7 rounded-full text-white text-xs font-bold flex items-center justify-center ${on ? 'bg-amber-600' : 'bg-amber-500'}`}>
+                    className={`w-full text-left flex items-start gap-3 p-3 rounded-xl border transition ${on
+                      ? 'bg-amber-50 border-amber-400 shadow-sm'
+                      : 'bg-white border-slate-200 hover:border-amber-300'}`}>
+                    <span className={`flex-shrink-0 w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center ${on ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
                       {i + 1}
                     </span>
-                    <span className="min-w-0">
-                      <span className="block text-[11px] text-slate-500">Halaman {m.page || 1}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[11px] font-medium text-slate-400 mb-0.5">Halaman {m.page || 1}</span>
                       <span className={`block text-sm leading-snug ${m.note ? 'text-slate-800' : 'text-slate-500 italic'}`}>
                         {m.note || 'Bagian ini perlu diperbaiki.'}
                       </span>
@@ -121,7 +128,7 @@ export default function RevisionMarksViewer({ doc, onClose }) {
               })}
 
               {showGeneral && (
-                <div className="mt-3 p-3 rounded-2xl bg-white ring-1 ring-slate-200">
+                <div className="mt-3 p-3 rounded-xl bg-white border border-slate-200">
                   <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                     <MessageSquareText className="w-3.5 h-3.5" /> Catatan Admin
                   </p>
@@ -129,7 +136,7 @@ export default function RevisionMarksViewer({ doc, onClose }) {
                 </div>
               )}
             </div>
-            <div className="mx-4 mb-4 mt-auto p-3 rounded-2xl bg-amber-50 ring-1 ring-amber-200 text-xs text-amber-950">
+            <div className="mx-4 mb-4 mt-auto p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950">
               <p className="font-semibold mb-1.5">Langkah memperbaiki</p>
               <ol className="list-decimal pl-4 space-y-1 text-amber-900">
                 <li>Perbaiki bagian bernomor pada file asli.</li>

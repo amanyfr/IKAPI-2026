@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, CheckCircle, XCircle, FileText, CreditCard, ExternalLink, ShieldCheck, Eye, Lock,
-  History, Truck, PenTool, Send, Clock, RefreshCw
+  History, Truck, PenTool, Send, Clock, RefreshCw, Plus, Trash2
 } from 'lucide-react';
 import SubmissionTimeline, { formatTime } from './SubmissionTimeline';
 import { STATUS_LABEL, POST_APPROVAL_STATUSES } from './StatusStepper';
@@ -93,6 +93,7 @@ export default function DocumentVerificationModal({
   const [openedAt, setOpenedAt] = useState({});             // waktu dibuka yang baru dicatat server
   const [rejecting, setRejecting] = useState(null);         // docId yang sedang diberi komentar
   const [comment, setComment] = useState('');
+  const [showComment, setShowComment] = useState(false);    // form komentar umum disembunyikan sampai dibuka
   const [marks, setMarks] = useState([]);                   // sorotan bagian dokumen yang perlu direvisi
   const [payReject, setPayReject] = useState(false);
   const [payComment, setPayComment] = useState('');
@@ -178,10 +179,14 @@ export default function DocumentVerificationModal({
     // Komentar umum boleh kosong bila sorotan sudah berisi catatan: ringkasan dibuat dari catatan sorotan
     const markNotes = marks.map((m) => String(m.note || '').trim()).filter(Boolean);
     const finalComment = comment.trim() || (markNotes.length ? `Perbaiki bagian yang disorot: ${markNotes.join('; ')}` : '');
-    if (value === 'Perlu Revisi' && !finalComment) throw new Error('Tulis alasan dokumen tidak sesuai, di komentar atau di catatan sorotan.');
+    if (value === 'Perlu Revisi' && !finalComment) {
+      setShowComment(true);
+      throw new Error('Tulis alasan dokumen tidak sesuai, di komentar atau di catatan sorotan.');
+    }
     await onScreenDocument(doc.id, value, value === 'Perlu Revisi' ? finalComment : '', value === 'Perlu Revisi' ? marks : []);
     setRejecting(null);
     setComment('');
+    setShowComment(false);
     setMarks([]);
     // Lanjut otomatis ke dokumen berikutnya yang belum diperiksa
     const next = documents.find((d) => d.id !== doc.id && d.file_path && d.screening_status === 'Menunggu');
@@ -291,7 +296,7 @@ export default function DocumentVerificationModal({
                     >
                       {fresh && (
                         <span className="mb-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 text-[10px] font-semibold">
-                          <RefreshCw className="w-3 h-3" /> Revisi ke-{doc.revision_count || 1} · {formatTime(doc.revised_at)}
+                          <RefreshCw className="w-3 h-3" /> Revisi ke-{submission.revision_round || 1} · {formatTime(doc.revised_at)}
                         </span>
                       )}
                       {!fresh && doc.revision_count > 0 && (
@@ -367,7 +372,7 @@ export default function DocumentVerificationModal({
                       <div className="text-xs text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-start gap-2">
                         <RefreshCw className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-sky-600" />
                         <span className="flex-1">
-                          <strong>Dokumen revisi ke-{activeDoc.revision_count || 1}</strong> diunggah ulang pemohon {formatTime(activeDoc.revised_at)}.
+                          <strong>Dokumen revisi ke-{submission.revision_round || 1}</strong> diunggah ulang pemohon {formatTime(activeDoc.revised_at)}.
                           {activeDoc.previous_revision_notes && <> Pastikan sudah memperbaiki: <em>"{activeDoc.previous_revision_notes}"</em></>}
                         </span>
                       </div>
@@ -385,25 +390,40 @@ export default function DocumentVerificationModal({
                               : <>belum ada. Opsional: seret pada dokumen di atas untuk menandai bagian yang salah.</>}
                           </div>
                         )}
-                        <p className="text-xs font-semibold text-slate-700">
-                          Komentar umum untuk pemohon
-                          {marks.some((m) => String(m.note || '').trim())
-                            ? <span className="font-normal text-slate-500"> (opsional, sorotan sudah berisi catatan)</span>
-                            : <span className="font-normal text-slate-500"> (wajib bila sorotan tidak diberi catatan)</span>}
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {REASON_LABELS.map((r) => (
-                            <button key={r} type="button" onClick={() => setComment((c) => (c.includes(r) ? c : c ? `${c}; ${r}` : r))}
-                              className="px-2.5 py-1 rounded-full text-[11px] border border-red-200 bg-white text-red-700 hover:bg-red-50">
-                              {r}
-                            </button>
-                          ))}
-                        </div>
-                        <textarea rows="2" value={comment} onChange={(e) => setComment(e.target.value)}
-                          placeholder="Contoh: Scan akta terpotong di halaman 2, mohon unggah ulang yang lengkap."
-                          className="w-full text-xs p-2.5 border border-red-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-300" />
+                        {showComment || comment ? (
+                          <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-semibold text-slate-700">
+                                Komentar umum untuk pemohon
+                                {marks.some((m) => String(m.note || '').trim())
+                                  ? <span className="font-normal text-slate-500"> (opsional)</span>
+                                  : <span className="font-normal text-slate-500"> (wajib bila sorotan tidak diberi catatan)</span>}
+                              </p>
+                              <button type="button" onClick={() => { setComment(''); setShowComment(false); }}
+                                className="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[11px] font-medium text-slate-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700 transition">
+                                <Trash2 className="w-3.5 h-3.5" /> Hapus komentar
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {REASON_LABELS.map((r) => (
+                                <button key={r} type="button" onClick={() => setComment((c) => (c.includes(r) ? c : c ? `${c}; ${r}` : r))}
+                                  className="px-2.5 py-1 rounded-full text-[11px] border border-red-200 bg-white text-red-700 hover:bg-red-50">
+                                  {r}
+                                </button>
+                              ))}
+                            </div>
+                            <textarea rows="2" value={comment} onChange={(e) => setComment(e.target.value)} autoFocus={!comment}
+                              placeholder="Contoh: Scan akta terpotong di halaman 2, mohon unggah ulang yang lengkap."
+                              className="w-full text-xs p-2.5 border border-red-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-300" />
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setShowComment(true)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-slate-300 text-xs font-medium text-slate-600 hover:border-red-300 hover:text-red-700 hover:bg-red-50/50 transition">
+                            <Plus className="w-3.5 h-3.5" /> Tambah komentar umum <span className="font-normal text-slate-400">(opsional)</span>
+                          </button>
+                        )}
                         <div className="flex justify-end gap-2">
-                          <button onClick={() => { setRejecting(null); setComment(''); setMarks([]); }} className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white">Batal</button>
+                          <button onClick={() => { setRejecting(null); setComment(''); setMarks([]); setShowComment(false); }} className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white">Batal</button>
                           <button disabled={busy} onClick={() => markDoc(activeDoc, 'Perlu Revisi')}
                             className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5">
                             <XCircle className="w-3.5 h-3.5" /> Simpan: tidak sesuai

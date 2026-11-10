@@ -457,6 +457,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   const rejectedDocs   = docs.filter((d) => d.screening_status === 'Perlu Revisi');
   const hasRejectedDocs = rejectedDocs.length > 0;
   const isNeedRevision = sub.status === 'Perlu Revisi' || hasRejectedDocs;
+  // Nomor revisi mengikuti putaran pengajuan agar sama dengan yang dilihat Admin
+  const revRound = sub.status === 'Perlu Revisi' ? Math.max(Number(sub.revision_round) || 0, 1) : (Number(sub.revision_round) || 0) + 1;
   const isShipping    = sub.status === 'Pengiriman Berkas';
   const actionDocs = docs.filter((d) => d.screening_status === 'Perlu Revisi'
     || ((isDraf || isScreening || isNeedRevision) && !d.file_path));
@@ -547,7 +549,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                 <h4 className="text-base font-bold text-amber-900">Pemberitahuan: Dokumen Perlu Direvisi</h4>
                 {sub.revision_round > 0 && (
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white text-amber-800 border border-amber-300">
-                    Revisi ke-{sub.revision_round}
+                    Revisi ke-{revRound}
                   </span>
                 )}
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500 text-white">
@@ -1016,7 +1018,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
             )}
           </div>
 
-          <ol className="divide-y divide-slate-100">
+          <ol className="p-4 sm:p-6 space-y-3">
             {actionDocs.map((doc, idx) => {
               const isRevisi  = doc.screening_status === 'Perlu Revisi';
               const hasFile   = Boolean(doc.file_path && doc.file_name && doc.file_name !== 'Belum diunggah');
@@ -1025,68 +1027,63 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               const label = !hasFile && !isRevisi
                 ? { text: 'Belum diunggah', cls: 'bg-slate-50 text-slate-500 border-slate-200', dot: 'bg-slate-300' }
                 : isRevisi
-                ? { text: `Perlu revisi ke-${(doc.revision_count || 0) + 1}`, cls: 'bg-amber-50 text-amber-800 border-amber-200', dot: 'bg-amber-500' }
+                ? { text: `Perlu revisi ke-${revRound}`, cls: 'bg-amber-50 text-amber-800 border-amber-200', dot: 'bg-amber-500' }
                 : SCREENING_LABEL[doc.screening_status] || SCREENING_LABEL.Menunggu;
 
               return (
-                <li
-                  key={doc.id || idx}
-                  className="px-5 sm:px-7 py-5 grid grid-cols-[auto,1fr] gap-x-4 items-start"
-                >
-                  <span className="w-7 h-7 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center mt-0.5">
-                    {idx + 1}
-                  </span>
+                <li key={doc.id || idx} className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                  {/* Kepala kartu: nomor, nama dokumen, status, berkas lama */}
+                  <div className="px-4 py-3 bg-slate-50/80 border-b border-slate-100 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <span className={`w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center flex-shrink-0 ${isRevisi ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                      {idx + 1}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-900 min-w-0">{doc.document_title}</span>
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${label.cls}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${label.dot}`} />
+                      {label.text}
+                    </span>
+                    {isRevisi && doc.file_path && (
+                      <a href={fileUrl(doc.file_path)} target="_blank" rel="noreferrer"
+                        className="ml-auto text-xs font-medium text-slate-500 hover:text-[#0884c4] flex items-center gap-1 transition">
+                        <ExternalLink className="w-3.5 h-3.5" /> Lihat berkas lama
+                      </a>
+                    )}
+                  </div>
 
-                  <div className="min-w-0 space-y-2.5">
-                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                      <span className="text-sm font-semibold text-slate-900">{doc.document_title}</span>
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${label.cls}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${label.dot}`} />
-                        {label.text}
-                      </span>
-                    </div>
-
-                    <div className={`grid gap-3 items-stretch ${canUpload ? 'lg:grid-cols-[minmax(0,1fr),20rem]' : ''}`}>
+                  <div className="p-4">
+                    <div className={`grid gap-4 items-stretch ${canUpload ? 'md:grid-cols-[minmax(0,1fr),16rem]' : ''}`}>
                       {isRevisi ? (() => {
                         const marks = parseMarks(doc.revision_marks);
                         const showMarks = marks.length > 0 && canMarkFile(doc);
                         const general = adminGeneralNote(doc, marks);
                         return (
-                          <div className="rounded-2xl bg-amber-50 border border-amber-200 p-4 text-sm text-slate-800 flex flex-col">
+                          <div className="rounded-xl bg-amber-50/70 border-l-4 border-amber-400 px-4 py-3 text-sm text-slate-800 flex flex-col min-w-0">
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-2">Catatan Admin</p>
                             {showMarks && (
                               <ol className="space-y-1.5">
                                 {marks.map((m, i) => (
                                   <li key={i} className="flex items-start gap-2">
-                                    <span className="mt-0.5 w-5 h-5 flex-shrink-0 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
+                                    <span className="mt-px w-5 h-5 flex-shrink-0 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
                                     <span className="leading-snug">{m.note || 'Bagian yang ditandai perlu diperbaiki.'}</span>
                                   </li>
                                 ))}
                               </ol>
                             )}
                             {(general || !showMarks) && (
-                              <p className={`leading-relaxed ${showMarks ? 'mt-2' : ''}`}>
+                              <p className={`leading-relaxed ${showMarks ? 'mt-2.5 pt-2.5 border-t border-amber-200/70 text-slate-600' : ''}`}>
                                 {general || 'Format atau berkas belum sesuai ketentuan. Silakan unggah dokumen pengganti.'}
                               </p>
                             )}
-                            <div className="mt-auto pt-3 flex flex-wrap gap-2 text-xs font-medium">
-                              {showMarks && (
-                                <button type="button" onClick={() => setMarkDoc(doc)}
-                                  className="px-3 py-1.5 rounded-full bg-yellow-300 hover:bg-yellow-400 text-amber-950 flex items-center gap-1.5 transition">
-                                  <Eye className="w-3.5 h-3.5" /> Lihat bagian yang disorot
-                                </button>
-                              )}
-                              {doc.file_path && (
-                                <a href={fileUrl(doc.file_path)} target="_blank" rel="noreferrer"
-                                  className="px-3 py-1.5 rounded-full bg-white border border-amber-200 text-slate-600 hover:text-slate-800 flex items-center gap-1.5 transition">
-                                  <ExternalLink className="w-3.5 h-3.5" /> Berkas lama
-                                </a>
-                              )}
-                            </div>
+                            {showMarks && (
+                              <button type="button" onClick={() => setMarkDoc(doc)}
+                                className="mt-3 self-start px-3 py-1.5 rounded-full bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 text-xs font-medium flex items-center gap-1.5 transition">
+                                <Eye className="w-3.5 h-3.5" /> Lihat bagian yang disorot
+                              </button>
+                            )}
                           </div>
                         );
                       })() : (
-                        <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 text-sm text-slate-600 flex items-center gap-2 min-w-0">
+                        <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm text-slate-600 flex items-center gap-2 min-w-0">
                           <FileText className="w-4 h-4 flex-shrink-0 text-slate-400" />
                           {hasFile ? (
                             <a href={fileUrl(doc.file_path)} target="_blank" rel="noreferrer" className="truncate hover:underline">{doc.file_name}</a>
@@ -1095,7 +1092,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                       )}
 
                       {canUpload && (staged ? (
-                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex flex-col gap-3 min-w-0">
+                        <div className="min-h-[8rem] rounded-xl border border-emerald-200 bg-emerald-50 p-4 flex flex-col gap-3 min-w-0">
                           <div className="flex items-start gap-2.5 min-w-0">
                             <span className="w-9 h-9 rounded-xl bg-white border border-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0">
                               <CheckCircle className="w-5 h-5" />
@@ -1124,8 +1121,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                           )}
                         </div>
                       ) : (
-                        <label className={`rounded-2xl border-2 border-dashed border-sky-300 bg-sky-50/60 hover:bg-sky-50 hover:border-[#0da2e7] p-4 flex flex-col items-center justify-center text-center gap-1.5 transition ${sendingDocs ? 'opacity-60 pointer-events-none' : 'cursor-pointer'}`}>
-                          <span className="w-10 h-10 rounded-full bg-[#0da2e7] text-white flex items-center justify-center shadow-sm">
+                        <label className={`min-h-[8rem] rounded-xl border-2 border-dashed border-sky-300 bg-sky-50/50 hover:bg-sky-50 hover:border-[#0da2e7] p-4 flex flex-col items-center justify-center text-center gap-1 transition ${sendingDocs ? 'opacity-60 pointer-events-none' : 'cursor-pointer'}`}>
+                          <span className="w-9 h-9 mb-1 rounded-full bg-[#0da2e7] text-white flex items-center justify-center shadow-sm">
                             <Upload className="w-4 h-4" />
                           </span>
                           <span className="text-sm font-semibold text-slate-800">{isRevisi ? 'Unggah file pengganti' : 'Pilih file'}</span>
@@ -1142,8 +1139,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
           </ol>
 
           {/* Kirim file yang sudah dipilih: baru masuk ke Admin setelah dikonfirmasi */}
-          <div className="px-5 sm:px-7 py-4 border-t border-slate-100 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-slate-600 max-w-md">
+          <div className="px-5 sm:px-7 py-4 border-t border-slate-100 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs text-slate-600 leading-relaxed sm:max-w-lg">
               {stagedCount === 0
                 ? (isDraf
                   ? 'Pilih file untuk setiap dokumen di atas. File belum tersimpan sampai Anda menekan tombol Simpan.'
@@ -1183,7 +1180,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       <SubmissionTimeline timeline={detailData?.timeline || []} cardClassName="card-surface" />
 
       {/* ══ DOKUMEN DENGAN SOROTAN REVISI ══ */}
-      {markDoc && <RevisionMarksViewer doc={markDoc} onClose={() => setMarkDoc(null)} />}
+      {markDoc && <RevisionMarksViewer doc={markDoc} round={revRound} onClose={() => setMarkDoc(null)} />}
 
       {/* ══ POP UP: KIRIM BERKAS FISIK ══ */}
       {showShipNotice && (

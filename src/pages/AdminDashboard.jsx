@@ -50,9 +50,10 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   const [search, setSearch] = useState('');
   const [taskFilter, setTaskFilter] = useState('Semua');
   const [showAllTasks, setShowAllTasks] = useState(false);
+  const [sortOrder, setSortOrder] = useState('newest'); // 'newest' | 'oldest'
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const [u, s, st] = await Promise.all([
         fetch('/api/admin/users', { headers: authHeaders() }).then((r) => r.json()),
@@ -69,7 +70,14 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData();
+    // Segarkan otomatis agar pengajuan / unggahan baru pemohon masuk tanpa reload halaman
+    const refresh = () => { if (document.visibilityState === 'visible') fetchData({ silent: true }); };
+    const timer = setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, []);
 
   const total = users.length;
   const byRole = Object.fromEntries(ROLES.map((r) => [r, users.filter((u) => u.role === r).length]));
@@ -111,8 +119,13 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   const tasks = useMemo(
     () => submissions
       .filter((x) => (taskFilter === 'Semua' ? cardOf(x) : taskOf(x)?.key === taskFilter))
-      .sort((a, b) => (taskOf(b) ? 1 : 0) - (taskOf(a) ? 1 : 0) || (parseDate(a.updated_at) || 0) - (parseDate(b.updated_at) || 0)),
-    [submissions, taskFilter]
+      // Tugas Admin dulu, lalu urut waktu masuk/diperbarui (default terbaru di atas agar unggahan baru langsung terlihat)
+      .sort((a, b) => {
+        const byTask = (taskOf(b) ? 1 : 0) - (taskOf(a) ? 1 : 0);
+        const diff = (parseDate(b.updated_at) || 0) - (parseDate(a.updated_at) || 0);
+        return byTask || (sortOrder === 'oldest' ? -diff : diff);
+      }),
+    [submissions, taskFilter, sortOrder]
   );
   const displayTasks = showAllTasks ? tasks : tasks.slice(0, 6);
   const taskCount = (key) => submissions.filter((x) => taskOf(x)?.key === key).length;
@@ -169,7 +182,9 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
             ]}
             active={taskFilter}
             onChange={(k) => { setTaskFilter(k); setShowAllTasks(false); }}
-            onRefresh={fetchData}
+            sortOrder={sortOrder}
+            onToggleSort={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
+            onRefresh={() => fetchData()}
             loading={loading}
           />
 

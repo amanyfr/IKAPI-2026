@@ -42,6 +42,8 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
   const [range, setRange] = useState('12m');
   const [queueFilter, setQueueFilter] = useState('Menunggu Approval');
   const [showAllQueue, setShowAllQueue] = useState(false);
+  // Default: yang paling lama menunggu tampil duluan agar tidak terlewat
+  const [sortOrder, setSortOrder] = useState('oldest'); // 'newest' | 'oldest'
   const [search, setSearch] = useState('');
 
   const fetchSubmissions = async () => {
@@ -77,9 +79,11 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
     const list = submissions.filter((s) =>
       queueFilter === 'Semua' ? [...PENDING, 'Perlu Revisi', ...SIGNED, ...REJECTED].includes(s.status) : queueFilter === 'Dikirim ke Pusat' ? ['Berkas Diterima', 'Dikirim ke Pusat'].includes(s.status) : s.status === queueFilter
     );
-    // Yang paling lama menunggu tampil duluan agar tidak terlewat
-    return list.sort((a, b) => (parseDate(a.updated_at) || 0) - (parseDate(b.updated_at) || 0));
-  }, [submissions, queueFilter]);
+    return list.sort((a, b) => {
+      const diff = (parseDate(b.updated_at) || 0) - (parseDate(a.updated_at) || 0);
+      return sortOrder === 'newest' ? diff : -diff;
+    });
+  }, [submissions, queueFilter, sortOrder]);
 
   const displayQueue = useMemo(() => {
     return showAllQueue ? queue : queue.slice(0, 6);
@@ -145,6 +149,8 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
             filters={FILTERS}
             active={queueFilter}
             onChange={(k) => { setQueueFilter(k); setShowAllQueue(false); }}
+            sortOrder={sortOrder}
+            onToggleSort={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
             onRefresh={fetchSubmissions}
             loading={loading}
           />
