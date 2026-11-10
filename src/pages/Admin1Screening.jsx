@@ -19,8 +19,13 @@ import {
   Download,
   Users,
   PenTool,
-  KeyRound
+  KeyRound,
+  BadgeCheck,
+  XCircle,
+  X
 } from 'lucide-react';
+import { fileUrl } from '../utils/fileUrl';
+import HeregRequestsPanel from '../components/HeregRequestsPanel';
 import { notify } from '../components/AppDialog';
 
 export default function Admin1Screening({ onNavigateToMembers, initialStatus = 'Semua', initialSearch = '', openSubmissionId = null, onDetailClosed }) {
@@ -51,6 +56,44 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
   const mySignature = useMySignature(isSekretaris);
   const [passing, setPassing] = useState(null); // { submission, settings, notes }
   const [processingPass, setProcessingPass] = useState(false);
+
+  // Verifikasi data KTA yang diisi pemohon (setujui → anggota aktif, tolak → wajib keterangan)
+  const [ktaReview, setKtaReview] = useState(null); // submission
+  const [ktaRejectMode, setKtaRejectMode] = useState(false);
+  const [ktaRejectNote, setKtaRejectNote] = useState('');
+  const [ktaSaving, setKtaSaving] = useState(false);
+
+  const openKtaReview = (sub) => {
+    setKtaReview(sub);
+    setKtaRejectMode(false);
+    setKtaRejectNote('');
+  };
+
+  const submitKtaReview = async (decision) => {
+    if (!ktaReview) return;
+    const note = ktaRejectNote.trim();
+    if (decision === 'reject' && !note) {
+      notify('Tulis keterangan penolakan supaya pemohon tahu apa yang harus diperbaiki.');
+      return;
+    }
+    setKtaSaving(true);
+    try {
+      const res = await fetch(`/api/submissions/${ktaReview.id}/kta-review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` },
+        body: JSON.stringify({ decision, note: decision === 'reject' ? note : undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Gagal menyimpan verifikasi KTA.');
+      setKtaReview(null);
+      notify(data.message || (decision === 'approve' ? 'KTA disetujui.' : 'KTA ditolak.'));
+      fetchSubmissions();
+    } catch (err) {
+      notify(err.message);
+    } finally {
+      setKtaSaving(false);
+    }
+  };
 
   const fetchSubmissions = async () => {
     setLoading(true);
@@ -257,7 +300,11 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     if (sub.status === 'Menunggu Pembayaran') return sub.payment_status === 'Perlu Revisi' ? 'Bukti transfer dikembalikan' : 'Menunggu pembayaran pemohon';
     if (sub.status === 'Pengiriman Berkas') return sub.physical_status === 'Dikirim' ? `Berkas dikirim (${sub.physical_courier || '-'})` : 'Berkas fisik belum dikirim';
     if (sub.status === 'Berkas Diterima') return 'Siap dikirim ke IKAPI Pusat';
-    if (sub.status === 'Dikirim ke Pusat') return `Menunggu KTA Pusat${sub.central_courier ? ` (${sub.central_courier})` : ''}`;
+    if (sub.status === 'Dikirim ke Pusat') {
+      if (sub.kta_review_status === 'Menunggu') return 'Data KTA masuk · perlu diverifikasi';
+      if (sub.kta_review_status === 'Ditolak') return 'KTA ditolak · menunggu perbaikan pemohon';
+      return `Menunggu pemohon isi data KTA${sub.central_courier ? ` (${sub.central_courier})` : ''}`;
+    }
     if (sub.status === 'Perlu Revisi') return `Menunggu revisi ke-${sub.revision_round || 1} dari pemohon`;
     if (sub.status === 'Menunggu Verifikasi' && sub.revision_round > 0) return `Hasil revisi ke-${sub.revision_round} masuk`;
     return null;
@@ -300,6 +347,18 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           >
             <KeyRound className="w-3.5 h-3.5" />
             <span>Input No. KTA</span>
+          </button>
+        )}
+
+        {/* Pemohon sudah mengisi data KTA: Admin cek lalu setujui / tolak */}
+        {isAdmin && sub.status === 'Dikirim ke Pusat' && sub.kta_review_status === 'Menunggu' && (
+          <button
+            onClick={() => openKtaReview(sub)}
+            className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold shadow transition flex items-center gap-1"
+            title="Cek data KTA dari pemohon, lalu setujui atau tolak"
+          >
+            <BadgeCheck className="w-3.5 h-3.5" />
+            <span>Verifikasi KTA</span>
           </button>
         )}
 
@@ -374,6 +433,9 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           </button>}
         </div>
       </div>
+
+      {/* Anggota lama menunggu verifikasi KTA lama (sebelum boleh mengisi formulir) */}
+      {isAdmin && <HeregRequestsPanel />}
 
       {/* Tanda tangan tersimpan Sekretaris */}
       {isSekretaris && (
@@ -647,6 +709,88 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
             payment={packetSubDetail.payment}
           />
         </ModalFrame>
+      )}
+
+      {/* MODAL 3: VERIFIKASI DATA KTA */}
+      {ktaReview && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" onClick={() => !ktaSaving && setKtaReview(null)}>
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-600">Verifikasi KTA</p>
+                <h3 className="text-sm font-bold text-slate-800 mt-0.5">{ktaReview.publisher_name || `Pengajuan #${ktaReview.id}`}</h3>
+                <p className="text-[11px] text-slate-500">Cocokkan dengan KTA dari IKAPI Pusat sebelum menyetujui.</p>
+              </div>
+              <button type="button" onClick={() => setKtaReview(null)} disabled={ktaSaving} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100" aria-label="Tutup">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <dl className="px-5 py-4 space-y-2.5 text-xs">
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Nomor KTA</dt>
+                <dd className="font-mono font-bold text-slate-800 text-right">{ktaReview.kta_number_submitted || '-'}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Tanggal terbit</dt>
+                <dd className="font-medium text-slate-800 text-right">
+                  {ktaReview.kta_issued_at ? new Date(ktaReview.kta_issued_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Bukti KTA</dt>
+                <dd className="text-right min-w-0">
+                  {ktaReview.kta_proof_file ? (
+                    <a href={fileUrl(ktaReview.kta_proof_file)} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline truncate inline-block max-w-[14rem] align-bottom">
+                      {ktaReview.kta_proof_name || 'Lihat file'}
+                    </a>
+                  ) : <span className="text-slate-400">Tidak dilampirkan</span>}
+                </dd>
+              </div>
+              {ktaReview.kta_notes && (
+                <div className="pt-1">
+                  <dt className="text-slate-500">Catatan pemohon</dt>
+                  <dd className="mt-1 p-2 rounded-lg bg-slate-50 text-slate-700 whitespace-pre-wrap">{ktaReview.kta_notes}</dd>
+                </div>
+              )}
+            </dl>
+
+            {ktaRejectMode && (
+              <div className="px-5 pb-3">
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Keterangan penolakan <span className="text-red-500">*</span></label>
+                <textarea
+                  value={ktaRejectNote}
+                  onChange={(e) => setKtaRejectNote(e.target.value)}
+                  rows={3}
+                  autoFocus
+                  placeholder="Contoh: Nomor KTA tidak sesuai dengan bukti yang dilampirkan."
+                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-300 focus:border-red-400"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">Keterangan ini dikirim ke pemohon untuk diperbaiki.</p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 px-5 py-3 bg-slate-50 border-t border-slate-100">
+              {ktaRejectMode ? (
+                <>
+                  <button type="button" onClick={() => setKtaRejectMode(false)} disabled={ktaSaving} className="px-3 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100">Batal</button>
+                  <button type="button" onClick={() => submitKtaReview('reject')} disabled={ktaSaving || !ktaRejectNote.trim()} className="px-3 py-2 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 flex items-center gap-1">
+                    <XCircle className="w-3.5 h-3.5" /> {ktaSaving ? 'Menyimpan...' : 'Kirim penolakan'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setKtaRejectMode(true)} disabled={ktaSaving} className="px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 bg-white hover:bg-red-50 flex items-center gap-1">
+                    <XCircle className="w-3.5 h-3.5" /> Tolak
+                  </button>
+                  <button type="button" onClick={() => submitKtaReview('approve')} disabled={ktaSaving} className="px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5" /> {ktaSaving ? 'Menyimpan...' : 'Setujui · aktifkan anggota'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

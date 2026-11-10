@@ -21,6 +21,12 @@ const FIELD_FILTERS = {
   office_phone: FILTERS.phone,
 };
 
+// Jalur anggota lama yang bisa dibuka Admin
+const HEREG_TRACK_OPTIONS = [
+  { key: 'Perpanjangan', title: 'Perpanjangan (berbayar)', desc: 'Anggota lama mengisi formulir registrasi, unggah dokumen & bayar iuran heregistrasi. Tombol Perpanjang juga tampil di dashboard.' },
+  { key: 'Masih Aktif', title: 'Masih aktif (data manual)', desc: 'KTA masih berlaku. Anggota langsung ke dashboard, melengkapi data, lalu Admin memvalidasi masa aktifnya.' },
+];
+
 const DEFAULT_TEMPLATES = {
   surat_kop_alamat: 'Sekretariat: Jl. Ibu Inggit Garnasih No. 148, Regol, Kota Bandung 40252',
   surat_kop_kontak: 'Telp: (022) 5202684 | Email: sekretariat@ikapi-jabar.or.id | Web: https://ikapi-jabar.or.id',
@@ -40,6 +46,7 @@ export default function SystemSettings() {
     fee_iuran_durasi_bulan: '24',
     fee_administrasi: '250000',
     fee_heregistrasi_iuran: '1200000',
+    hereg_tracks: 'Perpanjangan,Masih Aktif',
     ketua_nama: 'Dr. Abdul Raup, M.Pd.',
     ketua_jabatan: 'Ketua Pengurus Daerah IKAPI Jawa Barat',
     sekretaris_nama: 'Taofiq Rahman Ahmad, S.H.',
@@ -141,6 +148,18 @@ export default function SystemSettings() {
     Number(settings.fee_iuran_bulanan) * Number(settings.fee_iuran_durasi_bulan) +
     Number(settings.fee_administrasi);
   const totalHeregistrasi = Number(settings.fee_heregistrasi_iuran);
+
+  // Jalur anggota lama: boleh keduanya atau salah satu, tidak boleh kosong
+  const tracks = String(settings.hereg_tracks || '').split(',').map((t) => t.trim()).filter(Boolean);
+  const toggleTrack = (key) => {
+    const on = tracks.includes(key);
+    if (on && tracks.length === 1) {
+      notify('Minimal satu jalur anggota lama harus aktif.');
+      return;
+    }
+    const next = HEREG_TRACK_OPTIONS.map((o) => o.key).filter((k) => (k === key ? !on : tracks.includes(k)));
+    setSettings((prev) => ({ ...prev, hereg_tracks: next.join(',') }));
+  };
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -325,6 +344,30 @@ export default function SystemSettings() {
                   className="w-full text-xs pl-8 pr-2.5 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
                 />
               </div>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-slate-100">
+            <p className="text-xs font-semibold text-slate-700">Jalur anggota lama</p>
+            <p className="text-[11px] text-slate-500 mb-2.5">Aktifkan keduanya atau salah satu. Minimal satu jalur harus aktif.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {HEREG_TRACK_OPTIONS.map((o) => {
+                const on = tracks.includes(o.key);
+                const locked = on && tracks.length === 1;
+                return (
+                  <button key={o.key} type="button" role="switch" aria-checked={on} onClick={() => toggleTrack(o.key)}
+                    title={locked ? 'Minimal satu jalur harus aktif' : undefined}
+                    className={`text-left rounded-xl border p-3.5 flex items-start gap-3 transition-colors ${on ? 'border-[#0da2e7] bg-[#f0f9ff]' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                    <span className={`mt-0.5 w-9 h-5 flex-shrink-0 rounded-full p-0.5 transition-colors ${on ? 'bg-[#0da2e7]' : 'bg-slate-300'} ${locked ? 'opacity-60' : ''}`}>
+                      <span className={`block w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-4' : ''}`} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-semibold text-slate-800">{o.title} {on ? '· aktif' : '· nonaktif'}</span>
+                      <span className="block text-[11px] text-slate-500 mt-0.5">{o.desc}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

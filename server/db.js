@@ -332,10 +332,39 @@ async function upgradeSchema() {
   await addColumnIfMissing('users', 'password_reset_token', 'CHAR(64) NULL AFTER email_verify_token');
   await addColumnIfMissing('users', 'password_reset_expires', 'DATETIME NULL AFTER password_reset_token');
   await addColumnIfMissing('users', 'token_version', 'INT NOT NULL DEFAULT 0 AFTER password_reset_expires');
+  // Verifikasi data KTA lama oleh Admin sebelum anggota lama boleh mengisi formulir & dokumen
+  await addColumnIfMissing('users', 'hereg_status', 'VARCHAR(20) NULL AFTER token_version');
+  await addColumnIfMissing('users', 'hereg_note', 'TEXT NULL AFTER hereg_status');
+  await addColumnIfMissing('users', 'hereg_requested_at', 'DATETIME NULL AFTER hereg_note');
+  await addColumnIfMissing('users', 'hereg_reviewed_by', 'VARCHAR(255) NULL AFTER hereg_requested_at');
+  await addColumnIfMissing('users', 'hereg_reviewed_at', 'DATETIME NULL AFTER hereg_reviewed_by');
+  // Jalur anggota lama yang dipilih Admin: 'Perpanjangan' (heregistrasi penuh) atau
+  // 'Masih Aktif' (KTA masih berlaku, dulu didata manual: cukup isi data keanggotaan lalu divalidasi)
+  await addColumnIfMissing('users', 'hereg_track', 'VARCHAR(20) NULL AFTER hereg_reviewed_at');
+  await addColumnIfMissing('users', 'hereg_mig_data', 'LONGTEXT NULL AFTER hereg_track');
+  await addColumnIfMissing('users', 'hereg_mig_proof', 'VARCHAR(255) NULL AFTER hereg_mig_data');
+  await addColumnIfMissing('users', 'hereg_mig_proof_name', 'VARCHAR(255) NULL AFTER hereg_mig_proof');
+  await addColumnIfMissing('users', 'hereg_mig_status', 'VARCHAR(20) NULL AFTER hereg_mig_proof_name');
+  await addColumnIfMissing('users', 'hereg_mig_note', 'TEXT NULL AFTER hereg_mig_status');
+  await addColumnIfMissing('users', 'hereg_mig_at', 'DATETIME NULL AFTER hereg_mig_note');
   await addColumnIfMissing('submissions', 'central_courier', 'VARCHAR(150) NULL AFTER physical_received_by');
   await addColumnIfMissing('submissions', 'central_tracking_no', 'VARCHAR(150) NULL AFTER central_courier');
   await addColumnIfMissing('submissions', 'central_notes', 'TEXT NULL AFTER central_tracking_no');
   await addColumnIfMissing('submissions', 'central_sent_by', 'VARCHAR(255) NULL AFTER central_notes');
+  // Konfirmasi No. KTA oleh pemohon setelah berkas disetujui IKAPI Pusat
+  await addColumnIfMissing('submissions', 'kta_issued_at', 'DATE NULL AFTER central_sent_by');
+  await addColumnIfMissing('submissions', 'kta_proof_file', 'VARCHAR(255) NULL AFTER kta_issued_at');
+  // Masa berlaku manual (anggota lama yang dipindahkan dari data manual); NULL = terbit + durasi iuran
+  await addColumnIfMissing('submissions', 'kta_valid_until', 'DATE NULL AFTER kta_issued_at');
+  await addColumnIfMissing('submissions', 'kta_proof_name', 'VARCHAR(255) NULL AFTER kta_proof_file');
+  await addColumnIfMissing('submissions', 'kta_notes', 'TEXT NULL AFTER kta_proof_name');
+  await addColumnIfMissing('submissions', 'kta_confirmed_at', 'DATETIME NULL AFTER kta_notes');
+  // Verifikasi Admin atas No. KTA yang diisi pemohon: NULL (belum diisi) / Menunggu / Ditolak / Disetujui
+  await addColumnIfMissing('submissions', 'kta_number_submitted', 'VARCHAR(100) NULL AFTER kta_confirmed_at');
+  await addColumnIfMissing('submissions', 'kta_review_status', 'VARCHAR(20) NULL AFTER kta_number_submitted');
+  await addColumnIfMissing('submissions', 'kta_review_note', 'TEXT NULL AFTER kta_review_status');
+  await addColumnIfMissing('submissions', 'kta_reviewed_at', 'DATETIME NULL AFTER kta_review_note');
+  await addColumnIfMissing('submissions', 'kta_reviewed_by', 'VARCHAR(255) NULL AFTER kta_reviewed_at');
   await syncStatusCheck();
   // Penanda dokumen hasil revisi pemohon (untuk sorotan di layar screening Admin)
   await addColumnIfMissing('documents', 'revised_at', 'DATETIME NULL');

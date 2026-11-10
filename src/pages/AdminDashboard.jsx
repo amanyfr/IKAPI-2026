@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import QueueCard, { QueueFooter, QueueFilterBar } from '../components/QueueCard';
+import HeregRequestsPanel from '../components/HeregRequestsPanel';
 import { revisionRoundIn } from '../components/StatusStepper';
 import {
   parseDate, submittedDate, timeAgo, initials, pct, greetingName,
@@ -162,6 +163,9 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
           }))}
         />
       </section>
+
+      {/* Anggota lama menunggu verifikasi KTA lama (hanya tampil bila ada antrean) */}
+      <HeregRequestsPanel />
 
       {/* ══ Widget utama: tugas Admin + kesiapan sistem ══ */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">

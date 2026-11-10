@@ -13,7 +13,8 @@ export default function AnggotaPortal() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [subStatus, setSubStatus] = useState(null);
   // Label akun: belum terverifikasi sampai Admin mengonfirmasi berkas fisik (status Aktif)
-  const verified = subStatus ? subStatus === 'Aktif' : user?.member?.membership_status === 'Aktif';
+  // Selama perpanjangan berjalan, anggota tetap terverifikasi (data anggota masih Aktif)
+  const verified = subStatus === 'Aktif' || user?.member?.membership_status === 'Aktif';
   const roleLabel = verified ? 'Anggota penerbit' : 'Penerbit belum terverifikasi';
 
   // Nilai awal formulir dari jawaban pertanyaan login pertama
@@ -28,6 +29,20 @@ export default function AnggotaPortal() {
   };
 
   const handleNewSubmission = (opts) => {
+    // Perpanjangan anggota aktif (H-7): formulir Registrasi baru, terisi dari data keanggotaan terakhir
+    if (opts?.renewFrom) {
+      const prev = opts.renewFrom;
+      let parsed = {};
+      try { parsed = typeof prev.form_data === 'string' ? JSON.parse(prev.form_data || '{}') : { ...(prev.form_data || {}) }; } catch { parsed = {}; }
+      delete parsed.source; delete parsed.isDraft; delete parsed.isSubmit; delete parsed.submissionType;
+      const kta = prev.member_kta || prev.kta_number_submitted || prev.old_kta_number || '';
+      setInitSubType('Heregistrasi');
+      setInitCategory(prev.member_category || prev.category || profileCategory);
+      // id null: disimpan sebagai pengajuan baru, bukan mengubah pengajuan lama
+      setEditingDraft({ ...prev, id: null, form_data: { ...parsed, oldKtaNumber: kta }, submission_type: 'Heregistrasi', old_kta_number: kta });
+      setActiveTab('form');
+      return;
+    }
     // Satu akun = satu pengajuan; jenisnya selalu mengikuti profil
     setInitSubType(profileType);
     setInitCategory(opts?.category || profileCategory);

@@ -38,6 +38,28 @@ export default {
           muted: '#f2f2f2',  // latar abu muda
         }
       },
+      // Ikon tanda tanya di tahap Input KTA bergoyang pelan sesekali
+      keyframes: {
+        'stepper-wiggle': {
+          '0%, 70%, 100%': { transform: 'rotate(0deg) scale(1)' },
+          '76%': { transform: 'rotate(-14deg) scale(1.12)' },
+          '82%': { transform: 'rotate(12deg) scale(1.12)' },
+          '88%': { transform: 'rotate(-8deg) scale(1.06)' },
+          '94%': { transform: 'rotate(4deg) scale(1)' },
+        },
+        // Kilau mengalir di garis tahap yang sudah lewat & badge status
+        'stepper-flow': { '0%': { backgroundPosition: '100% 0' }, '100%': { backgroundPosition: '-100% 0' } },
+        'stepper-flow-v': { '0%': { backgroundPosition: '0 100%' }, '100%': { backgroundPosition: '0 -100%' } },
+        'stepper-shine': { '0%': { backgroundPosition: '100% 0' }, '60%, 100%': { backgroundPosition: '-150% 0' } },
+        'stepper-in': { '0%': { opacity: '0', transform: 'translateY(8px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+      },
+      animation: {
+        'stepper-wiggle': 'stepper-wiggle 2.4s ease-in-out infinite',
+        'stepper-flow': 'stepper-flow 2.8s linear infinite',
+        'stepper-flow-v': 'stepper-flow-v 2.8s linear infinite',
+        'stepper-shine': 'stepper-shine 3.5s ease-in-out infinite',
+        'stepper-in': 'stepper-in 0.5s ease-out both',
+      },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
         serif: ['Merriweather', 'Georgia', 'serif']

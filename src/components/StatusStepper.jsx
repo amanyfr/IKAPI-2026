@@ -10,20 +10,20 @@ import {
   BadgeCheck,
   PenLine,
   Truck,
-  Send
+  HelpCircle
 } from 'lucide-react';
 
 // Alur: dokumen dulu (Tahap 1), baru pembayaran (Tahap 2), lalu TTD pengurus, berkas fisik,
-// pengiriman ke IKAPI Pusat, dan No. KTA dari Pusat
+// pemohon mengirim berkas langsung ke IKAPI Pusat, lalu mengisi No. KTA dari Pusat
 export const STEPS = [
   { key: 'Draf',                    label: 'Isi Formulir',       hint: 'Formulir & unggah dokumen', icon: FileEdit },
   { key: 'Menunggu Verifikasi',     label: 'Screening Dokumen',  hint: 'Tahap 1 · diperiksa Admin', icon: Search },
   { key: 'Menunggu Pembayaran',     label: 'Pembayaran',         hint: 'Tahap 2 · transfer & verifikasi', icon: CreditCard },
   { key: 'Menunggu TTD Sekretaris', label: 'TTD Sekretaris',     hint: 'Ditandatangani Sekretaris', icon: PenLine },
   { key: 'Menunggu Approval',       label: 'TTD Ketua',          hint: 'Persetujuan Ketua', icon: Award },
-  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Cetak & kirim ke IKAPI Jabar', icon: Truck },
-  { key: 'Dikirim ke Pusat',        label: 'Proses di Pusat',    hint: 'Dikirim Admin ke IKAPI Pusat', icon: Send },
-  { key: 'Aktif',                   label: 'Anggota Aktif',      hint: 'No. KTA dari IKAPI Pusat', icon: BadgeCheck },
+  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Kirim berkas ke IKAPI Pusat', icon: Truck },
+  { key: 'Dikirim ke Pusat',        label: 'Input KTA',          hint: 'Isi No. KTA · dicek Admin', icon: HelpCircle },
+  { key: 'Aktif',                   label: 'Anggota Aktif',      hint: 'KTA diverifikasi Admin', icon: BadgeCheck },
 ];
 
 export const STEP_INDEX = {
@@ -57,16 +57,16 @@ export const STATUS_LABEL = {
   'Menunggu Approval': 'Menunggu TTD Ketua',
   'Pengiriman Berkas': 'Pengiriman Berkas Fisik',
   'Berkas Diterima': 'Berkas Diterima · Siap ke Pusat',
-  'Dikirim ke Pusat': 'Menunggu KTA dari Pusat',
+  'Dikirim ke Pusat': 'Input & Verifikasi KTA',
   'Aktif': 'Anggota Aktif',
   'Ditolak': 'Ditolak',
 };
 
 // Petunjuk tahap saat ini (sub-teks stepper)
 const CURRENT_HINT = {
-  'Pengiriman Berkas': 'Cetak sendiri & kirim berkas',
+  'Pengiriman Berkas': 'Kirim berkas, lalu klik Lanjutkan',
   'Berkas Diterima': 'Berkas diterima, disiapkan ke Pusat',
-  'Dikirim ke Pusat': 'Menunggu No. KTA dari Pusat',
+  'Dikirim ke Pusat': 'Isi No. KTA, diverifikasi Admin',
 };
 
 export default function StatusStepper({ currentStatus, rejectionReason, rejectedAtStatus, paymentRejected = false, hasDocRejection = false, cardClassName = 'card-surface' }) {
@@ -81,11 +81,17 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
 
   // Titik & garis tahap yang sudah lewat selalu biru, termasuk saat sudah aktif
   const doneDot = 'bg-[#0884c4] text-white border-[#0884c4]';
-  const doneLine = 'bg-[#0da2e7]';
+  const doneLine = 'bg-[#0da2e7] bg-[linear-gradient(90deg,#0da2e7_0%,#0da2e7_35%,#9be0ff_50%,#0da2e7_65%,#0da2e7_100%)] bg-[length:200%_100%] motion-safe:animate-stepper-flow';
+  const doneLineV = 'bg-[#0da2e7] bg-[linear-gradient(180deg,#0da2e7_0%,#0da2e7_35%,#9be0ff_50%,#0da2e7_65%,#0da2e7_100%)] bg-[length:100%_200%] motion-safe:animate-stepper-flow-v';
 
   const stepState = (idx) => {
     if (isActive || idx < currentIndex) return 'done';
-    if (idx === currentIndex) return isRejected ? 'rejected' : isNeedRevision ? 'revision' : 'current';
+    if (idx === currentIndex) {
+      if (isRejected) return 'rejected';
+      if (isNeedRevision) return 'revision';
+      // Tahap Input KTA: kuning, menandakan pemohon perlu mengisi / menunggu verifikasi KTA
+      return currentStatus === 'Dikirim ke Pusat' ? 'waiting' : 'current';
+    }
     return isRejected ? 'stopped' : 'todo';
   };
 
@@ -93,6 +99,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
     done: doneDot,
     current: 'bg-white text-[#0884c4] border-[#0da2e7] ring-4 ring-[#d8effd]',
     revision: 'bg-white text-amber-600 border-amber-400 ring-4 ring-amber-100',
+    waiting: 'bg-gradient-to-br from-amber-50 to-amber-100 text-amber-600 border-amber-400 ring-4 ring-amber-100 shadow-[0_0_18px_rgba(245,158,11,0.45)]',
     rejected: 'bg-white text-red-600 border-red-400 ring-4 ring-red-100',
     todo: 'bg-white text-slate-300 border-slate-200',
     stopped: 'bg-slate-50 text-slate-300 border-dashed border-slate-200',
@@ -102,6 +109,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
     done: 'text-slate-800',
     current: 'text-[#0884c4]',
     revision: 'text-amber-700',
+    waiting: 'text-amber-700',
     rejected: 'text-red-700',
     todo: 'text-slate-400',
     stopped: 'text-slate-300 line-through decoration-slate-300',
@@ -111,7 +119,11 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
     const Icon = state === 'done' ? Check : state === 'revision' ? AlertCircle : state === 'rejected' ? XCircle : step.icon;
     return (
       <div className={`stepper-dot relative z-10 w-11 h-11 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${dotClass[state]}`}>
-        <Icon className={state === 'done' ? 'w-5 h-5' : 'w-[18px] h-[18px]'} strokeWidth={state === 'done' ? 3 : 2} />
+        {/* Tahap Input KTA: gelombang kuning berdenyut supaya menarik perhatian (mati jika pengguna memilih kurangi animasi) */}
+        {state === 'waiting' && (
+          <span className="pointer-events-none absolute -inset-1 rounded-full bg-amber-300/50 motion-safe:animate-ping" />
+        )}
+        <Icon className={`relative ${state === 'done' ? 'w-5 h-5' : 'w-[18px] h-[18px]'} ${state === 'waiting' ? 'motion-safe:animate-stepper-wiggle' : ''}`} strokeWidth={state === 'done' ? 3 : 2} />
       </div>
     );
   };
@@ -119,7 +131,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
   const stepHint = (step, state) => {
     if (state === 'rejected') return 'Pengajuan ditolak di tahap ini';
     if (state === 'stopped') return 'Tidak dilanjutkan';
-    return state === 'current' && CURRENT_HINT[currentStatus] ? CURRENT_HINT[currentStatus] : step.hint;
+    return (state === 'current' || state === 'waiting') && CURRENT_HINT[currentStatus] ? CURRENT_HINT[currentStatus] : step.hint;
   };
 
   const statusText = isRejected
@@ -131,7 +143,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
     : STATUS_LABEL[currentStatus] || currentStatus;
 
   return (
-    <div className={`${cardClassName} overflow-hidden`}>
+    <div className={`${cardClassName} overflow-hidden motion-safe:animate-stepper-in`}>
       {/* Header */}
       <div className="border-b border-slate-100 px-5 sm:px-7 py-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -140,7 +152,8 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
             isRejected ? 'bg-red-50 text-red-700 border-red-200' :
             isNeedRevision ? 'bg-amber-50 text-amber-800 border-amber-200' :
             isActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-            'bg-[#eaf6fe] text-[#0884c4] border-[#b8e6fc]'
+            currentStatus === 'Dikirim ke Pusat' ? 'bg-amber-50 text-amber-800 border-amber-200 bg-[linear-gradient(110deg,#fffbeb_40%,#fde68a_50%,#fffbeb_60%)] bg-[length:250%_100%] motion-safe:animate-stepper-shine' :
+            'bg-[#eaf6fe] text-[#0884c4] border-[#b8e6fc] bg-[linear-gradient(110deg,#eaf6fe_40%,#c9ecfd_50%,#eaf6fe_60%)] bg-[length:250%_100%] motion-safe:animate-stepper-shine'
           }`}>
             {statusText}
           </span>
@@ -197,7 +210,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
           return (
             <li key={step.key} className="relative flex gap-3.5 pb-5 last:pb-0">
               {!last && (
-                <span className={`absolute left-[20px] top-11 bottom-0 w-[3px] ${isActive || idx < currentIndex ? doneLine : 'bg-slate-200'}`} />
+                <span className={`absolute left-[20px] top-11 bottom-0 w-[3px] ${isActive || idx < currentIndex ? doneLineV : 'bg-slate-200'}`} />
               )}
               {renderDot(step, state)}
               <div className="pt-1.5 min-w-0">

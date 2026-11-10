@@ -4,9 +4,10 @@ import DocumentVerificationModal from '../components/DocumentVerificationModal';
 import { STEPS, STATUS_LABEL } from '../components/StatusStepper';
 import {
   Activity, Truck, RefreshCw, CheckCircle, Clock, Search, Send, PackageCheck, BadgeCheck, Eye,
-  AlertTriangle, Inbox, Hash, CalendarDays, User, ChevronRight,
+  AlertTriangle, Inbox, Hash, CalendarDays, User, ChevronRight, HelpCircle, XCircle,
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
+import { fileUrl } from '../utils/fileUrl';
 
 const token = () => localStorage.getItem('ikapi_token');
 
@@ -25,25 +26,26 @@ const daysSince = (raw) => {
 
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 
-// Tahap setelah surat ditandatangani: berkas fisik ke IKAPI Jabar -> dikirim ke IKAPI Pusat -> No. KTA terbit
+// Tahap setelah surat ditandatangani: pemohon kirim berkas langsung ke IKAPI Pusat -> pemohon isi No. KTA -> aktif.
+// Tahap 'Berkas Diterima' hanya untuk data lama (alur sebelumnya lewat sekretariat).
 // Kelas warna ditulis lengkap supaya terbaca Tailwind.
 const SECTIONS = [
   {
     key: 'fisik', label: 'Berkas fisik dari pemohon', short: 'Berkas dari pemohon', icon: Truck, statuses: ['Pengiriman Berkas'],
-    hint: 'Pemohon mencetak & mengirim berkas ke sekretariat',
+    hint: 'Pemohon mencetak & mengirim berkas ke IKAPI Pusat',
     empty: 'Belum ada berkas fisik yang ditunggu dari pemohon.',
     tone: { icon: 'bg-amber-100 text-amber-700', active: 'border-amber-300 bg-amber-50/70 ring-2 ring-amber-200', bar: 'bg-amber-400', text: 'text-amber-700' },
   },
   {
-    key: 'pusat', label: 'Siap dikirim ke Pusat', short: 'Siap ke Pusat', icon: PackageCheck, statuses: ['Berkas Diterima'],
+    key: 'pusat', label: 'Di sekretariat (data lama)', short: 'Data lama', icon: PackageCheck, statuses: ['Berkas Diterima'],
     hint: 'Berkas sudah di sekretariat, tinggal dikirim',
     empty: 'Tidak ada berkas yang menunggu dikirim ke IKAPI Pusat.',
     tone: { icon: 'bg-indigo-100 text-indigo-700', active: 'border-indigo-300 bg-indigo-50/70 ring-2 ring-indigo-200', bar: 'bg-indigo-400', text: 'text-indigo-700' },
   },
   {
-    key: 'kta', label: 'Menunggu KTA dari Pusat', short: 'Menunggu KTA', icon: Send, statuses: ['Dikirim ke Pusat'],
-    hint: 'Sudah dikirim, menunggu No. KTA terbit',
-    empty: 'Tidak ada pengajuan yang sedang diproses di IKAPI Pusat.',
+    key: 'kta', label: 'Input KTA · verifikasi Admin', short: 'Input KTA', icon: HelpCircle, statuses: ['Dikirim ke Pusat'],
+    hint: 'Pemohon isi No. KTA, Admin cek benar / tolak',
+    empty: 'Tidak ada pengajuan di tahap Input KTA.',
     tone: { icon: 'bg-violet-100 text-violet-700', active: 'border-violet-300 bg-violet-50/70 ring-2 ring-violet-200', bar: 'bg-violet-400', text: 'text-violet-700' },
   },
   {
@@ -72,6 +74,10 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
   const [section, setSection] = useState('fisik');
   const [search, setSearch] = useState('');
   const [detail, setDetail] = useState(null);
+  // Verifikasi data KTA dari pemohon: id pengajuan yang sedang ditolak + alasannya
+  const [rejectFor, setRejectFor] = useState(null);
+  const [rejectNote, setRejectNote] = useState('');
+  const [reviewing, setReviewing] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -110,6 +116,24 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
     load();
   };
 
+  const handleKtaReview = async (id, decision) => {
+    if (decision === 'reject' && !rejectNote.trim()) {
+      notify('Tulis alasan penolakan agar pemohon tahu yang harus diperbaiki.', { tone: 'error' });
+      return;
+    }
+    setReviewing(id);
+    try {
+      await postAction(`/api/submissions/${id}/kta-review`, { decision, note: decision === 'reject' ? rejectNote.trim() : '' });
+      setRejectFor(null);
+      setRejectNote('');
+      load();
+    } catch (err) {
+      notify(err.message || 'Gagal menyimpan verifikasi KTA.', { tone: 'error' });
+    } finally {
+      setReviewing(null);
+    }
+  };
+
   const handleSendCentral = async (id, data) => {
     await postAction(`/api/submissions/${id}/sent-to-central`, data);
     await openDetail(id);
@@ -138,7 +162,8 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
   const waitingKta = submissions.filter((s) => s.status === 'Dikirim ke Pusat');
   const overdueKta = waitingKta.filter((s) => (daysSince(s.sent_to_central_at) ?? 0) > 30).length;
   const totalActive = stageCounts.Aktif || 0;
-  const needAction = shipped + readyCentral;
+  const ktaToReview = waitingKta.filter((s) => s.kta_review_status === 'Menunggu').length;
+  const needAction = shipped + readyCentral + ktaToReview;
 
   const rowInfo = (s) => {
     if (s.status === 'Pengiriman Berkas') {
@@ -161,18 +186,24 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
     }
     if (s.status === 'Dikirim ke Pusat') {
       const days = daysSince(s.sent_to_central_at);
-      return { badge: `Menunggu KTA${days !== null ? ` · ${days} hari` : ''}`, overdue: days > 30,
+      const meta = [{ icon: CalendarDays, text: `Berkas dikirim ${formatDate(s.sent_to_central_at)}` }];
+      if (s.kta_review_status === 'Menunggu') {
+        return { badge: 'KTA perlu diverifikasi', tone: 'bg-sky-50 text-[#0884c4] border-sky-200',
+          meta: [...meta, s.kta_confirmed_at && { icon: HelpCircle, text: `KTA diisi ${formatDate(s.kta_confirmed_at)}` }] };
+      }
+      if (s.kta_review_status === 'Ditolak') {
+        return { badge: 'Ditolak · menunggu perbaikan', tone: 'bg-red-50 text-red-700 border-red-200',
+          meta: [...meta, s.kta_reviewed_at && { icon: XCircle, text: `Ditolak ${formatDate(s.kta_reviewed_at)}` }] };
+      }
+      return { badge: `Menunggu pemohon isi KTA${days !== null ? ` · ${days} hari` : ''}`, overdue: days > 30,
         tone: days > 30 ? 'bg-red-50 text-red-700 border-red-200' : 'bg-violet-50 text-violet-700 border-violet-200',
-        meta: [
-          { icon: CalendarDays, text: `Dikirim ke Pusat ${formatDate(s.sent_to_central_at)}` },
-          s.central_courier && { icon: Truck, text: s.central_courier },
-          s.central_tracking_no && { icon: Hash, text: `Resi ${s.central_tracking_no}` },
-        ] };
+        meta };
     }
     return { badge: s.member_kta ? `KTA ${s.member_kta}` : 'Aktif', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       meta: [
         { icon: CalendarDays, text: `Aktif ${formatDate(s.activated_at)}` },
         s.sent_to_central_at && { icon: Send, text: `Dikirim ke Pusat ${formatDate(s.sent_to_central_at)}` },
+        s.kta_issued_at && { icon: BadgeCheck, text: `KTA terbit ${formatDate(s.kta_issued_at)}` },
       ] };
   };
 
@@ -194,9 +225,9 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
   const modalRole = user?.role === 'Admin' && ['Pengiriman Berkas', 'Berkas Diterima'].includes(detail?.submission?.status) ? 'Admin' : 'Pengamat';
 
   const kpis = [
-    { label: 'Perlu tindakan Admin', value: needAction, note: `${shipped} konfirmasi · ${readyCentral} kirim ke Pusat`, icon: AlertTriangle },
-    { label: 'Menunggu KTA Pusat', value: waitingKta.length, note: overdueKta ? `${overdueKta} lewat 30 hari` : 'Semua dalam batas wajar', icon: Send },
-    { label: 'Anggota aktif', value: totalActive, note: 'No. KTA sudah terbit', icon: BadgeCheck },
+    { label: 'Perlu tindakan Admin', value: needAction, note: `${ktaToReview} verifikasi KTA${readyCentral ? ` · ${readyCentral} kirim ke Pusat` : ''}`, icon: AlertTriangle },
+    { label: 'Tahap Input KTA', value: waitingKta.length, note: overdueKta ? `${overdueKta} lewat 30 hari` : 'Semua dalam batas wajar', icon: HelpCircle },
+    { label: 'Anggota aktif', value: totalActive, note: 'KTA diverifikasi Admin', icon: BadgeCheck },
   ];
 
   return (
@@ -213,7 +244,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
             <div className="min-w-0">
               <h2 className="text-2xl sm:text-3xl font-light tracking-tight">Monitoring Berkas Fisik</h2>
               <p className="text-sm text-sky-100 mt-1 max-w-xl">
-                Pantau setiap pengajuan dari berkas fisik di sekretariat IKAPI Jawa Barat sampai No. KTA terbit dari IKAPI Pusat.
+                Pantau pengajuan sejak pemohon mengirim berkas fisik ke IKAPI Pusat, mengisi No. KTA, sampai Admin memverifikasinya dan keanggotaan aktif.
               </p>
             </div>
           </div>
@@ -273,7 +304,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
                     )}
                   </span>
                   <span className={`mt-2 text-[11px] leading-tight font-medium ${has ? 'text-slate-800' : 'text-slate-400'}`}>
-                    {step.key === 'Dikirim ke Pusat' ? 'Menunggu KTA Pusat' : step.label}
+                    {step.label}
                   </span>
                   <span className="text-[10px] text-slate-400 mt-0.5">Tahap {i + 1}</span>
                 </button>
@@ -294,7 +325,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
             <div>
               <h3 className="text-lg font-medium text-slate-800">Berkas Fisik & Pengiriman ke IKAPI Pusat</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                {notShipped} belum dikirim pemohon · {shipped} perlu dikonfirmasi diterima
+                {notShipped} belum klik Lanjutkan · {ktaToReview} data KTA perlu diverifikasi
               </p>
             </div>
             <div className="relative w-full sm:w-64">
@@ -376,7 +407,56 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
                         const MIcon = m.icon;
                         return <span key={m.text} className="flex items-center gap-1"><MIcon className="w-3.5 h-3.5 text-slate-400" />{m.text}</span>;
                       })}
+                      {s.kta_proof_file && (
+                        <a href={fileUrl(s.kta_proof_file)} target="_blank" rel="noreferrer"
+                          className="flex items-center gap-1 text-[#0884c4] hover:underline">
+                          <Eye className="w-3.5 h-3.5" />Bukti KTA dari pemohon
+                        </a>
+                      )}
                     </div>
+
+                    {s.status === 'Dikirim ke Pusat' && s.kta_review_status && (
+                      <div className={`rounded-xl border p-3 text-xs space-y-2 ${s.kta_review_status === 'Ditolak' ? 'border-red-200 bg-red-50/60' : 'border-sky-200 bg-sky-50/60'}`}>
+                        <div className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1">
+                          <span className="text-slate-500">No. KTA</span>
+                          <span className="font-mono font-semibold text-slate-900 break-all">{s.kta_number_submitted || '-'}</span>
+                          <span className="text-slate-500">Tgl terbit</span>
+                          <span className="text-slate-800">{formatDate(s.kta_issued_at)}</span>
+                          {s.kta_notes && <><span className="text-slate-500">Catatan</span><span className="text-slate-800">{s.kta_notes}</span></>}
+                          {s.kta_review_status === 'Ditolak' && s.kta_review_note && (
+                            <><span className="text-red-600">Alasan tolak</span><span className="text-red-700">{s.kta_review_note}</span></>
+                          )}
+                        </div>
+                        {user?.role === 'Admin' && s.kta_review_status === 'Menunggu' && (
+                          rejectFor === s.id ? (
+                            <div className="space-y-2 pt-1">
+                              <textarea value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} rows={2} autoFocus
+                                placeholder="Alasan penolakan, mis. nomor tidak sesuai foto KTA"
+                                className="w-full text-xs px-3 py-2 border border-red-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-red-100" />
+                              <div className="flex gap-2 justify-end">
+                                <button type="button" onClick={() => { setRejectFor(null); setRejectNote(''); }}
+                                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 font-semibold">Batal</button>
+                                <button type="button" disabled={reviewing === s.id} onClick={() => handleKtaReview(s.id, 'reject')}
+                                  className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50">
+                                  {reviewing === s.id ? 'Menyimpan...' : 'Tolak & minta perbaikan'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex gap-2 justify-end pt-1">
+                              <button type="button" onClick={() => { setRejectFor(s.id); setRejectNote(''); }}
+                                className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-red-700 hover:bg-red-50 font-semibold flex items-center gap-1">
+                                <XCircle className="w-3.5 h-3.5" /> Tolak
+                              </button>
+                              <button type="button" disabled={reviewing === s.id} onClick={() => handleKtaReview(s.id, 'approve')}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-1 disabled:opacity-50">
+                                <CheckCircle className="w-3.5 h-3.5" /> {reviewing === s.id ? 'Menyimpan...' : 'Data benar · aktifkan'}
+                              </button>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    )}
 
                     <button onClick={() => openDetail(s.id)}
                       className={`mt-auto w-full sm:w-auto sm:self-end px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition ${

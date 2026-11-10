@@ -234,8 +234,8 @@ export default function MembersManagement({ canEditKta = true, initialStatus = '
                   Input No. KTA dari IKAPI Pusat <span className="text-violet-600 tabular-nums">{waitingKta.length}</span>
                 </h2>
                 <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-                  Berkas pemohon di bawah ini sudah dikirim ke IKAPI Pusat. Setelah Nomor KTA terbit, isi di sini.
-                  Status pemohon otomatis menjadi <strong className="font-medium text-slate-700">Anggota Aktif</strong> dan pemohon menerima email.
+                  Pemohon di bawah ini sudah mengirim berkas ke IKAPI Pusat. Pemohon mengisi sendiri Nomor KTA setelah disetujui Pusat.
+                  Isi di sini hanya bila pemohon meminta bantuan. Status pemohon otomatis menjadi <strong className="font-medium text-slate-700">Anggota Aktif</strong>.
                 </p>
               </div>
             </div>

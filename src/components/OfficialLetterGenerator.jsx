@@ -3,6 +3,7 @@ import { POST_APPROVAL_STATUSES } from './StatusStepper';
 import { Printer, Download, CheckCircle, FileText } from 'lucide-react';
 import { PengurusSignatureBlock, KopSurat, KopSuratFooter } from './PengurusSignature';
 import { downloadElementPdf, printElement, safeFileName } from '../utils/exportDocument';
+import { centralAddressLines } from '../utils/centralAddress';
 
 // `signing` (opsional) = { role: 'chairman' | 'secretary', img, pos, onChange }: mode pembubuhan
 // TTD seperti e-meterai pada blok tanda tangan surat.
@@ -98,10 +99,9 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
         {/* Recipient */}
         <div className="text-xs sm:text-sm font-sans mb-6">
           <p>Kepada Yth.</p>
-          <p className="font-bold text-slate-900">Pengurus Pusat IKAPI</p>
-          <p>c.q. Bidang Keanggotaan & Organisasi</p>
-          <p>Jl. Kalipasir No. 32, Cikini, Menteng</p>
-          <p>Jakarta Pusat 10330</p>
+          {centralAddressLines(settings).map((line, i) => (
+            <p key={i} className={i === 0 ? 'font-bold text-slate-900' : undefined}>{line}</p>
+          ))}
         </div>
 
         {/* Letter Body */}

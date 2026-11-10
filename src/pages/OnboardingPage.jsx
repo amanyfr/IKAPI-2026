@@ -54,7 +54,8 @@ export default function OnboardingPage({ onBack, onDone }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const canSubmit = memberType && category && !saving;
+  // Anggota lama wajib menyebut Nomor KTA lama (diverifikasi Admin sebelum formulir dibuka)
+  const canSubmit = memberType && category && !saving && (memberType !== 'Lama' || oldKtaNumber.trim());
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -142,7 +143,7 @@ export default function OnboardingPage({ onBack, onDone }) {
             {memberType === 'Lama' && (
               <div className="panel-inner p-3.5">
                 <label htmlFor="old-kta" className="text-sm font-semibold text-slate-700 block mb-1.5">
-                  Nomor KTA lama <span className="font-normal text-slate-400">(opsional)</span>
+                  Nomor KTA lama <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="old-kta"
@@ -150,7 +151,9 @@ export default function OnboardingPage({ onBack, onDone }) {
                   onChange={(e) => setOldKtaNumber(e.target.value)}
                   placeholder="Contoh: 008/JBR/2024"
                   className="soft-input focus:!border-[#0884c4] focus:!ring-sky-100"
+                  required
                 />
+                <p className="text-xs text-slate-500 mt-1.5">Admin memverifikasi nomor ini dulu. Formulir & dokumen registrasi terbuka setelah disetujui.</p>
               </div>
             )}
           </fieldset>

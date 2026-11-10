@@ -2,8 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import StatusStepper, { POST_APPROVAL_STATUSES } from '../components/StatusStepper';
-import CentralPacketExporter, { officeAddress, physicalChecklist } from '../components/CentralPacketExporter';
+import CentralPacketExporter, { physicalChecklist } from '../components/CentralPacketExporter';
+import { centralAddressLines } from '../utils/centralAddress';
 import ModalFrame from '../components/ModalFrame';
+import ActiveMemberDashboard from '../components/ActiveMemberDashboard';
+import ProfileEditModal from '../components/ProfileEditModal';
+import HeregVerificationCard from '../components/HeregVerificationCard';
+import HeregMigrationForm from '../components/HeregMigrationForm';
 import SubmissionTimeline from '../components/SubmissionTimeline';
 import PaymentInvoice, { downloadInvoicePdf, invoiceNumber, isInvoicePaid } from '../components/PaymentInvoice';
 import { feesFromSettings, formatRupiah } from '../utils/fees';
@@ -17,7 +22,7 @@ import {
   CheckCircle, ExternalLink, RefreshCw,
   Edit3, GraduationCap, ArrowRight, UserPlus, X,
   ShieldCheck, Landmark, Receipt, Download, XCircle, PartyPopper,
-  Printer, Truck, Clock, PenLine, MapPin, Info, ArrowLeft, Send, Phone, Mail, Eye, Trash2
+  Printer, Truck, Clock, PenLine, MapPin, Info, ArrowLeft, Send, Phone, Mail, Eye, Trash2, HelpCircle
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
 import UploadReviewDialog, { formatFileSize } from '../components/UploadReviewDialog';
@@ -83,7 +88,7 @@ function PrintNotice({ compact = false }) {
       <p>
         <strong className="font-semibold">Berkas fisik wajib dicetak sendiri.</strong>{' '}
         Setelah disetujui Sekretaris & Ketua, Anda mencetak surat pengantar, formulir, dan fotokopi berkas persyaratan,
-        lalu mengirimnya ke sekretariat IKAPI Jawa Barat. Keanggotaan aktif setelah berkas fisik diterima.
+        lalu mengirimnya langsung ke IKAPI Pusat. Setelah Pusat menyetujui, Anda mengisi Nomor KTA di sistem dan keanggotaan langsung aktif.
       </p>
     </div>
   );
@@ -110,12 +115,15 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   }, [stagedFiles]);
   const [showPacket,     setShowPacket]     = useState(false);
   const [showInvoice,    setShowInvoice]    = useState(false);
+  const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [refreshing,     setRefreshing]     = useState(false);
   const [appSettings,    setAppSettings]    = useState({});
   const [showWelcome,    setShowWelcome]    = useState(false);
   const [showShipNotice, setShowShipNotice] = useState(false);
-  const [shipForm,       setShipForm]       = useState({ courier: '', trackingNo: '', notes: '' });
+  const [shipConfirmed,  setShipConfirmed]  = useState(false);
   const [sendingShip,    setSendingShip]    = useState(false);
+  const [ktaForm,        setKtaForm]        = useState({ ktaNumber: '', issuedAt: '', notes: '', file: null });
+  const [sendingKta,     setSendingKta]     = useState(false);
   const [lastUpdated,    setLastUpdated]    = useState(null);
   const [markDoc,        setMarkDoc]        = useState(null); // dokumen yang dilihat beserta sorotan revisi Admin
 
@@ -231,6 +239,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
     try { localStorage.setItem(shipKey, '1'); } catch { /* abaikan */ }
   };
 
+  // Pemohon klik "Lanjutkan" setelah mengirim sendiri berkas fisik ke IKAPI Pusat -> tahap Input KTA
   const handleShipSubmit = async (e) => {
     e.preventDefault();
     setSendingShip(true);
@@ -238,13 +247,41 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       const res = await fetch(`/api/submissions/${selectedSub.id}/physical-sent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify(shipForm),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       await loadDetail(selectedSub.id);
     } catch (err) { notify('Gagal menyimpan: ' + err.message); }
     finally { setSendingShip(false); }
+  };
+
+  // Pemohon mengisi No. KTA dari IKAPI Pusat -> diverifikasi Admin sebelum keanggotaan aktif
+  const handleKtaSubmit = async (e) => {
+    e.preventDefault();
+    if (ktaForm.file && ktaForm.file.size > 10 * 1024 * 1024) {
+      notify('Ukuran file maksimal 10 MB. Kompres atau pilih file lain.', { tone: 'warning', title: 'File terlalu besar' });
+      return;
+    }
+    setSendingKta(true);
+    try {
+      const fd = new FormData();
+      fd.append('ktaNumber', ktaForm.ktaNumber);
+      fd.append('issuedAt', ktaForm.issuedAt);
+      fd.append('notes', ktaForm.notes);
+      if (ktaForm.file) fd.append('ktaFile', ktaForm.file);
+      const res = await fetch(`/api/submissions/${selectedSub.id}/kta-confirm`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token()}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      notify(data.message, { tone: 'success', title: 'Data KTA terkirim' });
+      setKtaForm({ ktaNumber: '', issuedAt: '', notes: '', file: null });
+      await loadDetail(selectedSub.id);
+    } catch (err) { notify('Gagal menyimpan: ' + err.message); }
+    finally { setSendingKta(false); }
   };
 
   // File yang dipilih hanya ditahan di browser (bisa dilihat/diganti/dihapus) sampai pemohon menekan Kirim
@@ -355,6 +392,14 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
      (jenis & kategori dipilih di pertanyaan awal; bisa diubah lewat "Ubah jawaban")
      ══════════════════════════════════════════════════════════ */
   if (submissions.length === 0) {
+    // Anggota lama: formulir & dokumen terkunci sampai Admin menyetujui data KTA lama
+    if (defaultType === 'Heregistrasi' && user?.hereg_status !== 'Disetujui') {
+      return <HeregVerificationCard onEditProfile={onEditProfile} />;
+    }
+    // Jalur "masih aktif" (dipilih Admin): tanpa formulir & bayar, cukup lengkapi data keanggotaan
+    if (defaultType === 'Heregistrasi' && user?.hereg_track === 'Masih Aktif') {
+      return <HeregMigrationForm onEditProfile={onEditProfile} />;
+    }
     const pickType = defaultType;
     const pickCategory = defaultCategory;
     const reqDocs = REQUIRED_DOCS[pickType]?.[pickCategory] || [];
@@ -446,6 +491,13 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   const docs     = detailData?.documents  || [];
   const payment  = detailData?.payment;
   const settings = { ...appSettings, ...detailData?.settings };
+  // Anggota lama yang masa aktifnya masih berlaku: tercatat dari data manual, tanpa paket dokumen resmi
+  const migratedSub = (() => {
+    try {
+      const fd = typeof sub?.form_data === 'string' ? JSON.parse(sub.form_data || '{}') : sub?.form_data || {};
+      return fd?.source === 'Migrasi';
+    } catch { return false; }
+  })();
 
   if (!sub) {
     return (
@@ -485,9 +537,26 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
     ['Biaya Administrasi', bill.administrasi],
   ].filter(([, amount]) => Number(amount) > 0);
 
+  // Anggota aktif: tampilkan dashboard keanggotaan saja, tanpa tahapan & riwayat pengajuan
+  const isActiveMember = sub.status === 'Aktif';
+
   return (
     <div className="space-y-6 w-full">
 
+      {/* ══ DASHBOARD ANGGOTA AKTIF: kartu anggota, masa aktif, data penerbit ══ */}
+      {isActiveMember ? (
+        <ActiveMemberDashboard
+          sub={sub}
+          durasiBulan={bill.durasiBulan || 24}
+          hasInvoice={Boolean(payment?.proof_file)}
+          onOpenPacket={() => setShowPacket(true)}
+          onOpenInvoice={() => setShowInvoice(true)}
+          onEditProfile={() => setShowProfileEdit(true)}
+          renewFee={feesFromSettings(settings, 'Heregistrasi')}
+          onRenew={() => onNewSubmission?.({ renewFrom: sub })}
+        />
+      ) : (
+      <>
       {/* ── Ringkasan pengajuan (satu akun = satu pengajuan) ── */}
       <div className="flex flex-wrap items-center justify-between gap-4 card-surface px-4 sm:px-6 py-4">
         <div className="flex items-center gap-3 min-w-0">
@@ -625,203 +694,181 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       )}
       {sub.status === 'Menunggu Approval' && (
         <StageInfo icon={PenLine} tone="blue" title="Ditandatangani Sekretaris · Menunggu persetujuan Ketua">
-          Setelah Ketua menyetujui, Anda akan diminta mencetak dan mengirim berkas fisik ke sekretariat IKAPI Jawa Barat.
+          Setelah Ketua menyetujui, Anda akan diminta mencetak dan mengirim berkas fisik langsung ke IKAPI Pusat.
         </StageInfo>
       )}
 
-      {/* ══ KIRIM BERKAS FISIK ══ */}
+      {/* ══ PEMBERITAHUAN: KIRIM BERKAS FISIK KE IKAPI PUSAT ══ */}
+      {/* Tidak ada data pengiriman yang diisi. Pemohon cukup klik "Lanjutkan" setelah mengirim berkas. */}
       {isShipping && (
         <div className="card-surface overflow-hidden">
-          <div className="bg-amber-50 border-b border-amber-100 px-5 sm:px-7 py-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <Truck className="w-5 h-5 text-amber-700" />
-              <h3 className="text-lg text-slate-800">Kirim Berkas Fisik ke IKAPI Jawa Barat</h3>
-            </div>
-            <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-              sub.physical_status === 'Dikirim' ? 'bg-sky-50 text-[#0884c4] border-sky-200' : 'bg-amber-100 text-amber-800 border-amber-200'
-            }`}>
-              {sub.physical_status === 'Dikirim' ? 'Sudah dikirim · menunggu konfirmasi Admin' : 'Belum dikirim'}
-            </span>
+          <div className="bg-amber-50 border-b border-amber-100 px-5 sm:px-7 py-4 flex items-center gap-2.5">
+            <Truck className="w-5 h-5 text-amber-700" />
+            <h3 className="text-lg text-slate-800">Kirim Berkas Fisik ke IKAPI Pusat</h3>
           </div>
           <div className="p-5 sm:p-7 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-4">
               <p className="text-sm text-slate-700">
-                Pengajuan Anda sudah disetujui Sekretaris & Ketua. <strong className="font-medium">Cetak sendiri</strong> berkas berikut lalu kirim ke sekretariat:
+                Pengajuan Anda sudah disetujui Sekretaris & Ketua. <strong className="font-medium">Cetak sendiri</strong> berkas berikut lalu kirim langsung ke IKAPI Pusat:
               </p>
               <ol className="space-y-1.5 text-sm text-slate-700 list-decimal pl-5">
                 {physicalChecklist(sub, docs).map((item) => <li key={item}>{item}</li>)}
               </ol>
-              <div className="panel-inner p-3.5 flex items-start gap-2.5 text-sm">
-                <MapPin className="w-4 h-4 text-[#0884c4] flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-medium text-slate-800">Sekretariat IKAPI Jawa Barat</p>
-                  <p className="text-slate-600">{officeAddress(settings)}</p>
-                  {settings.office_phone && <p className="text-slate-500 text-xs mt-0.5">Telp. {settings.office_phone}</p>}
-                </div>
-              </div>
               <button onClick={() => setShowPacket(true)} className="soft-pill-primary">
                 <Printer className="w-4 h-4" /> Cetak / unduh surat pengantar & formulir
               </button>
             </div>
 
-            {sub.physical_status === 'Dikirim' ? (
-              <div className="panel-inner p-5 space-y-2 text-sm">
-                <p className="font-medium text-slate-800 flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-600" /> Berkas fisik sudah Anda kirim</p>
-                <p className="text-slate-600">Dikirim lewat <strong className="font-medium">{sub.physical_courier}</strong>{sub.physical_tracking_no && <> · No. resi <span className="font-mono">{sub.physical_tracking_no}</span></>}{sub.physical_sent_at && <> · {formatLongDate(sub.physical_sent_at)}</>}.</p>
-                <p className="text-slate-500 text-xs">Admin akan mengonfirmasi setelah berkas sampai di sekretariat, lalu mengirimkannya ke IKAPI Pusat. Anda resmi aktif setelah Nomor KTA terbit dari Pusat.</p>
+            <form onSubmit={handleShipSubmit} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <span className="w-9 h-9 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
+                  <Info className="w-5 h-5" />
+                </span>
+                <div className="text-sm text-slate-700 space-y-1">
+                  <p className="font-medium text-slate-900">Kirim berkas fisik ke alamat ini</p>
+                  {centralAddressLines(settings).map((line, i) => (
+                    <p key={i} className={i === 0 ? 'text-slate-800' : 'text-slate-600'}>{line}</p>
+                  ))}
+                </div>
               </div>
-            ) : (
-              <form onSubmit={handleShipSubmit} className="panel-inner p-5 space-y-3">
-                <p className="text-sm font-medium text-slate-800">Sudah mengirim berkas? Konfirmasi di sini</p>
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">Dikirim lewat *</label>
-                  <input required value={shipForm.courier} onChange={(e) => setShipForm({ ...shipForm, courier: e.target.value })}
-                    placeholder="JNE / J&T / POS / Diantar langsung" className="soft-input" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">No. resi (jika ada)</label>
-                  <input {...NUMERIC} value={shipForm.trackingNo} onChange={(e) => setShipForm({ ...shipForm, trackingNo: FILTERS.digits(e.target.value) })}
-                    placeholder="Nomor resi (angka saja)" className="soft-input" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">Catatan</label>
-                  <input value={shipForm.notes} onChange={(e) => setShipForm({ ...shipForm, notes: e.target.value })}
-                    placeholder="Opsional" className="soft-input" />
-                </div>
-                <button type="submit" disabled={sendingShip} className="soft-pill-primary w-full py-3">
-                  <Truck className="w-4 h-4" /> {sendingShip ? 'Menyimpan...' : 'Saya sudah mengirim berkas fisik'}
-                </button>
-              </form>
-            )}
+              <p className="text-sm text-slate-600">
+                Pengiriman diurus sendiri oleh Anda. Setelah berkas dikirim, klik <strong className="font-medium">Lanjutkan</strong> untuk
+                masuk ke tahap pengisian Nomor KTA.
+              </p>
+              <label className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={shipConfirmed} onChange={(e) => setShipConfirmed(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#0da2e7] focus:ring-sky-200" />
+                Saya sudah mengirim berkas fisik ke IKAPI Pusat.
+              </label>
+              <button type="submit" disabled={!shipConfirmed || sendingShip} className="soft-pill-primary w-full py-3 disabled:opacity-50">
+                {sendingShip ? 'Menyimpan...' : <>Lanjutkan <ArrowRight className="w-4 h-4" /></>}
+              </button>
+            </form>
           </div>
         </div>
       )}
 
-      {/* ══ PROSES DI IKAPI PUSAT ══ */}
-      {(sub.status === 'Berkas Diterima' || sub.status === 'Dikirim ke Pusat') && (
-        <div className="card-surface px-5 sm:px-7 py-5 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <Truck className="w-5 h-5 text-violet-600" />
-              <h3 className="text-lg text-slate-800">
-                {sub.status === 'Berkas Diterima' ? 'Berkas fisik diterima sekretariat' : 'Berkas dikirim ke IKAPI Pusat'}
-              </h3>
+      {/* ══ INPUT NOMOR KTA (diverifikasi Admin) ══ */}
+      {/* kta_review_status: NULL = belum diisi, Menunggu = diperiksa Admin, Ditolak = isi / unggah ulang */}
+      {(sub.status === 'Berkas Diterima' || sub.status === 'Dikirim ke Pusat') && (() => {
+        const canInput = sub.status === 'Dikirim ke Pusat';
+        const review = sub.kta_review_status;
+        const waiting = canInput && review === 'Menunggu';
+        const rejected = canInput && review === 'Ditolak';
+        return (
+          <div className="card-surface overflow-hidden">
+            <div className="bg-sky-50 border-b border-sky-100 px-5 sm:px-7 py-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <HelpCircle className="w-5 h-5 text-[#0884c4]" />
+                <h3 className="text-lg text-slate-800">Input Nomor KTA</h3>
+              </div>
+              {canInput && (
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                  waiting ? 'bg-amber-50 text-amber-800 border-amber-200'
+                    : rejected ? 'bg-red-50 text-red-700 border-red-200'
+                    : 'bg-sky-100 text-[#0884c4] border-sky-200'}`}>
+                  {waiting ? 'Diverifikasi Admin' : rejected ? 'Perlu diperbaiki' : 'Belum diisi'}
+                </span>
+              )}
             </div>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-violet-50 text-violet-700 border-violet-200">
-              {sub.status === 'Berkas Diterima' ? 'Disiapkan untuk dikirim ke Pusat' : 'Menunggu Nomor KTA dari Pusat'}
-            </span>
-          </div>
-          {(() => {
-            const atPusat = sub.status === 'Dikirim ke Pusat';
-            const days = atPusat && sub.sent_to_central_at
-              ? Math.max(0, Math.floor((Date.now() - new Date(sub.sent_to_central_at).getTime()) / 86400000))
-              : null;
-            const late = days !== null && days > 30;
-            // Empat langkah setelah berkas diterima: siapa yang memegang berkas di tiap langkah
-            const steps = [
-              { label: 'Berkas diterima sekretariat', who: 'IKAPI Jawa Barat', at: sub.physical_received_at, done: true },
-              { label: 'Dikirim ke IKAPI Pusat', who: 'Admin IKAPI Jawa Barat', at: sub.sent_to_central_at, done: atPusat, current: !atPusat },
-              { label: 'Diproses IKAPI Pusat', who: 'Verifikasi & penerbitan No. KTA', current: atPusat },
-              { label: 'No. KTA dicatat, Anggota Aktif', who: 'Sekretaris IKAPI Jawa Barat' },
-            ];
-            return (
-              <>
-                {/* Posisi berkas sekarang */}
-                <div className={`rounded-2xl border p-4 flex items-start gap-3 ${late ? 'bg-amber-50 border-amber-200' : 'bg-violet-50 border-violet-200'}`}>
-                  <span className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${late ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700'}`}>
-                    {atPusat ? <Send className="w-5 h-5" /> : <Truck className="w-5 h-5" />}
+
+            <div className="p-5 sm:p-7">
+              {!canInput ? (
+                <div className="panel-inner p-5 text-sm text-slate-600">
+                  Berkas Anda tercatat di sekretariat IKAPI Jawa Barat dan sedang diteruskan ke IKAPI Pusat.
+                </div>
+              ) : waiting ? (
+                <div className="max-w-xl mx-auto text-center space-y-4 py-2">
+                  <span className="mx-auto w-14 h-14 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
+                    <Clock className="w-7 h-7" />
                   </span>
-                  <div className="min-w-0 text-sm">
-                    <p className="text-slate-800 font-medium">
-                      {atPusat ? 'Berkas Anda sedang diproses di IKAPI Pusat' : 'Sekretariat sedang menyiapkan pengiriman berkas ke IKAPI Pusat'}
-                    </p>
-                    <p className="text-slate-600 mt-0.5">
-                      {atPusat
-                        ? <>Dikirim {formatLongDate(sub.sent_to_central_at)}{days !== null && <> · <strong className="font-medium">{days === 0 ? 'menunggu sejak hari ini' : `sudah ${days} hari menunggu`}</strong></>}
-                            {(sub.central_courier || sub.central_tracking_no) && <> · {sub.central_courier || '-'}{sub.central_tracking_no && <> resi <span className="font-mono">{sub.central_tracking_no}</span></>}</>}</>
-                        : <>Berkas diterima {formatLongDate(sub.physical_received_at)}. Admin akan mengirim paket berkas ke IKAPI Pusat.</>}
-                    </p>
+                  <div className="space-y-1">
+                    <p className="text-base font-medium text-slate-900">Data KTA sedang diverifikasi Admin</p>
+                    <p className="text-sm text-slate-600">Keanggotaan Anda aktif setelah Admin menyatakan datanya benar.</p>
+                  </div>
+                  <div className="panel-inner p-4 text-left text-sm space-y-1.5">
+                    <p className="flex justify-between gap-3"><span className="text-slate-500">Nomor KTA</span><span className="font-mono text-slate-900">{sub.kta_number_submitted}</span></p>
+                    <p className="flex justify-between gap-3"><span className="text-slate-500">Tanggal terbit</span><span className="text-slate-900">{formatLongDate(sub.kta_issued_at)}</span></p>
+                    {sub.kta_proof_file && (
+                      <p className="flex justify-between gap-3"><span className="text-slate-500">Bukti</span>
+                        <a href={fileUrl(sub.kta_proof_file)} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline truncate">{sub.kta_proof_name || 'Lihat file'}</a>
+                      </p>
+                    )}
                   </div>
                 </div>
-
-                <ol className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">
-                  {steps.map((s, i) => (
-                    <li key={s.label} className={`p-3 rounded-2xl border flex items-start gap-2 ${
-                      s.current ? 'bg-white border-violet-300 ring-2 ring-violet-100' : s.done ? 'panel-inner' : 'panel-inner opacity-60'
-                    }`}>
-                      {s.done
-                        ? <CheckCircle className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
-                        : s.current
-                          ? <span className="relative mt-1 flex w-3 h-3 flex-shrink-0"><span className="absolute inline-flex w-full h-full rounded-full bg-violet-400 opacity-60 animate-ping" /><span className="relative inline-flex w-3 h-3 rounded-full bg-violet-600" /></span>
-                          : <Clock className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />}
-                      <span className="min-w-0">
-                        <span className={`block ${s.current ? 'text-violet-800 font-medium' : 'text-slate-800'}`}>{i + 1}. {s.label}</span>
-                        <span className="block text-xs text-slate-500">{s.done && s.at ? formatLongDate(s.at) : s.current ? 'Sedang berjalan' : 'Belum'}</span>
-                        <span className="block text-[11px] text-slate-400">{s.who}</span>
+              ) : (
+                <form onSubmit={handleKtaSubmit} className="max-w-xl mx-auto space-y-5">
+                  {rejected ? (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 p-4 flex items-start gap-3 text-sm">
+                      <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                      <div className="space-y-1 min-w-0">
+                        <p className="font-medium text-red-800">Data KTA ditolak Admin. Perbaiki lalu kirim ulang.</p>
+                        {sub.kta_review_note && <p className="text-red-700">Alasan: {sub.kta_review_note}</p>}
+                        {sub.kta_number_submitted && (
+                          <p className="text-xs text-red-600/80">Data sebelumnya: <span className="font-mono">{sub.kta_number_submitted}</span></p>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center space-y-2">
+                      <span className="mx-auto w-14 h-14 rounded-full bg-sky-100 text-[#0884c4] flex items-center justify-center">
+                        <HelpCircle className="w-7 h-7" />
                       </span>
-                    </li>
-                  ))}
-                </ol>
+                      <p className="text-base font-medium text-slate-900">Sudah menerima Nomor KTA dari IKAPI Pusat?</p>
+                      <p className="text-sm text-slate-600">
+                        Isi sesuai kartu / surat dari Pusat. Admin akan memeriksa datanya, lalu keanggotaan Anda aktif.
+                      </p>
+                    </div>
+                  )}
 
-                {/* Yang perlu dilakukan pemohon */}
-                <div className="panel-inner p-4 text-sm space-y-1.5">
-                  <p className="flex items-center gap-2 text-slate-800 font-medium">
-                    <Info className="w-4 h-4 text-sky-600" /> Yang perlu Anda lakukan
-                  </p>
-                  <p className="text-slate-600">
-                    Tidak ada tindakan dari Anda. Penerbitan Nomor KTA dilakukan oleh IKAPI Pusat. Setelah terbit, Sekretaris IKAPI Jawa Barat
-                    mencatat Nomor KTA. Status Anda otomatis menjadi <strong className="font-medium">Anggota Aktif</strong> dan Anda menerima email.
-                  </p>
+                  <div className="panel-inner p-5 space-y-4">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">Nomor KTA *</label>
+                      <input required value={ktaForm.ktaNumber} maxLength={100}
+                        onChange={(e) => setKtaForm({ ...ktaForm, ktaNumber: e.target.value.toUpperCase().replace(/[^A-Z0-9./ -]/g, '') })}
+                        placeholder="Sesuai kartu / surat dari IKAPI Pusat" className="soft-input font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">Tanggal terbit KTA *</label>
+                      <input required type="date" value={ktaForm.issuedAt} max={new Date().toISOString().slice(0, 10)}
+                        onChange={(e) => setKtaForm({ ...ktaForm, issuedAt: e.target.value })} className="soft-input" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">Foto / scan KTA atau surat dari Pusat *</label>
+                      <input required type="file" accept=".pdf,.png,.jpg,.jpeg,.webp"
+                        onChange={(e) => setKtaForm({ ...ktaForm, file: e.target.files?.[0] || null })}
+                        className="block w-full text-xs text-slate-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-full file:border-0 file:bg-sky-50 file:text-[#0884c4] file:font-medium hover:file:bg-sky-100" />
+                      <p className="text-[11px] text-slate-400 mt-1">PDF/JPG/PNG, maks. 10 MB.</p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">Catatan</label>
+                      <input value={ktaForm.notes} onChange={(e) => setKtaForm({ ...ktaForm, notes: e.target.value })}
+                        placeholder="Opsional" className="soft-input" />
+                    </div>
+                    <button type="submit" disabled={sendingKta} className="soft-pill-primary w-full py-3">
+                      <Send className="w-4 h-4" /> {sendingKta ? 'Mengirim...' : rejected ? 'Kirim ulang untuk diverifikasi' : 'Kirim untuk diverifikasi Admin'}
+                    </button>
+                  </div>
+
                   {(settings.office_phone || settings.office_email) && (
-                    <p className={late ? 'text-amber-800' : 'text-slate-500'}>
-                      {late ? 'Sudah lebih dari 30 hari? ' : 'Ada pertanyaan? '}Hubungi sekretariat:{' '}
+                    <p className="text-xs text-slate-500 text-center">
+                      Belum menerima Nomor KTA? Hubungi sekretariat IKAPI Jawa Barat:{' '}
                       {settings.office_phone && <span className="inline-flex items-center gap-1"><Phone className="w-3.5 h-3.5" />{settings.office_phone}</span>}
                       {settings.office_phone && settings.office_email && ' · '}
                       {settings.office_email && (
-                        <a href={`mailto:${settings.office_email}?subject=${encodeURIComponent(`Status No. KTA - ${sub.publisher_name || ''} (Pengajuan #${sub.id})`)}`}
+                        <a href={`mailto:${settings.office_email}?subject=${encodeURIComponent(`Status KTA - ${sub.publisher_name || ''} (Pengajuan #${sub.id})`)}`}
                           className="inline-flex items-center gap-1 text-sky-700 hover:underline">
                           <Mail className="w-3.5 h-3.5" />{settings.office_email}
                         </a>
                       )}
                     </p>
                   )}
-                </div>
-              </>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* ══ KTA AKTIF CARD ══ */}
-      {sub.status === 'Aktif' && (
-        <div className="accent-green rounded-[28px] p-6 sm:p-7 shadow-[0_14px_30px_-16px_rgba(18,194,111,0.8)] flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-          <div className="space-y-1.5">
-            <div className="soft-chip !text-emerald-700">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Anggota Penerbit IKAPI</span>
+                </form>
+              )}
             </div>
-            <h3 className="text-2xl sm:text-3xl font-light">{sub.publisher_name}</h3>
-            <p className="text-sm text-white/90">
-              Selamat! Anda resmi terdaftar sebagai anggota IKAPI Jawa Barat
-              {sub.activated_at && <> sejak <strong className="font-medium text-white">{formatLongDate(sub.activated_at)}</strong></>}.
-            </p>
-            <p className="text-sm text-white/85">
-              Nomor KTA:{' '}
-              {sub.member_kta || sub.kta_number
-                ? <strong className="text-white text-lg font-medium tracking-wide">{sub.member_kta || sub.kta_number}</strong>
-                : <span className="text-white/90">sedang dicatat oleh pengurus</span>}
-            </p>
           </div>
-          <button
-            onClick={() => setShowPacket(true)}
-            className="soft-pill self-start sm:self-center"
-          >
-            <FileText className="w-4 h-4" />
-            <span>Unduh Dokumen Resmi</span>
-          </button>
-        </div>
-      )}
-
+        );
+      })()}
 
       {/* ══ INVOICE PEMBAYARAN (setelah bukti transfer diunggah) ══ */}
       {payment?.proof_file && (
@@ -1182,6 +1229,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
 
       {/* ══ RIWAYAT ALUR BERKAS ══ */}
       <SubmissionTimeline timeline={detailData?.timeline || []} cardClassName="card-surface" />
+      </>
+      )}
 
       {/* ══ DOKUMEN DENGAN SOROTAN REVISI ══ */}
       {markDoc && <RevisionMarksViewer doc={markDoc} round={revRound} onClose={() => setMarkDoc(null)} />}
@@ -1201,14 +1250,14 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               <h3 id="ship-title" className="text-xl font-medium text-slate-900 text-center">Pengajuan disetujui! Kirim berkas fisik</h3>
               <p className="text-sm text-slate-600 mt-2 leading-relaxed text-center">
                 Sekretaris & Ketua sudah menandatangani. <strong className="font-medium text-slate-800">Cetak sendiri</strong> surat pengantar,
-                formulir, dan fotokopi berkas persyaratan, lalu kirim ke sekretariat IKAPI Jawa Barat:
+                formulir, dan fotokopi berkas persyaratan, lalu kirim langsung ke IKAPI Pusat:
               </p>
               <p className="text-xs text-slate-700 bg-slate-50 rounded-xl px-3 py-2 mt-3 flex gap-2">
-                <MapPin className="w-4 h-4 text-[#0884c4] flex-shrink-0" /> {officeAddress(settings)}
+                <MapPin className="w-4 h-4 text-[#0884c4] flex-shrink-0" /> {centralAddressLines(settings).join(', ')}
               </p>
               <p className="text-xs text-slate-500 mt-3 flex gap-2">
                 <Info className="w-4 h-4 flex-shrink-0" />
-                Setelah berkas diterima, Admin mengirimkannya ke IKAPI Pusat. Anda resmi menjadi anggota setelah Nomor KTA terbit.
+                Setelah berkas dikirim, klik Lanjutkan lalu isi Nomor KTA dari IKAPI Pusat. Admin memverifikasi sebelum keanggotaan aktif.
               </p>
               <div className="flex flex-col sm:flex-row gap-2 mt-5">
                 <button onClick={() => { closeShipNotice(); setShowPacket(true); }}
@@ -1243,23 +1292,29 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               </div>
             </div>
             <div className="-mt-6 mx-4 mb-4 bg-white rounded-3xl px-5 pt-6 pb-5">
-              <h3 id="welcome-title" className="text-xl font-medium text-slate-900">Selamat, tahap pendaftaran sudah selesai!</h3>
+              <h3 id="welcome-title" className="text-xl font-medium text-slate-900">
+                {migratedSub ? 'Selamat, keanggotaan Anda tervalidasi!' : 'Selamat, tahap pendaftaran sudah selesai!'}
+              </h3>
               <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-                Nomor KTA <strong className="font-medium text-slate-800">{sub.publisher_name}</strong> sudah terbit dari IKAPI Pusat.
-                Anda kini <strong className="font-medium text-emerald-700">resmi menjadi anggota IKAPI Jawa Barat</strong>
+                {migratedSub
+                  ? <>Admin memvalidasi KTA <strong className="font-medium text-slate-800">{sub.publisher_name}</strong> yang masih berlaku.</>
+                  : <>Nomor KTA <strong className="font-medium text-slate-800">{sub.publisher_name}</strong> sudah terbit dari IKAPI Pusat.</>}
+                {' '}Anda kini <strong className="font-medium text-emerald-700">resmi menjadi anggota IKAPI Jawa Barat</strong>
                 {sub.activated_at && <> sejak {formatLongDate(sub.activated_at)}</>}.
               </p>
               <p className="text-xs text-slate-500 mt-3">
                 {(sub.member_kta || sub.kta_number) ? <>Nomor KTA: <strong className="font-mono text-slate-700">{sub.member_kta || sub.kta_number}</strong>. </> : null}
-                Dokumen resmi (surat, formulir, berita acara & SK) bisa diunduh kapan saja.
+                {migratedSub
+                  ? 'Data keanggotaan Anda kini tercatat di aplikasi ini.'
+                  : 'Dokumen resmi (surat, formulir, berita acara & SK) bisa diunduh kapan saja.'}
               </p>
               <div className="flex flex-col sm:flex-row gap-2 mt-5">
-                <button
+                {!migratedSub && <button
                   onClick={() => { closeWelcome(); setShowPacket(true); }}
                   className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium transition"
                 >
                   <FileText className="w-4 h-4" /> Lihat dokumen
-                </button>
+                </button>}
                 <button
                   onClick={closeWelcome}
                   className="flex-1 px-4 py-2.5 rounded-2xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-medium transition"
@@ -1281,6 +1336,10 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       )}
 
       {/* ══ PACKET MODAL ══ */}
+      {showProfileEdit && (
+        <ProfileEditModal sub={sub} onClose={() => setShowProfileEdit(false)}
+          onSaved={async (msg) => { setShowProfileEdit(false); await loadDetail(sub.id); notify(msg, { tone: 'success', title: 'Data diperbarui' }); }} />
+      )}
       {showPacket && (
         <ModalFrame onClose={() => setShowPacket(false)}>
           <CentralPacketExporter submission={sub} documents={docs} settings={settings} />
