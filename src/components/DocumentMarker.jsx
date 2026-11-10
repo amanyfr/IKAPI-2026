@@ -124,6 +124,11 @@ function MarkLayer({ page, marks, allMarks, editable, onAdd, onRemove, activeInd
             <span className={`absolute -top-3 -left-3 w-6 h-6 rounded-full text-white text-[11px] font-bold flex items-center justify-center shadow-md ring-2 ring-white ${active ? 'bg-amber-600 scale-110' : 'bg-amber-500'} transition-transform`}>
               {n}
             </span>
+            {m.note && (
+              <span className="absolute left-4 -top-3 max-w-[calc(100%-1.5rem)] truncate px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-semibold shadow-sm ring-2 ring-white pointer-events-none">
+                {m.note}
+              </span>
+            )}
             {editable && (
               <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => onRemove(m)}
                 className="absolute -top-2.5 -right-2.5 w-5 h-5 rounded-full bg-white border border-amber-400 text-amber-700 flex items-center justify-center shadow hover:bg-amber-50"

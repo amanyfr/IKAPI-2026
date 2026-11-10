@@ -61,7 +61,7 @@ function FilePreview({ file }) {
 
 const DOC_BADGE = {
   Sesuai: 'bg-emerald-100 text-emerald-800',
-  'Perlu Revisi': 'bg-red-100 text-red-700',
+  'Perlu Revisi': 'bg-amber-100 text-amber-800 border border-amber-300',
   Menunggu: 'bg-slate-100 text-slate-600',
 };
 // Dokumen pengganti dari pemohon yang belum diperiksa ulang Admin
@@ -319,16 +319,16 @@ export default function DocumentVerificationModal({
                         </span>
                       </div>
                       {doc.verified_at && doc.screening_status !== 'Menunggu' && (
-                        <div className={`mt-0.5 flex items-center gap-1.5 text-[11px] ${doc.screening_status === 'Sesuai' ? 'text-emerald-700' : 'text-red-700'}`}>
+                        <div className={`mt-0.5 flex items-center gap-1.5 text-[11px] ${doc.screening_status === 'Sesuai' ? 'text-emerald-700' : 'text-amber-700'}`}>
                           {doc.screening_status === 'Sesuai' ? <CheckCircle className="w-3 h-3 flex-shrink-0" /> : <XCircle className="w-3 h-3 flex-shrink-0" />}
                           <span>
-                            {doc.screening_status === 'Sesuai' ? 'Sesuai' : 'Tidak sesuai'} · {formatTime(doc.verified_at)}
+                            {doc.screening_status === 'Sesuai' ? 'Sesuai' : 'Perlu revisi'} · {formatTime(doc.verified_at)}
                             {doc.verified_by_name && <span className="text-slate-500"> · {doc.verified_by_name}</span>}
                           </span>
                         </div>
                       )}
                       {doc.screening_status === 'Perlu Revisi' && doc.revision_notes && (
-                        <p className="mt-1.5 text-[11px] text-red-700 bg-red-50 rounded-lg px-2 py-1">{doc.revision_notes}</p>
+                        <p className="mt-1.5 text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">{doc.revision_notes}</p>
                       )}
                       {fresh && doc.previous_revision_notes && (
                         <p className="mt-1.5 text-[11px] text-slate-600">
@@ -345,8 +345,25 @@ export default function DocumentVerificationModal({
                   {activeDoc && opened.has(activeDoc.id) ? (
                     rejecting === activeDoc.id && canMarkFile(activeDoc) ? (
                       <DocumentMarker key={`mark-${activeDoc.id}`} file={activeDoc} marks={marks} onChange={setMarks} editable />
-                    ) : activeDoc.screening_status === 'Perlu Revisi' && parseMarks(activeDoc.revision_marks).length > 0 && canMarkFile(activeDoc) ? (
-                      <DocumentMarker key={`view-${activeDoc.id}`} file={activeDoc} marks={parseMarks(activeDoc.revision_marks)} />
+                    ) : activeDoc.screening_status === 'Perlu Revisi' && canMarkFile(activeDoc) ? (
+                      <DocumentMarker
+                        key={`view-${activeDoc.id}`}
+                        file={activeDoc}
+                        marks={(() => {
+                          const parsed = parseMarks(activeDoc.revision_marks);
+                          if (parsed.length > 0) return parsed;
+                          return activeDoc.revision_notes
+                            ? String(activeDoc.revision_notes).split(';').map((s) => s.trim()).filter(Boolean).map((note, idxNote) => ({
+                                page: 1,
+                                x: 0.08,
+                                y: Math.min(0.75, 0.10 + idxNote * 0.18),
+                                w: 0.84,
+                                h: 0.14,
+                                note,
+                              }))
+                            : [{ page: 1, x: 0.08, y: 0.10, w: 0.84, h: 0.16, note: 'Perlu direvisi sesuai ketentuan.' }];
+                        })()}
+                      />
                     ) : (
                       <FilePreview file={activeDoc} />
                     )
@@ -381,17 +398,17 @@ export default function DocumentVerificationModal({
                       <p className="text-xs text-slate-500 flex items-center gap-1.5"><Lock className="w-3.5 h-3.5" /> Buka dokumen dulu untuk menilai.</p>
                     ) : rejecting === activeDoc.id ? (
                       <div className="space-y-2.5">
-                        <p className="text-sm font-semibold text-red-700 flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Tandai tidak sesuai</p>
+                        <p className="text-sm font-semibold text-amber-800 flex items-center gap-1.5"><XCircle className="w-4 h-4 text-amber-600" /> Tandai perlu revisi (tidak sesuai)</p>
                         {canMarkFile(activeDoc) && (
-                          <div className="text-[11px] rounded-lg px-3 py-2 bg-amber-50 border border-amber-200 text-amber-900">
-                            <span className="font-semibold">Sorotan di dokumen:</span>{' '}
+                          <div className="text-[11px] rounded-lg px-3 py-2 bg-amber-50 border border-amber-300 text-amber-900">
+                            <span className="font-semibold">Highlight revisi di dokumen:</span>{' '}
                             {marks.length > 0
                               ? <>{marks.length} bagian disorot. Catatan tiap sorotan diisi di kotak bernomor di bawah dokumen.</>
-                              : <>belum ada. Opsional: seret pada dokumen di atas untuk menandai bagian yang salah.</>}
+                              : <>belum ada. Seret pada dokumen di atas untuk menandai (highlight) bagian yang salah.</>}
                           </div>
                         )}
                         {showComment || comment ? (
-                          <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                          <div className="space-y-2 rounded-lg border border-amber-200 bg-white p-3">
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-xs font-semibold text-slate-700">
                                 Komentar umum untuk pemohon
@@ -400,33 +417,33 @@ export default function DocumentVerificationModal({
                                   : <span className="font-normal text-slate-500"> (wajib bila sorotan tidak diberi catatan)</span>}
                               </p>
                               <button type="button" onClick={() => { setComment(''); setShowComment(false); }}
-                                className="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[11px] font-medium text-slate-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700 transition">
+                                className="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[11px] font-medium text-slate-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 transition">
                                 <Trash2 className="w-3.5 h-3.5" /> Hapus komentar
                               </button>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               {REASON_LABELS.map((r) => (
                                 <button key={r} type="button" onClick={() => setComment((c) => (c.includes(r) ? c : c ? `${c}; ${r}` : r))}
-                                  className="px-2.5 py-1 rounded-full text-[11px] border border-red-200 bg-white text-red-700 hover:bg-red-50">
+                                  className="px-2.5 py-1 rounded-full text-[11px] border border-amber-300 bg-amber-50/60 text-amber-900 hover:bg-amber-100">
                                   {r}
                                 </button>
                               ))}
                             </div>
                             <textarea rows="2" value={comment} onChange={(e) => setComment(e.target.value)} autoFocus={!comment}
                               placeholder="Contoh: Scan akta terpotong di halaman 2, mohon unggah ulang yang lengkap."
-                              className="w-full text-xs p-2.5 border border-red-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-300" />
+                              className="w-full text-xs p-2.5 border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
                           </div>
                         ) : (
                           <button type="button" onClick={() => setShowComment(true)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-slate-300 text-xs font-medium text-slate-600 hover:border-red-300 hover:text-red-700 hover:bg-red-50/50 transition">
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-amber-300 text-xs font-medium text-amber-800 hover:border-amber-400 hover:text-amber-900 hover:bg-amber-50 transition">
                             <Plus className="w-3.5 h-3.5" /> Tambah komentar umum <span className="font-normal text-slate-400">(opsional)</span>
                           </button>
                         )}
                         <div className="flex justify-end gap-2">
                           <button onClick={() => { setRejecting(null); setComment(''); setMarks([]); setShowComment(false); }} className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white">Batal</button>
                           <button disabled={busy} onClick={() => markDoc(activeDoc, 'Perlu Revisi')}
-                            className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5">
-                            <XCircle className="w-3.5 h-3.5" /> Simpan: tidak sesuai
+                            className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-1.5">
+                            <XCircle className="w-3.5 h-3.5" /> Simpan: perlu revisi
                           </button>
                         </div>
                       </div>
@@ -438,8 +455,8 @@ export default function DocumentVerificationModal({
                             : <>Menunggu pemohon mengganti dokumen ini. Catatan & sorotan masih bisa diperbarui.</>}
                         </span>
                         <button disabled={busy} onClick={() => { setRejecting(activeDoc.id); setComment(activeDoc.revision_notes || ''); setMarks(activeDoc.screening_status === 'Perlu Revisi' ? parseMarks(activeDoc.revision_marks) : []); }}
-                          className={`px-3.5 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 border ${activeDoc.screening_status === 'Perlu Revisi' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-700 border-red-200 hover:bg-red-50'}`}>
-                          <XCircle className="w-3.5 h-3.5" /> {canScreenDocs ? 'Tidak sesuai' : 'Ubah catatan & sorotan'}
+                          className={`px-3.5 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 border ${activeDoc.screening_status === 'Perlu Revisi' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-50'}`}>
+                          <XCircle className="w-3.5 h-3.5" /> {canScreenDocs ? 'Tidak sesuai / Revisi' : 'Ubah catatan & sorotan'}
                         </button>
                         {canScreenDocs && <button disabled={busy} onClick={() => markDoc(activeDoc, 'Sesuai')}
                           className={`px-3.5 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 ${activeDoc.screening_status === 'Sesuai' ? 'bg-emerald-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}>
@@ -644,7 +661,7 @@ export default function DocumentVerificationModal({
               <>
                 <div className="text-xs text-slate-600 flex flex-wrap gap-x-3 gap-y-1 sm:mr-auto">
                   <span className="text-emerald-700 font-semibold">{okCount} sesuai</span>
-                  <span className="text-red-700 font-semibold">{badCount} tidak sesuai</span>
+                  <span className="text-amber-700 font-semibold">{badCount} perlu revisi</span>
                   <span>{pendingCount} belum diperiksa</span>
                 </div>
                 {badCount > 0 ? (

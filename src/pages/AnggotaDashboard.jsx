@@ -585,9 +585,9 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                   ) : (
                     <span className="text-amber-700 font-medium"> — Belum sesuai ketentuan</span>
                   )}
-                  {parseMarks(d.revision_marks).length > 0 && canMarkFile(d) && (
-                    <button type="button" onClick={() => setMarkDoc(d)} className="ml-1.5 text-[#0884c4] font-semibold hover:underline">
-                      Lihat bagian yang disorot
+                  {canMarkFile(d) && (
+                    <button type="button" onClick={() => setMarkDoc(d)} className="ml-2 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-semibold transition">
+                      <Eye className="w-3 h-3" /> Lihat highlight revisi
                     </button>
                   )}
                 </li>
@@ -1047,41 +1047,65 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                       {label.text}
                     </span>
                     {isRevisi && doc.file_path && (
-                      <a href={fileUrl(doc.file_path)} target="_blank" rel="noreferrer"
-                        className="ml-auto text-xs font-medium text-slate-500 hover:text-[#0884c4] flex items-center gap-1 transition">
-                        <ExternalLink className="w-3.5 h-3.5" /> Lihat berkas lama
-                      </a>
+                      <div className="ml-auto flex flex-wrap items-center gap-2">
+                        {canMarkFile(doc) && (
+                          <button
+                            type="button"
+                            onClick={() => setMarkDoc(doc)}
+                            className="px-3 py-1 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-semibold flex items-center gap-1.5 transition"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> Lihat highlight di dokumen
+                          </button>
+                        )}
+                        <a href={fileUrl(doc.file_path)} target="_blank" rel="noreferrer"
+                          className="text-xs font-medium text-slate-500 hover:text-[#0884c4] flex items-center gap-1 transition">
+                          <ExternalLink className="w-3.5 h-3.5" /> Lihat berkas lama
+                        </a>
+                      </div>
                     )}
                   </div>
 
                   <div className="p-4">
                     <div className={`grid gap-4 items-stretch ${canUpload ? 'md:grid-cols-[minmax(0,1fr),16rem]' : ''}`}>
                       {isRevisi ? (() => {
-                        const marks = parseMarks(doc.revision_marks);
-                        const showMarks = marks.length > 0 && canMarkFile(doc);
-                        const general = adminGeneralNote(doc, marks);
+                        const rawMarks = parseMarks(doc.revision_marks);
+                        const hasFileToMark = canMarkFile(doc);
+                        const marks = rawMarks.length > 0
+                          ? rawMarks
+                          : (doc.revision_notes
+                            ? String(doc.revision_notes).split(';').map((s) => s.trim()).filter(Boolean).map((note, idxNote) => ({
+                                page: 1,
+                                x: 0.08,
+                                y: Math.min(0.75, 0.10 + idxNote * 0.18),
+                                w: 0.84,
+                                h: 0.14,
+                                note,
+                              }))
+                            : []);
+                        const showMarks = marks.length > 0;
+                        const general = adminGeneralNote(doc, rawMarks);
                         return (
-                          <div className="rounded-xl bg-amber-50/70 border-l-4 border-amber-400 px-4 py-3 text-sm text-slate-800 flex flex-col min-w-0">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-2">Catatan Admin</p>
+                          <div className="rounded-xl bg-amber-50/80 border-l-4 border-amber-400 px-4 py-3 text-sm text-amber-950 flex flex-col min-w-0">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800 mb-2">Catatan Admin</p>
                             {showMarks && (
                               <ol className="space-y-1.5">
                                 {marks.map((m, i) => (
                                   <li key={i} className="flex items-start gap-2">
                                     <span className="mt-px w-5 h-5 flex-shrink-0 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
-                                    <span className="leading-snug">{m.note || 'Bagian yang ditandai perlu diperbaiki.'}</span>
+                                    <span className="leading-snug text-amber-950">{m.note || 'Bagian yang ditandai perlu diperbaiki.'}</span>
                                   </li>
                                 ))}
                               </ol>
                             )}
-                            {(general || !showMarks) && (
-                              <p className={`leading-relaxed ${showMarks ? 'mt-2.5 pt-2.5 border-t border-amber-200/70 text-slate-600' : ''}`}>
-                                {general || 'Format atau berkas belum sesuai ketentuan. Silakan unggah dokumen pengganti.'}
+                            {(general && rawMarks.length > 0) || !showMarks ? (
+                              <p className={`leading-relaxed ${showMarks ? 'mt-2.5 pt-2.5 border-t border-amber-200/70 text-amber-900' : 'text-amber-950'}`}>
+                                {general || doc.revision_notes || 'Format atau berkas belum sesuai ketentuan. Silakan unggah dokumen pengganti.'}
                               </p>
-                            )}
-                            {showMarks && (
+                            ) : null}
+                            {hasFileToMark && (
                               <button type="button" onClick={() => setMarkDoc(doc)}
-                                className="mt-3 self-start px-3 py-1.5 rounded-full bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 text-xs font-medium flex items-center gap-1.5 transition">
-                                <Eye className="w-3.5 h-3.5" /> Lihat bagian yang disorot
+                                className="mt-3 self-start px-3.5 py-1.5 rounded-full bg-amber-400/90 hover:bg-amber-400 border border-amber-500/40 text-amber-950 text-xs font-semibold flex items-center gap-1.5 shadow-sm transition">
+                                <Eye className="w-3.5 h-3.5" /> Lihat bagian yang disorot pada dokumen
                               </button>
                             )}
                           </div>

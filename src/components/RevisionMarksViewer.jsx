@@ -10,14 +10,26 @@ import { fileUrl } from '../utils/fileUrl';
  * Klik nomor di daftar atau kotak di dokumen untuk berpindah sorotan.
  */
 export default function RevisionMarksViewer({ doc, round: roundProp, onClose }) {
-  const marks = parseMarks(doc?.revision_marks);
+  const rawMarks = parseMarks(doc?.revision_marks);
+  const marks = rawMarks.length > 0
+    ? rawMarks
+    : (doc?.revision_notes
+      ? String(doc.revision_notes).split(';').map((s) => s.trim()).filter(Boolean).map((note, idx) => ({
+          page: 1,
+          x: 0.08,
+          y: Math.min(0.75, 0.10 + idx * 0.18),
+          w: 0.84,
+          h: 0.14,
+          note,
+        }))
+      : [{ page: 1, x: 0.08, y: 0.10, w: 0.84, h: 0.16, note: 'Bagian dokumen ini perlu diperbaiki sesuai ketentuan.' }]);
   const [active, setActive] = useState(marks.length ? 0 : null);
   const listRef = useRef(null);
   const total = marks.length;
   const round = roundProp || (Number(doc?.revision_count) || 0) + 1;
 
   // Catatan umum disembunyikan bila hanya gabungan otomatis dari catatan sorotan
-  const general = adminGeneralNote(doc, marks);
+  const general = rawMarks.length > 0 ? adminGeneralNote(doc, rawMarks) : '';
   const showGeneral = Boolean(general);
 
   useEffect(() => {

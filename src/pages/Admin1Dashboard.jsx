@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { exportMembersExcel } from '../utils/exportMembers';
-import { STATUS_LABEL, POST_APPROVAL_STATUSES } from '../components/StatusStepper';
+import { STATUS_LABEL, POST_APPROVAL_STATUSES, revisionRoundIn } from '../components/StatusStepper';
 import {
   parseDate, submittedDate, timeAgo, initials, pct, greetingName,
   buildTrend, TrendChart, TrendLegend, PositionBubbles, RangeToggle, SideCardList, HeaderStats } from '../components/DashboardWidgets';
@@ -62,7 +62,7 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
   const count = (statuses) => submissions.filter((s) => statuses.includes(s.status)).length;
   const total = submissions.length;
   const needScreening = count(['Menunggu TTD Sekretaris']);
-  const needRevision  = count(['Perlu Revisi']);
+  const needRevision  = submissions.filter((s) => s.status === 'Perlu Revisi' || revisionRoundIn(s) > 0).length;
   const needPayment   = count(['Menunggu Pembayaran']);
   // Anggota yang sudah aktif tapi nomor KTA-nya belum dicatat di Data Anggota
   // Berkas sudah dikirim ke IKAPI Pusat, No. KTA belum diinput (data lama: Aktif tanpa KTA)
@@ -77,6 +77,7 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
   const queue = useMemo(() => {
     const list = submissions.filter((s) =>
       queueFilter === 'Semua' ? ADMIN1_QUEUE.includes(s.status)
+        : queueFilter === 'Perlu Revisi' ? (s.status === 'Perlu Revisi' || revisionRoundIn(s) > 0)
         : s.status === queueFilter
     );
     return list.sort((a, b) => {
