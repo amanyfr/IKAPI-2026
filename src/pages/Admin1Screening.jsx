@@ -541,8 +541,20 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                     <div className="text-[11px] text-slate-500">Pimpinan: {sub.leader_name}</div>
                   </div>
                   <span className="flex-shrink-0 flex flex-col items-end gap-1">
-                    <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
-                      {STATUS_LABEL[sub.status] || sub.status}
+                    <span className="flex flex-wrap items-center justify-end gap-1">
+                      <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
+                        {STATUS_LABEL[sub.status] || sub.status}
+                      </span>
+                      {sub.status === 'Menunggu Verifikasi' && Number(sub.revision_round) > 0 && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-400 text-amber-950">
+                          <RefreshCw className="w-3 h-3" /> Pengajuan Revisi ke-{sub.revision_round}
+                        </span>
+                      )}
+                      {sub.status === 'Perlu Revisi' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                          Ke-{Math.max(Number(sub.revision_round) || 0, 1)}
+                        </span>
+                      )}
                     </span>
                     {waitingText(sub) && <span className="text-[10px] font-medium text-slate-500">{waitingText(sub)}</span>}
                   </span>
@@ -629,9 +641,21 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                     </td>
 
                     <td className="py-3.5 px-4">
-                      <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
-                        {STATUS_LABEL[sub.status] || sub.status}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
+                          {STATUS_LABEL[sub.status] || sub.status}
+                        </span>
+                        {sub.status === 'Menunggu Verifikasi' && Number(sub.revision_round) > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-400 text-amber-950">
+                            <RefreshCw className="w-3 h-3" /> Pengajuan Revisi ke-{sub.revision_round}
+                          </span>
+                        )}
+                        {sub.status === 'Perlu Revisi' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                            Ke-{Math.max(Number(sub.revision_round) || 0, 1)}
+                          </span>
+                        )}
+                      </div>
                       {waitingText(sub) && <span className="block mt-1 text-[10px] font-medium text-slate-500">{waitingText(sub)}</span>}
                     </td>
 

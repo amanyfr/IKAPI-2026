@@ -43,7 +43,11 @@ export const STEP_INDEX = {
 // Status setelah surat ditandatangani Sekretaris & Ketua (dokumen resmi sudah terbit)
 // Pengajuan revisi yang masuk: pemohon sudah mengirim dokumen perbaikan dan menunggu diperiksa ulang Admin.
 // Mengembalikan nomor revisi (1, 2, ...) atau 0 bila bukan revisi masuk. Dipakai sama di Admin, Sekretaris, Ketua.
-export const revisionRoundIn = (s) => (s?.status === 'Menunggu Verifikasi' ? Number(s.revision_round) || 0 : 0);
+export const revisionRoundIn = (s) => (
+  s?.status === 'Menunggu Verifikasi'
+    ? Math.max(Number(s.revision_round) || 0, Number(s.revised_docs_count) > 0 ? 1 : 0)
+    : 0
+);
 
 export const POST_APPROVAL_STATUSES = ['Pengiriman Berkas', 'Berkas Diterima', 'Dikirim ke Pusat', 'Aktif'];
 

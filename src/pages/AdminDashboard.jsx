@@ -115,9 +115,15 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   };
   const taskOf = (x) => TASKS.find((t) => t.test(x));
   const cardOf = (x) => { const t = taskOf(x); return t ? { ...t, label: t.action, isTask: true } : (WAITING[x.status] ? { key: 'tunggu', ...WAITING[x.status] } : null); };
+  const matchesFilter = (x, fKey) => {
+    if (fKey === 'Semua') return Boolean(cardOf(x));
+    if (fKey === 'screening') return x.status === 'Menunggu Verifikasi';
+    if (fKey === 'revisi') return revisionRoundIn(x) > 0 || x.status === 'Perlu Revisi';
+    return taskOf(x)?.key === fKey;
+  };
   const tasks = useMemo(
     () => submissions
-      .filter((x) => (taskFilter === 'Semua' ? cardOf(x) : taskOf(x)?.key === taskFilter))
+      .filter((x) => matchesFilter(x, taskFilter))
       // Tugas Admin dulu, lalu urut waktu masuk/diperbarui (default terbaru di atas agar unggahan baru langsung terlihat)
       .sort((a, b) => {
         const byTask = (taskOf(b) ? 1 : 0) - (taskOf(a) ? 1 : 0);
@@ -128,7 +134,11 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   );
   // Dashboard hanya menampilkan maksimal 6 kartu; selebihnya lewat menu Screening
   const displayTasks = tasks.slice(0, 6);
-  const taskCount = (key) => submissions.filter((x) => taskOf(x)?.key === key).length;
+  const taskCount = (key) => {
+    if (key === 'screening') return submissions.filter((x) => x.status === 'Menunggu Verifikasi').length;
+    if (key === 'revisi') return submissions.filter((x) => revisionRoundIn(x) > 0 || x.status === 'Perlu Revisi').length;
+    return submissions.filter((x) => taskOf(x)?.key === key).length;
+  };
 
   const { first: firstName } = greetingName(user?.name);
 

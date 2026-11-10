@@ -1272,7 +1272,12 @@ app.get('/api/submissions', authenticate, async (req, res) => {
   try {
     const { status, type, category, search } = req.query;
     let sql = `
-      SELECT s.*, 
+      SELECT s.*,
+             GREATEST(
+               COALESCE(s.revision_round, 0),
+               COALESCE((SELECT MAX(d.revision_count) FROM documents d WHERE d.submission_id = s.id), 0)
+             ) AS revision_round,
+             (SELECT COUNT(*) FROM documents d WHERE d.submission_id = s.id AND (d.revised_at IS NOT NULL OR d.revision_count > 0)) AS revised_docs_count,
              m.publisher_name, m.category as member_category, m.leader_name, m.city, m.kta_number as member_kta,
              u.name as applicant_name, u.email as applicant_email,
              p.amount as payment_amount, p.verification_status as payment_status, p.proof_file as payment_proof
@@ -1783,6 +1788,7 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
       if (stillNeedsRevision.count === 0 && owner.status === 'Perlu Revisi') {
         await query.run(
           `UPDATE submissions SET status = 'Menunggu Verifikasi', admin_notes = 'Dokumen revisi telah diunggah kembali oleh pemohon.',
+             revision_round = CASE WHEN COALESCE(revision_round, 0) < 1 THEN 1 ELSE revision_round END,
              screened_at = NULL, screened_by_name = NULL, updated_at = NOW()
            WHERE id = ?`,
           [subId]
