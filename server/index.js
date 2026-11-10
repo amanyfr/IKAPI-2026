@@ -1246,6 +1246,20 @@ app.get('/api/submissions/:id', authenticate, async (req, res) => {
       [subId]
     );
 
+    // Selama screening, tanda "tidak sesuai" masih draf Admin: pemohon baru melihatnya
+    // setelah Admin mengirim permintaan revisi (status pengajuan -> Perlu Revisi)
+    if (req.user.role === 'Anggota' && sub.status === 'Menunggu Verifikasi') {
+      documents.forEach((d) => {
+        if (d.screening_status !== 'Perlu Revisi') return;
+        d.screening_status = 'Menunggu';
+        d.revision_notes = null;
+        d.revision_marks = null;
+        d.verified_at = null;
+        d.verified_by = null;
+        d.verified_by_name = null;
+      });
+    }
+
     // Payment
     const payment = await query.get(
       `SELECT p.*, u.name AS verified_by_name FROM payments p
@@ -1263,8 +1277,15 @@ app.get('/api/submissions/:id', authenticate, async (req, res) => {
       'SELECT id, actor_name, actor_role, action, notes, created_at FROM submission_logs WHERE submission_id = ? ORDER BY created_at ASC, id ASC',
       [subId]
     );
+    // Penilaian "tidak sesuai" di putaran screening yang sedang berjalan belum ditampilkan ke pemohon
+    let visibleLogs = logs;
+    if (req.user.role === 'Anggota' && sub.status === 'Menunggu Verifikasi') {
+      let lastApplicant = -1;
+      logs.forEach((l, i) => { if (l.actor_role === 'Anggota') lastApplicant = i; });
+      visibleLogs = logs.filter((l, i) => !(i > lastApplicant && String(l.action).startsWith('Dokumen tidak sesuai')));
+    }
     // Pengajuan lama tanpa log: susun dari tanggal-tanggal yang tercatat
-    const timeline = logs.length ? logs : legacyTimeline(sub);
+    const timeline = visibleLogs.length ? visibleLogs : legacyTimeline(sub);
 
     res.json({
       submission: sub,
@@ -1572,8 +1593,10 @@ app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), 
     if (req.user.role === 'Anggota' && owner.status !== 'Draf') {
       const isEmptySlot = existing && !existing.file_path;
       const isRevisiDoc = existing && existing.screening_status === 'Perlu Revisi';
+      // Saat screening, dokumen yang baru ditandai Admin belum boleh diganti sampai permintaan revisi dikirim
       const allowed =
-        ((owner.status === 'Perlu Revisi' || owner.status === 'Menunggu Verifikasi') && (isRevisiDoc || isEmptySlot));
+        (owner.status === 'Perlu Revisi' && (isRevisiDoc || isEmptySlot))
+        || (owner.status === 'Menunggu Verifikasi' && isEmptySlot);
       if (!allowed) {
         return res.status(400).json({ error: 'Dokumen ini tidak perlu diunggah ulang. Hanya dokumen yang dinyatakan tidak sesuai yang dapat diganti.' });
       }
