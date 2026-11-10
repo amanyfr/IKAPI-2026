@@ -4,8 +4,7 @@ import QueueCard, { QueueFooter, QueueFilterBar } from '../components/QueueCard'
 import { revisionRoundIn } from '../components/StatusStepper';
 import {
   parseDate, submittedDate, timeAgo, initials, pct, greetingName,
-  buildTrend, TrendChart, TrendLegend, RangeToggle
-} from '../components/DashboardWidgets';
+  buildTrend, SideCardList, TrendChart, TrendLegend, RangeToggle, HeaderStats } from '../components/DashboardWidgets';
 import {
   ArrowUpRight, ArrowRight, Users, UserPlus, UserCheck, RefreshCw, Lightbulb, Wallet,
   FileSignature, Search, Sparkles, CheckCircle2, CircleDashed, KeyRound,
@@ -49,7 +48,6 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   const [range, setRange] = useState('12m');
   const [search, setSearch] = useState('');
   const [taskFilter, setTaskFilter] = useState('Semua');
-  const [showAllTasks, setShowAllTasks] = useState(false);
   const [sortOrder, setSortOrder] = useState('newest'); // 'newest' | 'oldest'
 
   const fetchData = async ({ silent = false } = {}) => {
@@ -127,7 +125,8 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
       }),
     [submissions, taskFilter, sortOrder]
   );
-  const displayTasks = showAllTasks ? tasks : tasks.slice(0, 6);
+  // Dashboard hanya menampilkan maksimal 6 kartu; selebihnya lewat menu Screening
+  const displayTasks = tasks.slice(0, 6);
   const taskCount = (key) => submissions.filter((x) => taskOf(x)?.key === key).length;
 
   const { first: firstName } = greetingName(user?.name);
@@ -156,19 +155,12 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">{total} akun · {newAccounts} akun baru dalam 30 hari · {notOnboarded} profil anggota belum lengkap</p>
         </div>
-        <div className="grid grid-cols-3 gap-3 sm:flex sm:gap-8">
-          {TASKS.map(({ key, label, icon: Icon }, i) => (
-            <button key={key} onClick={() => { setTaskFilter(key); setShowAllTasks(false); }} className="flex items-center gap-2.5 text-left">
-              <span className={`w-8 h-8 flex-shrink-0 rounded-full flex items-center justify-center ring-4 ring-white/70 ${TASKS[i].chip}`}>
-                <Icon className="w-4 h-4" />
-              </span>
-              <span className="leading-tight">
-                <span className="text-2xl sm:text-3xl font-light text-slate-900 tabular-nums">{loading ? '–' : taskCount(key)}</span>
-                <span className="block text-[11px] text-slate-500">{label}</span>
-              </span>
-            </button>
-          ))}
-        </div>
+        <HeaderStats
+          loading={loading}
+          items={TASKS.map(({ key, label, icon, chip }) => ({
+            key, label, icon, tone: chip, value: taskCount(key), onClick: () => setTaskFilter(key),
+          }))}
+        />
       </section>
 
       {/* ══ Widget utama: tugas Admin + kesiapan sistem ══ */}
@@ -181,7 +173,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
               { key: 'Semua', label: 'Semua', dot: 'bg-slate-400', value: submissions.filter((x) => cardOf(x)).length },
             ]}
             active={taskFilter}
-            onChange={(k) => { setTaskFilter(k); setShowAllTasks(false); }}
+            onChange={setTaskFilter}
             sortOrder={sortOrder}
             onToggleSort={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
             onRefresh={() => fetchData()}
@@ -216,7 +208,6 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
               {tasks.length > 6 && (
                 <QueueFooter shown={displayTasks.length} total={tasks.length}
                   noun={taskFilter === 'Semua' ? 'pengajuan berjalan' : 'tugas'}
-                  expanded={showAllTasks} onToggle={() => setShowAllTasks(!showAllTasks)}
                   linkLabel="Buka menu Screening" onLink={() => onOpenScreening?.()} />
               )}
             </div>
@@ -224,7 +215,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
         </div>
 
         {/* Kesiapan sistem */}
-        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-blue-700 to-blue-900 shadow-xl shadow-blue-900/25 flex flex-col min-h-0 overflow-hidden">
+        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-blue-700 to-blue-900 shadow-xl shadow-blue-900/25 flex flex-col min-h-0 overflow-hidden lg:h-0 lg:min-h-full">
           <div className="flex items-start justify-between">
             <h2 className="text-lg">Kesiapan sistem</h2>
             <button onClick={onOpenSettings} title="Buka pengaturan sistem"
@@ -236,11 +227,10 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
             <div className="h-full rounded-full bg-white" style={{ width: `${pct(settingsDone, checklist.length)}%` }} />
           </div>
           <p className="text-xs text-white/90 mt-2">{settingsDone} dari {checklist.length} pengaturan lengkap.</p>
-          <ul className="mt-2 space-y-1 text-[11px] text-white/90 min-h-0 overflow-hidden [@media(max-height:780px)]:hidden">
-            {checklist.filter((c) => !c.ok).slice(0, 3).map((c) => (
-              <li key={c.label} className="flex items-center gap-1.5"><CircleDashed className="w-3.5 h-3.5" /> {c.label}</li>
-            ))}
-          </ul>
+          <SideCardList title="Daftar pengaturan"
+            items={checklist.map((c) => ({
+              label: c.label, icon: c.ok ? CheckCircle2 : CircleDashed, muted: !c.ok, onClick: onOpenSettings,
+            }))} />
           <div className="mt-auto pt-3 space-y-2">
             <button onClick={onOpenSettings}
               className="w-full flex items-center justify-between gap-3 text-left bg-white text-slate-800 rounded-2xl px-4 py-3 [@media(max-height:780px)]:py-2 shadow-lg hover:-translate-y-0.5 transition">

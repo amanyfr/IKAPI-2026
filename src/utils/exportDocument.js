@@ -38,13 +38,31 @@ async function renderPages(element) {
       el.querySelectorAll('.no-print, [data-export-hide]').forEach((n) => { n.style.display = 'none'; });
       // Catat posisi setiap baris/elemen terkecil agar potongan halaman jatuh di sela-selanya
       const base = el.getBoundingClientRect().top;
+      const box = (n) => {
+        const r = n.getBoundingClientRect();
+        return [r.top - base, r.bottom - base];
+      };
+      // Elemen yang punya teks langsung (mis. <p>teks<br/><span/></p>) juga dihitung satu baris utuh
+      const hasOwnText = (n) => Array.from(n.childNodes).some((c) => c.nodeType === 3 && c.textContent.trim());
       blocks = Array.from(el.querySelectorAll('*'))
-        .filter((n) => n.children.length === 0 || n.tagName === 'TR' || n.tagName === 'IMG')
-        .map((n) => {
-          const r = n.getBoundingClientRect();
-          return [r.top - base, r.bottom - base];
-        })
+        .filter((n) => n.children.length === 0 || n.tagName === 'TR' || n.tagName === 'IMG' || hasOwnText(n))
+        .map(box)
         .filter(([top, bottom]) => bottom - top > 0 && bottom - top < 400);
+      // Blok bertanda data-keep-together (penutup + TTD + stempel) tidak boleh terbelah
+      el.querySelectorAll('[data-keep-together]').forEach((n) => {
+        const [t, b] = box(n);
+        if (b - t > 0) blocks.push([t, b]);
+      });
+      // Judul bertanda data-keep-with-next tidak ditinggal sendirian di bawah halaman:
+      // ikut pindah bersama baris pertama sesudahnya
+      el.querySelectorAll('[data-keep-with-next]').forEach((n) => {
+        const next = n.nextElementSibling;
+        const firstRow = next?.querySelector('tr, p, li') || next;
+        if (!firstRow) return;
+        const [t] = box(n);
+        const [, b] = box(firstRow);
+        if (b - t > 0) blocks.push([t, b]);
+      });
     },
   });
 
@@ -67,7 +85,7 @@ async function renderPages(element) {
   };
 
   // Surat yang hanya sedikit melebihi satu halaman diperkecil agar tetap utuh di satu lembar
-  if (canvas.height > pageH && canvas.height <= pageH * 1.2) {
+  if (canvas.height > pageH && canvas.height <= pageH * 1.3) {
     const scale = pageH / canvas.height;
     const page = document.createElement('canvas');
     page.width = canvas.width;

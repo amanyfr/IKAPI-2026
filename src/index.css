@@ -15,7 +15,7 @@
 
 @layer base {
   body {
-    @apply bg-[#f8fbfe] text-slate-800 antialiased;
+    @apply bg-white text-slate-800 antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
@@ -51,7 +51,7 @@
 
   /* Latar halaman: gradasi biru sangat muda agar kartu putih tetap terlihat terpisah */
   .portal-bg {
-    @apply bg-gradient-to-br from-sky-100 via-slate-50 to-blue-100;
+    @apply bg-white;
   }
 
   /* Kartu/section utama */
@@ -128,6 +128,48 @@
     background: white !important;
     color: black !important;
   }
+
+  /* Ctrl+P saat dokumen resmi terbuka di modal: cetak kertasnya saja, bukan dashboard di belakangnya */
+  /* Dashboard di belakang modal tidak ikut dicetak (juga tidak menambah halaman kosong) */
+  body:has(.modal-overlay [data-paper]) :not(.modal-overlay, .modal-overlay *):not(:has(.modal-overlay)) {
+    display: none !important;
+  }
+  body:has(.modal-overlay [data-paper]),
+  body:has(.modal-overlay [data-paper]) :has(.modal-overlay) {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  body:has(.modal-overlay [data-paper]) * {
+    visibility: hidden;
+  }
+  body:has(.modal-overlay [data-paper]) .modal-overlay [data-paper],
+  body:has(.modal-overlay [data-paper]) .modal-overlay [data-paper] * {
+    visibility: visible;
+  }
+  body:has(.modal-overlay [data-paper]) .modal-overlay [data-paper] [data-export-hide] {
+    display: none !important;
+  }
+  /* Pembungkus modal (bukan isi kertas) dibuat statis agar kertas bisa diletakkan di pojok halaman */
+  body:has(.modal-overlay [data-paper]) .modal-overlay,
+  body:has(.modal-overlay [data-paper]) .modal-overlay :not([data-paper], [data-paper] *) {
+    position: static !important;
+    overflow: visible !important;
+    transform: none !important;
+    animation: none !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+  }
+  body:has(.modal-overlay [data-paper]) .modal-overlay [data-paper] {
+    position: absolute !important;
+    inset: 0 auto auto 0;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+  }
+  body:has(.modal-overlay [data-paper]) .modal-overlay [data-paper] [data-keep-together] {
+    break-inside: avoid;
+  }
 }
 
 /* =============================================
@@ -161,17 +203,17 @@
 .theme-soft {
   font-family: 'Inter', system-ui, -apple-system, sans-serif; /* sama dengan semua dashboard */
   color: #1f2430;
-  background: #eceef2;
+  background: #ffffff;
 }
 .theme-soft .card-surface {
-  background: #f6f7f9;
-  border: 1px solid #ffffff;
+  background: #ffffff;
+  border: 1px solid #e6e9ef;
   border-radius: 28px;
   box-shadow: inset 0 1px 0 #ffffff, 0 12px 32px -20px rgb(30 40 60 / 0.35);
 }
 .theme-soft .panel-surface {
-  background: #f6f7f9;
-  border: 1px solid #ffffff;
+  background: #ffffff;
+  border: 1px solid #e6e9ef;
   border-radius: 22px;
   box-shadow: inset 0 1px 0 #ffffff, 0 8px 22px -16px rgb(30 40 60 / 0.3);
 }
@@ -182,12 +224,12 @@
   box-shadow: 0 2px 8px -4px rgb(30 40 60 / 0.12);
 }
 .theme-soft .bar-surface {
-  background: rgb(246 247 249 / 0.92);
-  border-color: #dfe3e9;
+  background: rgb(255 255 255 / 0.92);
+  border-color: #e6e9ef;
 }
 .theme-soft .soft-header {
-  background: rgb(246 247 249 / 0.92);
-  border-bottom: 1px solid #ffffff;
+  background: rgb(255 255 255 / 0.92);
+  border-bottom: 1px solid #e6e9ef;
   box-shadow: 0 6px 20px -16px rgb(30 40 60 / 0.35);
 }
 
@@ -236,12 +278,81 @@
 }
 
 /* =============================================
-   Latar foto buku IKAPI & lampu (semua halaman Anggota)
+   Latar putih polos (semua halaman Anggota)
    ============================================= */
 .anggota-photo-bg {
-  background: #8ccbec url('/bg-ikapi-anggota.webp') 70% 85% / cover no-repeat;
+  background: #ffffff;
 }
-/* Layar sempit: geser fokus ke buku & lampu */
-@media (max-width: 640px) {
-  .anggota-photo-bg { background-position: 66% 100%; }
+
+/* =============================================
+   Halaman Masuk / Daftar — latar putih bergerak
+   ============================================= */
+.auth-bg { background: #ffffff; overflow: hidden; }
+.auth-grid {
+  background-image: radial-gradient(rgb(13 162 231 / 0.22) 1px, transparent 1.6px);
+  background-size: 22px 22px;
+  /* titik terlihat di sekeliling kartu, memudar ke tepi layar */
+  -webkit-mask-image: radial-gradient(ellipse 75% 85% at center, black 45%, transparent 100%);
+  mask-image: radial-gradient(ellipse 75% 85% at center, black 45%, transparent 100%);
+  animation: auth-grid-pan 40s linear infinite;
+}
+.auth-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  opacity: 0.7;
+  will-change: transform;
+}
+.auth-blob-1 { width: 420px; height: 420px; top: -120px; left: -100px;
+  background: radial-gradient(circle, #7dd3fc, transparent 70%); animation: auth-drift-1 18s ease-in-out infinite; }
+.auth-blob-2 { width: 380px; height: 380px; bottom: -120px; right: -80px;
+  background: radial-gradient(circle, #93c5fd, transparent 70%); animation: auth-drift-2 22s ease-in-out infinite; }
+.auth-blob-3 { width: 320px; height: 320px; bottom: 6%; left: 8%;
+  background: radial-gradient(circle, #bae6fd, transparent 70%); animation: auth-drift-3 26s ease-in-out infinite; }
+/* Lembaran buku kecil yang melayang */
+.auth-float {
+  position: absolute;
+  border-radius: 14px;
+  border: 1.5px solid rgb(13 162 231 / 0.22);
+  background:
+    linear-gradient(rgb(13 162 231 / 0.35), rgb(13 162 231 / 0.35)) 22% 30% / 56% 2px no-repeat,
+    linear-gradient(rgb(13 162 231 / 0.2), rgb(13 162 231 / 0.2)) 22% 45% / 42% 2px no-repeat,
+    linear-gradient(rgb(13 162 231 / 0.2), rgb(13 162 231 / 0.2)) 22% 60% / 50% 2px no-repeat,
+    rgb(255 255 255 / 0.7);
+  box-shadow: 0 10px 24px -14px rgb(8 132 196 / 0.4);
+  animation: auth-float 9s ease-in-out infinite;
+}
+/* Panel kiri kartu masuk: senada dengan header portal */
+.auth-aside {
+  position: relative;
+  background: linear-gradient(160deg, #0b1120 0%, #0b1a4a 50%, #0a3bb8 100%);
+}
+.auth-aside::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgb(255 255 255 / 0.1) 1px, transparent 1.6px);
+  background-size: 18px 18px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 30%, black 100%);
+  mask-image: linear-gradient(to bottom, transparent 30%, black 100%);
+}
+.auth-aside > * { position: relative; }
+.auth-card { animation: auth-card-in 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+/* Desktop: tab tetap di atas, isi formulir rata tengah sisa tinggi kartu */
+@media (min-width: 1024px) { .auth-pane { margin-block: auto; } }
+.auth-pane { animation: auth-pane-in 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.auth-logo { animation: auth-logo-spin 1s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@keyframes auth-drift-1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(90px,60px) scale(1.12); } }
+@keyframes auth-drift-2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-80px,-70px) scale(1.08); } }
+@keyframes auth-drift-3 { 0%,100% { transform: translate(0,0); } 33% { transform: translate(-60px,40px); } 66% { transform: translate(40px,-50px); } }
+@keyframes auth-grid-pan { from { background-position: 0 0; } to { background-position: 220px 220px; } }
+@keyframes auth-float { 0%,100% { transform: translateY(0) rotate(var(--r,0deg)); } 50% { transform: translateY(-18px) rotate(calc(var(--r,0deg) + 4deg)); } }
+@keyframes auth-card-in { from { opacity: 0; transform: translateY(24px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes auth-pane-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes auth-logo-spin { from { opacity: 0; transform: rotate(-90deg) scale(0.6); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-grid, .auth-blob, .auth-float, .auth-card, .auth-pane, .auth-logo { animation: none !important; }
 }

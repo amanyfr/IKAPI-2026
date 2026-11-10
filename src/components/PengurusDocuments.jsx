@@ -167,8 +167,14 @@ export function SuratKeputusan({ submission, settings, signing = null }) {
         {[['Menimbang', menimbang], ['Mengingat', mengingat]].map(([label, items]) => (
           <div key={label} className="grid grid-cols-[6.5rem_1fr] gap-2">
             <span className="font-semibold">{label}</span>
-            <ol className="list-[lower-alpha] pl-4 space-y-1 text-justify">
-              {items.map((item) => <li key={item}>{item}</li>)}
+            {/* Huruf a./b./c. ditulis manual: penanda list bawaan bergeser saat dicetak/di-PDF */}
+            <ol className="list-none space-y-1 text-justify">
+              {items.map((item, i) => (
+                <li key={item} className="flex gap-1.5">
+                  <span className="shrink-0 w-4">{String.fromCharCode(97 + i)}.</span>
+                  <span className="flex-1">{item}</span>
+                </li>
+              ))}
             </ol>
           </div>
         ))}

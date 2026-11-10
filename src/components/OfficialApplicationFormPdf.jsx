@@ -206,7 +206,7 @@ export default function OfficialApplicationFormPdf({ submission, settings, signi
 function FormSection({ title, children }) {
   return (
     <div>
-      <h4 className="text-xs font-bold text-[#0884c4] bg-[#f0f9ff] px-3 py-1.5 rounded-lg border-l-4 border-[#0da2e7] uppercase mb-2">
+      <h4 data-keep-with-next className="text-xs font-bold text-[#0884c4] bg-[#f0f9ff] px-3 py-1.5 rounded-lg border-l-4 border-[#0da2e7] uppercase mb-2">
         {title}
       </h4>
       <table className="w-full text-xs">

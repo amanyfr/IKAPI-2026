@@ -78,7 +78,7 @@ function StageInfo({ icon: Icon, tone = 'blue', title, children }) {
 // Keterangan berkas fisik yang wajib dicetak sendiri oleh pemohon
 function PrintNotice({ compact = false }) {
   return (
-    <div className={`flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 ${compact ? 'px-3.5 py-2.5 text-xs' : 'px-4 py-3 text-sm'}`}>
+    <div className={`flex items-start gap-2.5 rounded-2xl border border-amber-200/80 bg-amber-50/70 text-amber-900 leading-relaxed ${compact ? 'px-3.5 py-2.5 text-xs' : 'px-4 py-3 text-sm'}`}>
       <Printer className="w-4 h-4 flex-shrink-0 mt-0.5" />
       <p>
         <strong className="font-semibold">Berkas fisik wajib dicetak sendiri.</strong>{' '}
@@ -367,7 +367,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         Anda terdaftar sebagai <strong className="font-medium text-slate-700">{typeText}</strong> kategori{' '}
         <strong className="font-medium text-slate-700">{isLB ? 'Anggota Luar Biasa' : 'Anggota Biasa'}</strong>, jadi pengajuan Anda adalah {subText}.{' '}
         {onEditProfile && (
-          <button type="button" onClick={onEditProfile} className="text-[#3b82f6] hover:underline font-medium">
+          <button type="button" onClick={onEditProfile} className="text-[#0884c4] hover:underline font-semibold">
             Salah pilih? Ubah jawaban
           </button>
         )}
@@ -375,13 +375,14 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
     );
     return (
       <div className="relative w-full max-w-5xl mx-auto lg:min-h-[calc(100vh-14rem)] flex items-center">
-        <div className="card-surface overflow-hidden w-full">
-          <div className="bg-slate-50/70 border-b border-slate-100 px-5 sm:px-7 py-4 sm:py-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="overflow-hidden w-full rounded-[28px] bg-white border border-slate-200/80 shadow-[0_30px_80px_-40px_rgba(11,26,74,0.45)]">
+          <div className="border-b border-slate-100 px-5 sm:px-7 py-5 sm:py-6 flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-light text-slate-900 tracking-tight">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#0884c4]">Sebelum mengisi formulir</p>
+              <h2 className="mt-1 text-2xl font-semibold text-slate-900 tracking-tight">
                 Persyaratan {isLB ? 'Anggota Luar Biasa' : 'Anggota Biasa'}
               </h2>
-              <p className="text-sm text-slate-500 mt-0.5">
+              <p className="text-sm text-slate-500 mt-1">
                 {pickType === 'Heregistrasi' ? 'Registrasi (perpanjangan)' : 'Pendaftaran anggota baru'} ·{' '}
                 {isLB ? 'Penerbit perguruan tinggi / lembaga (university press)' : 'Badan usaha penerbit (PT / CV / yayasan)'}
               </p>
@@ -393,12 +394,12 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
           </div>
 
           <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div className="panel-inner p-4">
-              <p className="text-sm font-medium text-slate-800 mb-2">Dokumen yang diunggah ({reqDocs.length})</p>
+            <div className="rounded-2xl border border-slate-200 p-4 sm:p-5">
+              <p className="text-sm font-semibold text-slate-800 mb-3">Dokumen yang diunggah ({reqDocs.length})</p>
               <ol className="space-y-1.5">
                 {reqDocs.map((title, i) => (
-                  <li key={title} className="flex items-center gap-2.5 bg-white px-3 py-2 rounded-lg border border-slate-200/70 text-[13px] text-slate-700">
-                    <span className="w-6 h-6 flex-shrink-0 rounded-full bg-blue-50 text-[#3b82f6] text-xs font-semibold flex items-center justify-center">{i + 1}</span>
+                  <li key={title} className="flex items-center gap-3 bg-slate-50/70 px-3 py-2.5 rounded-xl border border-slate-100 text-[13px] text-slate-700">
+                    <span className="w-6 h-6 flex-shrink-0 rounded-full bg-sky-50 text-[#0884c4] ring-1 ring-sky-100 text-xs font-semibold tabular-nums flex items-center justify-center">{i + 1}</span>
                     <span>{title}</span>
                   </li>
                 ))}
@@ -406,30 +407,33 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               <p className="text-xs text-slate-500 mt-3">Format PDF / JPG / PNG. Dokumen diperiksa Admin satu per satu sebelum pembayaran.</p>
             </div>
             <div className="space-y-3">
-              <div className="panel-inner p-4 text-sm">
-                <p className="font-medium text-slate-800 mb-2">Rincian biaya</p>
+              <div className="rounded-2xl border border-slate-200 p-4 sm:p-5 text-sm">
+                <p className="font-semibold text-slate-800 mb-3">Rincian biaya</p>
                 {[
                   ['Uang Pangkal', fees.uangPangkal],
                   [`Iuran ${fees.durasiBulan || 24} Bulan`, fees.iuran24Bulan],
                   ['Biaya Administrasi', fees.administrasi],
                 ].filter(([, v]) => Number(v) > 0).map(([label, v]) => (
                   <div key={label} className="flex justify-between text-slate-600 py-0.5">
-                    <span>{label}</span><span className="text-slate-900">{formatRupiah(v)}</span>
+                    <span>{label}</span><span className="text-slate-900 tabular-nums">{formatRupiah(v)}</span>
                   </div>
                 ))}
+                <div className="flex justify-between mt-2 pt-2.5 border-t border-dashed border-slate-200 font-semibold text-slate-900">
+                  <span>Total</span><span className="tabular-nums">{formatRupiah(fees.total)}</span>
+                </div>
               </div>
               <PrintNotice compact />
             </div>
           </div>
 
-          <div className="border-t border-slate-100 px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="border-t border-slate-100 px-5 sm:px-7 py-4 sm:py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="sm:max-w-xl">{backText}</div>
             <button
               onClick={() => onNewSubmission({ submissionType: pickType, category: pickCategory })}
-              className="soft-pill-primary w-full sm:w-auto px-6 py-3 whitespace-nowrap"
+              className="group inline-flex items-center justify-center gap-2 w-full sm:w-auto h-12 px-6 rounded-xl bg-[#0884c4] hover:bg-[#076fa5] active:bg-[#065d8a] text-white text-sm font-semibold shadow-sm transition-colors whitespace-nowrap"
             >
-              <span>Isi Formulir Pengajuan</span>
-              <ArrowRight className="w-4 h-4" />
+              <span>Isi formulir pengajuan</span>
+              <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
             </button>
           </div>
         </div>

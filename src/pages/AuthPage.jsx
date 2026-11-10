@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Mail, User, Phone, AlertCircle, CheckCircle2, Eye, EyeOff, ArrowLeft, MessageCircle } from 'lucide-react';
+import { Lock, Mail, User, Phone, AlertCircle, CheckCircle2, Eye, EyeOff, ArrowLeft, ArrowRight, MessageCircle } from 'lucide-react';
 import { waLink } from '../utils/whatsapp';
 import { FILTERS } from '../utils/inputFilters';
 
@@ -142,25 +142,30 @@ export default function AuthPage() {
 
   /* ── Shared styles (kartu putih di atas foto) ── */
   const inputBase =
-    'w-full pl-11 pr-4 py-3 text-sm text-slate-900 bg-slate-50 border border-slate-200 rounded-xl ' +
-    'focus:bg-white focus:border-[#0da2e7] focus:ring-2 focus:ring-sky-100 ' +
+    'w-full h-12 pl-11 pr-4 text-sm text-slate-900 bg-white border border-slate-200 rounded-xl ' +
+    'hover:border-slate-300 focus:border-[#0884c4] focus:ring-4 focus:ring-sky-100 ' +
     'outline-none transition placeholder:text-slate-400';
   const inputWithEye = inputBase + ' pr-12';
   const iconBase = 'absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none';
   const eyeBtn = 'absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#0da2e7] transition';
   const submitBtn =
-    'w-full py-3.5 bg-[#0da2e7] hover:bg-[#0884c4] disabled:opacity-60 ' +
-    'text-white font-semibold text-sm rounded-xl shadow-lg shadow-sky-600/25 ' +
-    'transition-all duration-150 flex items-center justify-center gap-2 mt-2';
+    'group w-full h-12 bg-[#0884c4] hover:bg-[#076fa5] active:bg-[#065d8a] disabled:opacity-60 ' +
+    'text-white font-semibold text-sm rounded-xl shadow-sm ' +
+    'transition-colors duration-150 flex items-center justify-center gap-2 !mt-6';
   const tabBtn = (tab) =>
-    'px-5 py-2 text-sm font-semibold rounded-full transition ' +
-    (activeTab === tab
-      ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
-      : 'text-slate-500 hover:text-slate-900');
+    'relative z-10 h-9 text-sm font-semibold rounded-[10px] transition-colors ' +
+    (activeTab === tab ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800');
+  // Alur keanggotaan yang ditampilkan di panel kiri (sesuai proses di sistem)
+  const steps = [
+    'Buat akun & lengkapi data penerbit',
+    'Unggah berkas & bukti pembayaran iuran',
+    'Diperiksa Admin, Sekretaris & Ketua',
+    'Surat rekomendasi terbit, diteruskan ke Pusat',
+  ];
 
   /* ── Field label ── */
   const Label = ({ children }) => (
-    <label className="text-xs font-semibold text-slate-600 block mb-1.5">{children}</label>
+    <label className="text-[13px] font-medium text-slate-700 block mb-1.5">{children}</label>
   );
 
   const Alerts = () => (
@@ -189,45 +194,93 @@ export default function AuthPage() {
   );
 
   return (
-    <div className="relative min-h-screen font-sans text-white bg-slate-900">
+    <div className="auth-bg relative min-h-screen font-sans text-slate-900">
 
-      {/* ── Latar foto buku IKAPI (fokus ke buku) ── */}
-      <div aria-hidden="true" className="fixed inset-0 bg-[url('/bg-ikapi-buku.webp')] bg-cover bg-[position:45%_75%]" />
-      <div aria-hidden="true" className="fixed inset-0 bg-gradient-to-b from-slate-950/35 via-blue-950/10 to-slate-950/45" />
+      {/* ── Latar putih dengan gerak halus ── */}
+      <div aria-hidden="true" className="fixed inset-0 pointer-events-none">
+        <div className="auth-blob auth-blob-1" />
+        <div className="auth-blob auth-blob-2" />
+        <div className="auth-blob auth-blob-3" />
+        <div className="auth-grid absolute inset-0" />
+        <div className="auth-float hidden xl:block w-16 h-20 top-[12%] left-[3%]" style={{ '--r': '-8deg', animationDelay: '0s' }} />
+        <div className="auth-float hidden xl:block w-12 h-16 bottom-[14%] left-[5%]" style={{ '--r': '10deg', animationDelay: '-3s' }} />
+        <div className="auth-float hidden xl:block w-14 h-[4.5rem] top-[16%] right-[3%]" style={{ '--r': '6deg', animationDelay: '-5s' }} />
+        <div className="auth-float hidden xl:block w-10 h-14 bottom-[12%] right-[5%]" style={{ '--r': '-12deg', animationDelay: '-7s' }} />
+      </div>
 
       <div className="relative min-h-screen flex flex-col">
-        <main className="flex-1 flex items-center justify-center px-4 py-10">
+        <main className="flex-1 flex items-center justify-center px-4 py-6 sm:py-8">
 
-          {/* ══════════════════════════════════
-                KARTU LOGIN
-              ══════════════════════════════════ */}
-          <div className="w-full max-w-[440px] rounded-[28px] bg-white text-slate-900 shadow-2xl shadow-slate-950/40 p-6 sm:p-9">
+          <div className="auth-card w-full max-w-[440px] lg:max-w-[960px] lg:min-h-[640px] lg:grid lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)] rounded-[28px] bg-white border border-slate-200/80 shadow-[0_30px_80px_-40px_rgba(11,26,74,0.45)] overflow-hidden">
 
-            {/* Tab Masuk / Daftar + logo */}
-            <div className="flex items-center justify-between gap-4 mb-8">
-              <div className="inline-flex p-1 bg-slate-100 border border-slate-200 rounded-full">
-                <button type="button" onClick={() => switchTab('login')} className={tabBtn('login')}>
-                  Masuk
-                </button>
-                <button type="button" onClick={() => switchTab('register')} className={tabBtn('register')}>
-                  Daftar
-                </button>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <div className="text-right leading-tight hidden sm:block">
-                  <p className="text-sm font-bold tracking-wider text-[#0884c4]">IKAPI</p>
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Jawa Barat</p>
+            {/* ── Panel kiri (desktop): identitas + alur keanggotaan ── */}
+            <aside className="auth-aside hidden lg:flex flex-col p-9 text-white">
+              <div className="flex items-center gap-3">
+                <img src="/logo-ikapi.jpg" alt="Logo IKAPI" className="auth-logo w-11 h-11 rounded-full object-cover bg-white" />
+                <div className="leading-tight">
+                  <p className="text-sm font-semibold">IKAPI Jawa Barat</p>
+                  <p className="text-xs text-white/60">Ikatan Penerbit Indonesia</p>
                 </div>
-                <img src="/logo-ikapi.jpg" alt="Logo IKAPI" className="w-11 h-11 rounded-full object-cover bg-white ring-2 ring-slate-100" />
               </div>
+
+              <div className="my-auto py-8">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-300/90">Sistem keanggotaan</p>
+                <h2 className="mt-3 text-[26px] leading-[1.25] font-semibold tracking-tight [text-wrap:balance]">
+                  Daftar, unggah berkas, dan pantau keanggotaan penerbit Anda.
+                </h2>
+                <ol className="mt-7">
+                  {steps.map((text, i) => {
+                    const on = activeTab === 'register' && i === 0;
+                    return (
+                      <li key={text} className="relative flex items-start gap-3.5 pb-4 last:pb-0">
+                        {i < steps.length - 1 && <span aria-hidden="true" className="absolute left-[13px] top-7 bottom-0 w-px bg-white/15" />}
+                        <span className={`relative w-7 h-7 flex-shrink-0 rounded-full border text-[11px] font-semibold tabular-nums flex items-center justify-center transition-colors ${on ? 'bg-white text-[#0b1a4a] border-white' : 'border-white/30 text-white/80'}`}>
+                          {i + 1}
+                        </span>
+                        <span className={`pt-[5px] text-sm leading-snug transition-colors ${on ? 'text-white font-medium' : 'text-white/70'}`}>{text}</span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+
+              <p className="text-xs text-white/50 leading-relaxed">
+                Sekretariat: Jl. Ibu Inggit Garnasih No. 148, Bandung
+              </p>
+            </aside>
+
+            {/* ── Panel kanan: formulir ── */}
+            <div className="p-6 sm:p-9 lg:flex lg:flex-col">
+
+            {/* Logo (HP/tablet) */}
+            <div className="lg:hidden flex items-center gap-3 mb-7">
+              <img src="/logo-ikapi.jpg" alt="Logo IKAPI" className="auth-logo w-10 h-10 rounded-full object-cover bg-white ring-1 ring-slate-200" />
+              <div className="leading-tight">
+                <p className="text-sm font-semibold text-slate-900">IKAPI Jawa Barat</p>
+                <p className="text-xs text-slate-500">Sistem keanggotaan</p>
+              </div>
+            </div>
+
+            {/* Tab Masuk / Daftar dengan penanda yang bergeser */}
+            <div className="relative grid grid-cols-2 p-1 mb-7 bg-slate-100 rounded-xl">
+              <span
+                aria-hidden="true"
+                className={`absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-[10px] bg-white shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 ease-out ${activeTab === 'register' ? 'translate-x-full' : ''} ${activeTab === 'login' || activeTab === 'register' ? 'opacity-100' : 'opacity-0'}`}
+              />
+              <button type="button" onClick={() => switchTab('login')} className={tabBtn('login')}>
+                Masuk
+              </button>
+              <button type="button" onClick={() => switchTab('register')} className={tabBtn('register')}>
+                Daftar
+              </button>
             </div>
 
             {/* ── HALAMAN LOGIN ── */}
             {activeTab === 'login' && (
-              <div>
-                <h1 className="text-3xl font-light tracking-tight">Masuk ke akun</h1>
-                <p className="text-sm text-slate-500 mt-1.5 mb-7">
-                  Sistem keanggotaan IKAPI Pengurus Daerah Jawa Barat. Peran Anda terdeteksi otomatis setelah login.
+              <div key="login" className="auth-pane">
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Masuk ke akun</h1>
+                <p className="text-sm text-slate-500 leading-relaxed mt-1.5 mb-6">
+                  Gunakan email yang terdaftar. Halaman akan menyesuaikan peran akun Anda setelah masuk.
                 </p>
                 <Alerts />
 
@@ -252,7 +305,7 @@ export default function AuthPage() {
                       <button
                         type="button"
                         onClick={() => { setForgotEmail(loginEmail); switchTab('forgot'); }}
-                        className="text-xs text-[#0884c4] hover:underline -mt-1.5"
+                        className="text-xs font-medium text-[#0884c4] hover:underline -mt-1.5"
                       >
                         Lupa sandi?
                       </button>
@@ -284,12 +337,12 @@ export default function AuthPage() {
                         Memverifikasi...
                       </>
                     ) : (
-                      <>Masuk</>
+                      <>Masuk <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" /></>
                     )}
                   </button>
                 </form>
 
-                <p className="text-sm text-slate-500 text-center mt-7">
+                <p className="text-sm text-slate-500 text-center mt-6 pt-6 border-t border-slate-100">
                   Belum memiliki akun?{' '}
                   <button onClick={() => switchTab('register')} className="text-[#0884c4] font-semibold hover:underline">
                     Daftar sebagai pemohon
@@ -300,10 +353,10 @@ export default function AuthPage() {
 
             {/* ── HALAMAN REGISTER ── */}
             {activeTab === 'register' && (
-              <div>
-                <h1 className="text-3xl font-light tracking-tight">Buat akun baru</h1>
-                <p className="text-sm text-slate-500 mt-1.5 mb-7">
-                  Daftarkan diri Anda sebagai pemohon keanggotaan IKAPI Jawa Barat.
+              <div key="register" className="auth-pane">
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Buat akun baru</h1>
+                <p className="text-sm text-slate-500 leading-relaxed mt-1.5 mb-6">
+                  Isi data singkat. Berkas keanggotaan dilengkapi setelah masuk.
                 </p>
                 <Alerts />
 
@@ -336,6 +389,7 @@ export default function AuthPage() {
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Kata sandi</Label>
                     <div className="relative">
@@ -345,7 +399,7 @@ export default function AuthPage() {
                         minLength={6}
                         value={regPassword}
                         onChange={(e) => setRegPassword(e.target.value)}
-                        placeholder="Minimal 6 karakter"
+                        placeholder="Min. 6 karakter"
                         className={inputWithEye}
                       />
                       <button
@@ -372,6 +426,7 @@ export default function AuthPage() {
                       />
                     </div>
                   </div>
+                  </div>
 
                   <button type="submit" disabled={loading} className={submitBtn}>
                     {loading ? (
@@ -380,22 +435,28 @@ export default function AuthPage() {
                         Mendaftarkan...
                       </>
                     ) : (
-                      <>Daftar sekarang</>
+                      <>Daftar sekarang <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" /></>
                     )}
                   </button>
+                  <p className="text-xs text-slate-400 text-center leading-relaxed !mt-3">
+                    Dengan mendaftar, Anda menyatakan data yang diisi benar dan sah.
+                  </p>
                 </form>
 
-                <p className="text-xs text-slate-400 text-center leading-relaxed mt-6">
-                  Dengan mendaftar, Anda menyetujui bahwa data yang diisikan adalah benar dan sah untuk keperluan keanggotaan IKAPI Pengurus Daerah Jawa Barat.
+                <p className="text-sm text-slate-500 text-center mt-5 pt-5 border-t border-slate-100">
+                  Sudah punya akun?{' '}
+                  <button onClick={() => switchTab('login')} className="text-[#0884c4] font-semibold hover:underline">
+                    Masuk di sini
+                  </button>
                 </p>
               </div>
             )}
 
             {/* ── LUPA SANDI ── */}
             {activeTab === 'forgot' && (
-              <div>
-                <h1 className="text-3xl font-light tracking-tight">Lupa kata sandi</h1>
-                <p className="text-sm text-slate-500 mt-1.5 mb-7">
+              <div key="forgot" className="auth-pane">
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Lupa kata sandi</h1>
+                <p className="text-sm text-slate-500 leading-relaxed mt-1.5 mb-6">
                   Hubungi Admin sekretariat lewat WhatsApp untuk mengatur ulang kata sandi Anda.
                 </p>
                 <Alerts />
@@ -431,9 +492,9 @@ export default function AuthPage() {
 
             {/* ── ATUR ULANG SANDI (dari tautan email) ── */}
             {activeTab === 'reset' && (
-              <div>
-                <h1 className="text-3xl font-light tracking-tight">Kata sandi baru</h1>
-                <p className="text-sm text-slate-500 mt-1.5 mb-7">
+              <div key="reset" className="auth-pane">
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Kata sandi baru</h1>
+                <p className="text-sm text-slate-500 leading-relaxed mt-1.5 mb-6">
                   Buat kata sandi baru untuk akun Anda.
                 </p>
                 <Alerts />
@@ -471,12 +532,13 @@ export default function AuthPage() {
                 </button>
               </div>
             )}
+            </div>
           </div>
         </main>
 
         <footer className="px-4 pb-6 text-center">
-          <p className="text-xs text-white/60">
-            © 2026 IKAPI Pengurus Daerah Jawa Barat · Jl. Ibu Inggit Garnasih No. 148, Bandung
+          <p className="text-xs text-slate-400">
+            © 2026 IKAPI Pengurus Daerah Jawa Barat<span className="lg:hidden"> · Jl. Ibu Inggit Garnasih No. 148, Bandung</span>
           </p>
         </footer>
       </div>

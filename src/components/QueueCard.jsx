@@ -139,6 +139,7 @@ export function QueueFooter({ shown, total, noun, expanded, onToggle, linkLabel,
         <span className="font-semibold text-slate-800 tabular-nums">{total}</span> {noun}
       </p>
       <div className="flex flex-wrap items-center gap-2">
+        {onToggle && (
         <button
           type="button"
           onClick={onToggle}
@@ -147,6 +148,7 @@ export function QueueFooter({ shown, total, noun, expanded, onToggle, linkLabel,
           {expanded ? 'Tampilkan lebih sedikit' : `Lihat ${hidden} lainnya`}
           <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </button>
+        )}
         {onLink && (
           <button
             type="button"

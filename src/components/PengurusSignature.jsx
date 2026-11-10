@@ -153,7 +153,7 @@ export function PengurusSignatureBlock({ submission, settings, docKey, signing =
       signing={signing}
       className={`text-slate-900 ${className}`}
     >
-      <div style={{ fontFamily: 'Tahoma, Verdana, Segoe UI, sans-serif', fontSize: '12pt', lineHeight: 1.2 }}>
+      <div data-keep-together style={{ fontFamily: 'Tahoma, Verdana, Segoe UI, sans-serif', fontSize: '12pt', lineHeight: 1.2 }}>
         <p className="text-center">
           {heading ? <span className="font-bold">{heading}</span> : (
             <>

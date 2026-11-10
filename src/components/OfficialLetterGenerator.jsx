@@ -77,7 +77,7 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
       <div
         ref={paperRef}
         data-paper
-        className="p-8 sm:p-12 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white flex flex-col"
+        className="p-8 sm:p-10 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white flex flex-col"
         style={{ minHeight: '1123px' }}
       >
         {/* Kop Surat Resmi IKAPI Jawa Barat */}
@@ -105,7 +105,7 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
         </div>
 
         {/* Letter Body */}
-        <div className="text-xs sm:text-sm text-justify space-y-4 mb-6">
+        <div className="text-xs sm:text-sm text-justify space-y-3 mb-4">
           <p>Dengan hormat,</p>
           <p className="indent-8 leading-relaxed">
             {openingText}
@@ -154,7 +154,7 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
         <PengurusSignatureBlock submission={submission} settings={settings} docKey="surat" signing={signing} />
 
         {/* Kaki surat resmi */}
-        <KopSuratFooter className="mt-auto pt-10" />
+        <KopSuratFooter className="mt-auto pt-6" />
       </div>
     </div>
   );

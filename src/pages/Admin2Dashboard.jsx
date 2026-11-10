@@ -3,8 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { STATUS_LABEL, POST_APPROVAL_STATUSES } from '../components/StatusStepper';
 import {
   parseDate, submittedDate, timeAgo, initials, pct,
-  buildTrend, TrendChart, TrendLegend, PositionBubbles, RangeToggle
-} from '../components/DashboardWidgets';
+  buildTrend, TrendChart, TrendLegend, PositionBubbles, RangeToggle, SideCardList, HeaderStats } from '../components/DashboardWidgets';
 import QueueCard, { QueueFooter, QueueFilterBar } from '../components/QueueCard';
 import {
   ArrowUpRight, ArrowRight, PenTool, FileCheck2, Wallet, RefreshCw, ChevronDown, Lightbulb,
@@ -41,7 +40,6 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState('12m');
   const [queueFilter, setQueueFilter] = useState('Menunggu Approval');
-  const [showAllQueue, setShowAllQueue] = useState(false);
   // Default: yang paling lama menunggu tampil duluan agar tidak terlewat
   const [sortOrder, setSortOrder] = useState('oldest'); // 'newest' | 'oldest'
   const [search, setSearch] = useState('');
@@ -85,9 +83,8 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
     });
   }, [submissions, queueFilter, sortOrder]);
 
-  const displayQueue = useMemo(() => {
-    return showAllQueue ? queue : queue.slice(0, 6);
-  }, [queue, showAllQueue]);
+  // Dashboard hanya menampilkan maksimal 6 kartu; selebihnya lewat menu utama
+  const displayQueue = useMemo(() => queue.slice(0, 6), [queue]);
 
   const displayName = (user?.name || '').split(',')[0];
 
@@ -118,27 +115,14 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">{atAdmin1} pengajuan masih di Admin & Sekretaris · {total} pengajuan total</p>
         </div>
-        <div className="grid grid-cols-3 gap-3 sm:flex sm:gap-8">
-          {[
-            { value: pending, label: 'Menunggu keputusan',  icon: PenTool,    tone: 'bg-indigo-100 text-indigo-700' },
-            { value: signed,  label: 'Surat ditandatangani', icon: FileCheck2, tone: 'bg-emerald-100 text-emerald-700' },
-            { value: formatJuta(iuran), prefix: 'Rp', suffix: 'jt', label: 'Iuran terverifikasi', icon: Wallet, tone: 'bg-sky-100 text-[#0884c4]' },
-          ].map(({ value, prefix, suffix, label, icon: Icon, tone }) => (
-            <div key={label} className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5 sm:gap-2.5 min-w-0">
-              <span className={`w-8 h-8 flex-shrink-0 rounded-full flex items-center justify-center ring-4 ring-white/70 ${tone}`}>
-                <Icon className="w-4 h-4" />
-              </span>
-              <div className="leading-tight min-w-0">
-                <span className="text-xl sm:text-3xl font-light text-slate-900 tabular-nums whitespace-nowrap">
-                  {prefix && <span className="text-sm text-slate-500 mr-0.5">{prefix}</span>}
-                  {loading ? '–' : value}
-                  {suffix && <span className="text-sm text-slate-500 ml-0.5">{suffix}</span>}
-                </span>
-                <p className="text-[11px] text-slate-500">{label}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+        <HeaderStats
+          loading={loading}
+          items={[
+            { value: pending, label: 'Menunggu keputusan',  icon: PenTool,    tone: 'bg-indigo-50 text-indigo-600' },
+            { value: signed,  label: 'Surat ditandatangani', icon: FileCheck2, tone: 'bg-emerald-50 text-emerald-600' },
+            { value: formatJuta(iuran), prefix: 'Rp', suffix: 'jt', label: 'Iuran terverifikasi', icon: Wallet, tone: 'bg-sky-50 text-[#0884c4]' },
+          ]}
+        />
       </section>
 
       {/* ══ Widget utama: antrian keputusan + tanda tangan ══ */}
@@ -148,7 +132,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
             title="Antrian keputusan"
             filters={FILTERS}
             active={queueFilter}
-            onChange={(k) => { setQueueFilter(k); setShowAllQueue(false); }}
+            onChange={setQueueFilter}
             sortOrder={sortOrder}
             onToggleSort={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
             onRefresh={fetchSubmissions}
@@ -184,7 +168,6 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
 
               {queue.length > 6 && (
                 <QueueFooter shown={displayQueue.length} total={queue.length} noun="pengajuan"
-                  expanded={showAllQueue} onToggle={() => setShowAllQueue(!showAllQueue)}
                   linkLabel="Buka menu Approval" onLink={() => onOpenApproval?.()} />
               )}
             </div>
@@ -192,7 +175,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
         </div>
 
         {/* Kartu tanda tangan */}
-        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-blue-600 to-indigo-700 shadow-xl shadow-indigo-700/25 flex flex-col justify-between overflow-hidden min-h-[220px]">
+        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-blue-600 to-indigo-700 shadow-xl shadow-indigo-700/25 flex flex-col overflow-hidden min-h-[220px] lg:h-0 lg:min-h-full">
           <div>
             <div className="flex items-start justify-between">
               <h2 className="text-lg">Perlu tanda tangan</h2>
@@ -205,6 +188,13 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
               Pengajuan yang sudah disetujui Admin & Sekretaris. Setujui dan bubuhkan TTD Ketua.
             </p>
           </div>
+          <SideCardList title="Posisi pengajuan"
+            items={[
+              { label: 'Menunggu TTD Anda', value: pending, icon: PenTool, onClick: () => onOpenApproval() },
+              { label: 'Di Admin & Sekretaris', value: atAdmin1, icon: FileCheck2 },
+              { label: 'Sudah ditandatangani', value: signed, icon: Award },
+              { label: 'Ditolak', value: rejected, icon: Activity, muted: true },
+            ]} />
           <div className="pt-4 space-y-2">
             <button onClick={() => onOpenApproval()}
               className="w-full flex items-center justify-between gap-3 text-left bg-white text-slate-800 rounded-2xl px-4 py-3 shadow-lg hover:-translate-y-0.5 transition cursor-pointer">

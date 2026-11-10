@@ -4,8 +4,7 @@ import { exportMembersExcel } from '../utils/exportMembers';
 import { STATUS_LABEL, POST_APPROVAL_STATUSES } from '../components/StatusStepper';
 import {
   parseDate, submittedDate, timeAgo, initials, pct, greetingName,
-  buildTrend, TrendChart, TrendLegend, PositionBubbles, RangeToggle
-} from '../components/DashboardWidgets';
+  buildTrend, TrendChart, TrendLegend, PositionBubbles, RangeToggle, SideCardList, HeaderStats } from '../components/DashboardWidgets';
 import {
   ArrowUpRight, ArrowRight, ShieldCheck, Users, Download, KeyRound, Search, Sparkles,
   FileStack, Send, BadgeCheck, RefreshCw, ChevronDown, Lightbulb
@@ -41,7 +40,6 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
   const [range, setRange] = useState('12m');
   const [sortOrder, setSortOrder] = useState('newest');
   const [queueFilter, setQueueFilter] = useState('Semua');
-  const [showAllQueue, setShowAllQueue] = useState(false);
   const [search, setSearch] = useState('');
 
   const fetchSubmissions = async () => {
@@ -87,9 +85,8 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
     });
   }, [submissions, queueFilter, sortOrder]);
 
-  const displayQueue = useMemo(() => {
-    return showAllQueue ? queue : queue.slice(0, 6);
-  }, [queue, showAllQueue]);
+  // Dashboard hanya menampilkan maksimal 6 kartu; selebihnya lewat menu utama
+  const displayQueue = useMemo(() => queue.slice(0, 6), [queue]);
 
   const { first: firstName, rest: restName } = greetingName(user?.name);
 
@@ -125,23 +122,14 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
             {needScreening > 0 ? `${needScreening} pengajuan menunggu persetujuan & tanda tangan Anda` : 'Tidak ada pengajuan yang menunggu tanda tangan Anda'}
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-3 sm:flex sm:gap-8">
-          {[
-            { value: total,         label: 'Total pengajuan',     icon: FileStack,  tone: 'bg-sky-100 text-[#0884c4]' },
-            { value: atAdmin2,      label: 'Diteruskan ke Ketua', icon: Send,       tone: 'bg-violet-100 text-violet-700' },
-            { value: activeMembers, label: 'Anggota aktif',       icon: BadgeCheck, tone: 'bg-emerald-100 text-emerald-700' },
-          ].map(({ value, label, icon: Icon, tone }) => (
-            <div key={label} className="flex items-center gap-2.5">
-              <span className={`w-8 h-8 flex-shrink-0 rounded-full flex items-center justify-center ring-4 ring-white/70 ${tone}`}>
-                <Icon className="w-4 h-4" />
-              </span>
-              <div className="leading-tight">
-                <span className="text-2xl sm:text-3xl font-light text-slate-900 tabular-nums">{loading ? '–' : value}</span>
-                <p className="text-[11px] text-slate-500">{label}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+        <HeaderStats
+          loading={loading}
+          items={[
+            { value: total,         label: 'Total pengajuan',     icon: FileStack,  tone: 'bg-sky-50 text-[#0884c4]' },
+            { value: atAdmin2,      label: 'Diteruskan ke Ketua', icon: Send,       tone: 'bg-violet-50 text-violet-600' },
+            { value: activeMembers, label: 'Anggota aktif',       icon: BadgeCheck, tone: 'bg-emerald-50 text-emerald-600' },
+          ]}
+        />
       </section>
 
       {/* ══ Widget utama: antrian + prioritas ══ */}
@@ -182,7 +170,6 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
 
               {queue.length > 6 && (
                 <QueueFooter shown={displayQueue.length} total={queue.length} noun="pengajuan"
-                  expanded={showAllQueue} onToggle={() => setShowAllQueue(!showAllQueue)}
                   linkLabel="Buka menu Screening" onLink={() => onOpenScreening?.({})} />
               )}
             </div>
@@ -190,7 +177,7 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
         </div>
 
         {/* Kartu prioritas */}
-        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-[#0884c4] to-blue-700 shadow-xl shadow-sky-700/25 flex flex-col justify-between overflow-hidden min-h-[220px]">
+        <div className="lg:col-span-3 rounded-3xl p-5 text-white bg-gradient-to-br from-[#0da2e7] via-[#0884c4] to-blue-700 shadow-xl shadow-sky-700/25 flex flex-col overflow-hidden min-h-[220px] lg:h-0 lg:min-h-full">
           <div>
             <div className="flex items-start justify-between">
               <h2 className="text-lg">Prioritas hari ini</h2>
@@ -203,6 +190,13 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
               Lihat semua dokumen & bukti transfer yang sudah disetujui Admin, lalu putuskan: setujui & tanda tangani, atau tolak.
             </p>
           </div>
+          <SideCardList title="Posisi pengajuan"
+            items={[
+              { label: 'Perlu TTD Anda', value: needScreening, icon: ShieldCheck, onClick: () => onOpenScreening({ status: 'Menunggu TTD Sekretaris' }) },
+              { label: 'Masih di Admin', value: count(['Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran']), icon: FileStack },
+              { label: 'Menunggu TTD Ketua', value: atAdmin2, icon: Send },
+              { label: 'Anggota aktif', value: activeMembers, icon: BadgeCheck },
+            ]} />
           <div className="pt-4 space-y-2">
             <button onClick={() => onOpenScreening({ status: 'Menunggu TTD Sekretaris' })}
               className="w-full flex items-center justify-between gap-3 text-left bg-white text-slate-800 rounded-2xl px-4 py-3 shadow-lg hover:-translate-y-0.5 transition cursor-pointer">

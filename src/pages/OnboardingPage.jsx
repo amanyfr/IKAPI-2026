@@ -23,19 +23,19 @@ function OptionCard({ option, active, onSelect }) {
       type="button"
       onClick={() => onSelect(option.id)}
       aria-pressed={active}
-      className={`text-left p-3 sm:p-4 rounded-[20px] border-2 transition flex flex-col sm:flex-row items-start gap-2 sm:gap-3 ${
-        active ? 'border-[#3b82f6] bg-white shadow-[0_8px_20px_-12px_rgba(59,130,246,0.6)]' : 'border-white bg-white/70 hover:border-blue-200'
+      className={`text-left p-3 sm:p-4 rounded-2xl border transition flex flex-col sm:flex-row items-start gap-2 sm:gap-3 ${
+        active ? 'border-[#0884c4] bg-sky-50/60 ring-4 ring-sky-100' : 'border-slate-200 bg-white hover:border-slate-300'
       }`}
     >
       <span className={`w-9 h-9 sm:w-10 sm:h-10 flex-shrink-0 rounded-full flex items-center justify-center ${
-        active ? 'bg-[#3b82f6] text-white' : 'bg-slate-100 text-slate-500'
+        active ? 'bg-[#0884c4] text-white' : 'bg-slate-100 text-slate-500'
       }`}>
         <Icon className="w-[18px] h-[18px]" />
       </span>
       <span className="min-w-0 flex-1 w-full">
         <span className="flex items-center justify-between gap-2">
           <span className="font-medium text-sm sm:text-base text-slate-900">{option.title}</span>
-          {active && <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-[#3b82f6] flex-shrink-0" />}
+          {active && <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-[#0884c4] flex-shrink-0" />}
         </span>
         <span className="block text-xs sm:text-[13px] leading-snug text-slate-500 mt-0.5">{option.desc}</span>
       </span>
@@ -84,7 +84,11 @@ export default function OnboardingPage({ onBack, onDone }) {
     <div className="theme-soft relative min-h-screen flex flex-col">
 
       {/* Latar foto buku IKAPI (sama dengan portal Anggota) */}
-      <div aria-hidden="true" className="anggota-photo-bg fixed inset-0" />
+      <div aria-hidden="true" className="auth-bg fixed inset-0">
+        <div className="auth-blob auth-blob-1" />
+        <div className="auth-blob auth-blob-2" />
+        <div className="auth-grid absolute inset-0" />
+      </div>
 
       <header className="soft-header relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-3">
@@ -106,27 +110,30 @@ export default function OnboardingPage({ onBack, onDone }) {
       </header>
 
       <main className="relative flex-1 w-full max-w-2xl mx-auto px-4 py-5 sm:py-8 flex items-center">
-        <form onSubmit={handleSubmit} className="card-surface w-full p-5 sm:p-7 space-y-5 sm:space-y-6">
+        <form onSubmit={handleSubmit} className="w-full p-5 sm:p-8 space-y-5 sm:space-y-6 rounded-[28px] bg-white border border-slate-200/80 shadow-[0_30px_80px_-40px_rgba(11,26,74,0.45)]">
           <div>
             <div className="flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={onBack || logout}
-                className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900 transition"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                {onBack ? 'Kembali ke dashboard' : 'Kembali ke halaman masuk'}
-              </button>
-              <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />{onBack ? 'Ubah jawaban' : 'Langkah awal'}</span>
+              {/* Dari dashboard cukup "Simpan & lanjutkan"; tautan kembali hanya saat login pertama */}
+              {!onBack && (
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="inline-flex items-center gap-1.5 text-left text-sm text-slate-500 hover:text-slate-900 transition"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Kembali ke halaman masuk
+                </button>
+              )}
+              <span className="soft-chip"><span className="w-1.5 h-1.5 rounded-full bg-[#0884c4]" />{onBack ? 'Ubah jawaban' : 'Langkah awal'}</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-light text-slate-900 mt-2.5 tracking-tight">Lengkapi profil keanggotaan</h1>
+            <h1 className="text-2xl font-semibold text-slate-900 mt-3 tracking-tight">Lengkapi profil keanggotaan</h1>
             <p className="text-sm text-slate-500 mt-1.5">
               Jawab dua pertanyaan berikut. Jawaban Anda dipakai untuk menyiapkan formulir pengajuan yang sesuai.
             </p>
           </div>
 
           <fieldset className="space-y-2.5">
-            <legend className="text-base sm:text-lg text-slate-800 mb-2.5">1. Apakah Anda sudah pernah menjadi anggota IKAPI?</legend>
+            <legend className="text-sm sm:text-base font-semibold text-slate-800 mb-2.5">1. Apakah Anda sudah pernah menjadi anggota IKAPI?</legend>
             <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
               {TYPE_OPTIONS.map((o) => (
                 <OptionCard key={o.id} option={o} active={memberType === o.id} onSelect={setMemberType} />
@@ -142,14 +149,14 @@ export default function OnboardingPage({ onBack, onDone }) {
                   value={oldKtaNumber}
                   onChange={(e) => setOldKtaNumber(e.target.value)}
                   placeholder="Contoh: 008/JBR/2024"
-                  className="soft-input"
+                  className="soft-input focus:!border-[#0884c4] focus:!ring-sky-100"
                 />
               </div>
             )}
           </fieldset>
 
           <fieldset className="space-y-2.5">
-            <legend className="text-base sm:text-lg text-slate-800 mb-2.5">2. Kategori keanggotaan Anda</legend>
+            <legend className="text-sm sm:text-base font-semibold text-slate-800 mb-2.5">2. Kategori keanggotaan Anda</legend>
             {/* Lebar penuh, sejajar dengan pilihan di pertanyaan 1 */}
             <div className="grid grid-cols-1">
               <OptionCard option={CATEGORY_OPTIONS.find((o) => o.id === category) || CATEGORY_OPTIONS[0]} active onSelect={() => {}} />
@@ -157,10 +164,10 @@ export default function OnboardingPage({ onBack, onDone }) {
             <p className="text-xs text-slate-500 px-1">
               {category === 'Luar Biasa' ? (
                 <>Bukan perguruan tinggi / lembaga?{' '}
-                  <button type="button" onClick={() => setCategory('Biasa')} className="text-[#3b82f6] hover:underline font-medium">Kembali ke anggota biasa</button></>
+                  <button type="button" onClick={() => setCategory('Biasa')} className="text-[#0884c4] hover:underline font-semibold">Kembali ke anggota biasa</button></>
               ) : (
                 <>Anda penerbit perguruan tinggi atau lembaga?{' '}
-                  <button type="button" onClick={() => setCategory('Luar Biasa')} className="text-[#3b82f6] hover:underline font-medium">Daftar sebagai anggota luar biasa</button></>
+                  <button type="button" onClick={() => setCategory('Luar Biasa')} className="text-[#0884c4] hover:underline font-semibold">Daftar sebagai anggota luar biasa</button></>
               )}
             </p>
           </fieldset>
@@ -172,14 +179,14 @@ export default function OnboardingPage({ onBack, onDone }) {
             </div>
           )}
 
-          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-slate-100">
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-5 border-t border-slate-100">
             <p className="text-xs text-slate-400">Jenis pengajuan mengikuti jawaban ini. Jawaban masih bisa diubah selama pengajuan belum dibuat.</p>
             <button
               type="submit"
               disabled={!canSubmit}
-              className="soft-pill-primary px-6 py-2.5 disabled:!bg-slate-300 disabled:shadow-none disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0"
+              className="group inline-flex items-center justify-center gap-2 h-11 px-6 rounded-xl bg-[#0884c4] hover:bg-[#076fa5] active:bg-[#065d8a] text-white text-sm font-semibold shadow-sm transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0"
             >
-              {saving ? 'Menyimpan...' : <>Simpan & lanjutkan <ArrowRight className="w-4 h-4" /></>}
+              {saving ? 'Menyimpan...' : <>Simpan & lanjutkan <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" /></>}
             </button>
           </div>
         </form>

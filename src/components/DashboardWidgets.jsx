@@ -226,3 +226,86 @@ export function RangeToggle({ value, onChange }) {
     </div>
   );
 }
+
+/* ── Ringkasan di kartu biru samping (Admin, Sekretaris, Ketua) ──
+   Mengisi ruang tengah kartu dengan daftar angka per tahap. */
+// Tinggi kartu samping mengikuti kotak antrean di sebelahnya. Baris yang tidak muat
+// disembunyikan utuh (flex-wrap ke kolom tersembunyi), dan panel disembunyikan bila
+// tidak ada satu baris pun yang muat, supaya tidak tampil sebagai kotak scroll terpotong.
+export function SideCardList({ title, items }) {
+  const max = Math.max(1, ...items.map((i) => Number(i.value) || 0));
+  const listRef = useRef(null);
+  const [fits, setFits] = useState(true);
+  useEffect(() => {
+    const ul = listRef.current;
+    if (!ul || typeof ResizeObserver === 'undefined') return undefined;
+    const check = () => {
+      const first = ul.firstElementChild;
+      setFits(!first || ul.clientHeight >= first.offsetHeight);
+    };
+    const ro = new ResizeObserver(check);
+    ro.observe(ul);
+    check();
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div className={`flex-1 min-h-0 mt-4 rounded-2xl p-3 flex flex-col overflow-hidden ${fits ? 'bg-white/10 ring-1 ring-white/15' : 'invisible'}`}>
+      {title && <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70 mb-2">{title}</p>}
+      <ul ref={listRef} className="flex-1 min-h-0 overflow-hidden flex flex-col flex-wrap content-start gap-x-6 gap-y-1.5" style={{ justifyContent: 'safe space-around' }}>
+        {items.map((it) => {
+          const Row = it.onClick ? 'button' : 'div';
+          const Icon = it.icon;
+          return (
+            <li key={it.label} className="w-full">
+              <Row type={it.onClick ? 'button' : undefined} onClick={it.onClick}
+                className={`w-full text-left rounded-xl px-2.5 py-2 ${it.onClick ? 'hover:bg-white/10 transition' : ''}`}>
+                <span className="flex items-center gap-2">
+                  {Icon && <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${it.muted ? 'text-white/50' : 'text-white'}`} />}
+                  <span className={`flex-1 min-w-0 leading-snug text-xs ${it.muted ? 'text-white/60' : 'text-white/90'}`}>{it.label}</span>
+                  {it.value !== undefined && <span className="text-sm font-semibold tabular-nums">{it.value}</span>}
+                </span>
+                {it.value !== undefined && !it.hideBar && (
+                  <span className="block mt-1.5 h-1 rounded-full bg-white/15 overflow-hidden">
+                    <span className="block h-full rounded-full bg-white/80" style={{ width: `${Math.round(((Number(it.value) || 0) / max) * 100)}%` }} />
+                  </span>
+                )}
+              </Row>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// Angka utama di samping sapaan: satu kartu rapi, ikon + angka + label sejajar.
+// prefix/suffix (mis. "Rp" / "jt") duduk di garis dasar yang sama dengan angkanya.
+export function HeaderStats({ items, loading }) {
+  return (
+    <div className="card-surface p-1.5 grid grid-cols-2 sm:grid-cols-none sm:grid-flow-col sm:auto-cols-fr sm:divide-x divide-slate-100 lg:flex-shrink-0">
+      {items.map(({ key, value, prefix, suffix, label, icon: Icon, tone, onClick }) => {
+        const Tag = onClick ? 'button' : 'div';
+        return (
+          <Tag
+            key={key || label}
+            type={onClick ? 'button' : undefined}
+            onClick={onClick}
+            className={`flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 text-left min-w-0 rounded-xl sm:rounded-none sm:first:rounded-l-xl sm:last:rounded-r-xl ${onClick ? 'hover:bg-slate-50 transition-colors' : ''}`}
+          >
+            <span className={`w-9 h-9 flex-shrink-0 rounded-xl flex items-center justify-center ${tone}`}>
+              <Icon className="w-[18px] h-[18px]" />
+            </span>
+            <span className="min-w-0">
+              <span className="flex items-baseline gap-1 leading-none text-slate-900 tabular-nums whitespace-nowrap">
+                {prefix && <span className="text-xs font-medium text-slate-400">{prefix}</span>}
+                <span className="text-2xl font-semibold tracking-tight">{loading ? '–' : value}</span>
+                {suffix && <span className="text-xs font-medium text-slate-400">{suffix}</span>}
+              </span>
+              <span className="block mt-1 text-[11px] leading-snug text-slate-500 sm:whitespace-nowrap">{label}</span>
+            </span>
+          </Tag>
+        );
+      })}
+    </div>
+  );
+}
