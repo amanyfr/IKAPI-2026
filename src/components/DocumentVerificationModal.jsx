@@ -64,10 +64,13 @@ const DOC_BADGE = {
   Sesuai: 'bg-emerald-100 text-emerald-800',
   'Perlu Revisi': 'bg-amber-100 text-amber-800 border border-amber-300',
   Menunggu: 'bg-slate-100 text-slate-600',
+  Diperiksa: 'bg-sky-100 text-sky-800',
 };
 // Dokumen pengganti dari pemohon yang belum diperiksa ulang Admin
 const isFreshRevision = (doc) => Boolean(doc?.revised_at && doc.file_path && doc.screening_status === 'Menunggu');
-const docBadgeText = (doc) => (!doc.file_path ? 'Belum diunggah' : doc.screening_status === 'Perlu Revisi' ? 'Tidak sesuai' : doc.screening_status === 'Menunggu' ? 'Belum diperiksa' : 'Sesuai');
+// Dokumen yang sudah dibuka dianggap sudah diperiksa walau belum dinilai Sesuai/Tidak sesuai
+const docBadgeKey = (doc, viewed) => (!doc.file_path ? 'Menunggu' : doc.screening_status === 'Menunggu' && viewed ? 'Diperiksa' : doc.screening_status);
+const docBadgeText = (doc, viewed) => (!doc.file_path ? 'Belum diunggah' : doc.screening_status === 'Perlu Revisi' ? 'Tidak sesuai' : doc.screening_status === 'Menunggu' ? (viewed ? 'Sudah diperiksa' : 'Belum diperiksa') : 'Sesuai');
 
 export default function DocumentVerificationModal({
   isOpen,
@@ -124,6 +127,9 @@ export default function DocumentVerificationModal({
   const canScreenDocs = isAdmin && status === 'Menunggu Verifikasi';
   // Pengajuan menunggu revisi: Admin masih bisa memperbarui catatan & sorotan dokumen yang belum diganti
   const canEditRevision = (doc) => isAdmin && status === 'Perlu Revisi' && doc?.screening_status === 'Perlu Revisi';
+  // Berkas pengganti yang sudah masuk bisa langsung di-screening walau revisi lain belum lengkap
+  const canScreenDoc = (doc) => canScreenDocs || (isAdmin && status === 'Perlu Revisi' && isFreshRevision(doc));
+  const hasFreshRevision = isAdmin && status === 'Perlu Revisi' && documents.some(isFreshRevision);
   const canVerifyPayment = isAdmin && status === 'Menunggu Pembayaran' && payment?.proof_file && payment?.verification_status === 'Menunggu';
   const canSign = role === 'Sekretaris' && status === 'Menunggu TTD Sekretaris';
   // Berkas fisik baru bisa dikonfirmasi setelah pemohon menandainya sudah dikirim
@@ -287,13 +293,14 @@ export default function DocumentVerificationModal({
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,22rem)_1fr]">
               <div className="border-b lg:border-b-0 lg:border-r border-slate-200 p-3 space-y-2">
                 <p className="text-[11px] text-slate-500 px-1">
-                  {canScreenDocs
+                  {canScreenDocs || hasFreshRevision
                     ? 'Buka setiap dokumen dulu. Tombol penilaian muncul setelah dokumen dibuka.'
                     : 'Hasil screening dokumen oleh Admin.'}
                 </p>
                 {documents.map((doc, i) => {
                   const active = activeDoc?.id === doc.id;
                   const seen = opened.has(docViewKey(doc));
+                  const viewed = seen || Boolean(docOpenInfo(doc));
                   const fresh = isFreshRevision(doc);
                   return (
                     <button
@@ -315,8 +322,8 @@ export default function DocumentVerificationModal({
                       )}
                       <div className="flex items-start justify-between gap-2">
                         <span className="text-xs font-semibold text-slate-800">{i + 1}. {doc.document_title}</span>
-                        <span className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold ${doc.file_path ? DOC_BADGE[doc.screening_status] : DOC_BADGE.Menunggu}`}>
-                          {docBadgeText(doc)}
+                        <span className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold ${DOC_BADGE[docBadgeKey(doc, viewed)]}`}>
+                          {docBadgeText(doc, viewed)}
                         </span>
                       </div>
                       <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
@@ -392,7 +399,7 @@ export default function DocumentVerificationModal({
                 </div>
 
                 {/* Penilaian per dokumen (hanya Admin, hanya setelah dokumen dibuka) */}
-                {(canScreenDocs || canEditRevision(activeDoc)) && activeDoc?.file_path && (
+                {(canScreenDoc(activeDoc) || canEditRevision(activeDoc)) && activeDoc?.file_path && (
                   <div className="p-4 bg-slate-50 space-y-3">
                     {isFreshRevision(activeDoc) && rejecting !== activeDoc.id && (
                       <div className="text-xs text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-start gap-2">
@@ -459,15 +466,15 @@ export default function DocumentVerificationModal({
                     ) : (
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <span className="mr-auto text-xs text-slate-600">
-                          {canScreenDocs
+                          {canScreenDoc(activeDoc)
                             ? <>Hasil pemeriksaan <strong>{activeDoc.document_title}</strong>:</>
                             : <>Menunggu pemohon mengganti dokumen ini. Catatan & sorotan masih bisa diperbarui.</>}
                         </span>
                         <button disabled={busy} onClick={() => { setRejecting(activeDoc.id); setComment(activeDoc.revision_notes || ''); setMarks(activeDoc.screening_status === 'Perlu Revisi' ? parseMarks(activeDoc.revision_marks) : []); }}
                           className={`px-3.5 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 border ${activeDoc.screening_status === 'Perlu Revisi' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-50'}`}>
-                          <XCircle className="w-3.5 h-3.5" /> {canScreenDocs ? 'Tidak sesuai / Revisi' : 'Ubah catatan & sorotan'}
+                          <XCircle className="w-3.5 h-3.5" /> {canScreenDoc(activeDoc) ? 'Tidak sesuai / Revisi' : 'Ubah catatan & sorotan'}
                         </button>
-                        {canScreenDocs && <button disabled={busy} onClick={() => markDoc(activeDoc, 'Sesuai')}
+                        {canScreenDoc(activeDoc) && <button disabled={busy} onClick={() => markDoc(activeDoc, 'Sesuai')}
                           className={`px-3.5 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 ${activeDoc.screening_status === 'Sesuai' ? 'bg-emerald-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}>
                           <CheckCircle className="w-3.5 h-3.5" /> Sesuai
                         </button>}

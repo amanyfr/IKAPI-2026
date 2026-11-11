@@ -315,14 +315,20 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
       if (sub.kta_review_status === 'Ditolak') return 'KTA ditolak · menunggu perbaikan pemohon';
       return `Menunggu pemohon isi data KTA${sub.central_courier ? ` (${sub.central_courier})` : ''}`;
     }
-    if (sub.status === 'Perlu Revisi') return `Menunggu revisi ke-${sub.revision_round || 1} dari pemohon`;
+    if (sub.status === 'Perlu Revisi') {
+      const fresh = Number(sub.fresh_revision_count) || 0;
+      return fresh > 0
+        ? `${fresh} berkas revisi masuk · siap di-screening`
+        : `Menunggu revisi ke-${sub.revision_round || 1} dari pemohon`;
+    }
     if (sub.status === 'Menunggu Verifikasi' && sub.revision_round > 0) return `Hasil revisi ke-${sub.revision_round} masuk`;
     return null;
   };
 
   // Tombol utama sesuai tugas peran pada tahap ini
   const primaryLabel = (sub) => {
-    if (isAdmin && sub.status === 'Menunggu Verifikasi') return 'Screening dokumen';
+    if (isAdmin && sub.status === 'Menunggu Verifikasi') return Number(sub.revision_round) > 0 ? `Screening revisi ke-${sub.revision_round}` : 'Screening dokumen';
+    if (isAdmin && sub.status === 'Perlu Revisi' && Number(sub.fresh_revision_count) > 0) return 'Screening revisi';
     if (isAdmin && sub.status === 'Menunggu Pembayaran' && sub.payment_status === 'Menunggu' && sub.payment_proof) return 'Verifikasi bayar';
     if (isAdmin && sub.status === 'Pengiriman Berkas' && sub.physical_status === 'Dikirim') return 'Konfirmasi berkas';
     if (isAdmin && sub.status === 'Berkas Diterima') return 'Kirim ke Pusat';

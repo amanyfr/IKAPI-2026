@@ -1278,6 +1278,7 @@ app.get('/api/submissions', authenticate, async (req, res) => {
                COALESCE((SELECT MAX(d.revision_count) FROM documents d WHERE d.submission_id = s.id), 0)
              ) AS revision_round,
              (SELECT COUNT(*) FROM documents d WHERE d.submission_id = s.id AND (d.revised_at IS NOT NULL OR d.revision_count > 0)) AS revised_docs_count,
+             (SELECT COUNT(*) FROM documents d WHERE d.submission_id = s.id AND d.revised_at IS NOT NULL AND d.file_path <> '' AND d.screening_status = 'Menunggu') AS fresh_revision_count,
              m.publisher_name, m.category as member_category, m.leader_name, m.city, m.kta_number as member_kta,
              u.name as applicant_name, u.email as applicant_email,
              p.amount as payment_amount, p.verification_status as payment_status, p.proof_file as payment_proof
@@ -1895,7 +1896,9 @@ app.put('/api/documents/:docId/screen', authenticate, authorize('Admin'), async 
     if (!doc) return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
     // Saat pengajuan menunggu revisi, Admin masih boleh memperbarui catatan/sorotan dokumen yang belum diganti pemohon
     const editingRevision = doc.sub_status === 'Perlu Revisi' && doc.screening_status === 'Perlu Revisi' && status === 'Perlu Revisi';
-    if (doc.sub_status !== 'Menunggu Verifikasi' && !editingRevision) {
+    // Berkas pengganti yang sudah diunggah boleh langsung di-screening walau revisi lain belum lengkap
+    const screeningFreshRevision = doc.sub_status === 'Perlu Revisi' && doc.screening_status === 'Menunggu' && Boolean(doc.revised_at);
+    if (doc.sub_status !== 'Menunggu Verifikasi' && !editingRevision && !screeningFreshRevision) {
       return res.status(400).json({ error: 'Dokumen hanya bisa diperiksa saat pengajuan berada di tahap screening dokumen.' });
     }
     if (!doc.file_path) {
