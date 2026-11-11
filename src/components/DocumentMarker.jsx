@@ -109,23 +109,31 @@ function MarkLayer({ page, marks, allMarks, editable, onAdd, onRemove, activeInd
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDraft(null)}
     >
       {children}
+      {/* Warna sorotan dipisah & memakai multiply agar teks di bawahnya tetap terbaca jelas */}
+      {marks.map((m, i) => (
+        <div key={`fill-${i}`} aria-hidden="true"
+          className={`absolute rounded-sm pointer-events-none mix-blend-multiply transition-colors duration-300 ${activeIndex === allMarks.indexOf(m) ? 'bg-yellow-300/60' : 'bg-yellow-200/55'}`}
+          style={{ left: pct(m.x), top: pct(m.y), width: pct(m.w), height: pct(m.h) }} />
+      ))}
       {marks.map((m) => {
         const n = allMarks.indexOf(m) + 1;
         const active = activeIndex === n - 1;
         const selectable = !editable && onSelect;
         return (
           <div key={n} data-mark={n}
-            className={`absolute rounded-md transition-all duration-300 ${active
-              ? 'border-2 border-amber-500 bg-yellow-300/45 ring-4 ring-amber-400/50 shadow-lg shadow-amber-500/30 z-10'
-              : 'border-2 border-amber-500/90 bg-yellow-300/30'} ${selectable ? 'cursor-pointer hover:bg-yellow-300/50' : ''}`}
+            className={`group absolute rounded-sm transition-all duration-300 ${active
+              ? 'border-2 border-amber-500 ring-2 ring-amber-400/40 z-10'
+              : 'border-[1.5px] border-amber-500/80'} ${selectable ? 'cursor-pointer hover:border-amber-600' : ''}`}
             style={{ left: pct(m.x), top: pct(m.y), width: pct(m.w), height: pct(m.h) }}
             onClick={selectable ? () => onSelect(n - 1) : undefined}
             title={m.note || `Bagian ${n}`}>
-            <span className={`absolute -top-3 -left-3 w-6 h-6 rounded-full text-white text-[11px] font-bold flex items-center justify-center shadow-md ring-2 ring-white ${active ? 'bg-amber-600 scale-110' : 'bg-amber-500'} transition-transform`}>
+            {/* Nomor di luar kotak (sisi kiri) supaya tidak menutupi teks yang ditandai */}
+            <span className={`absolute ${m.x < 0.04 ? 'left-0 bottom-full mb-1' : 'right-full mr-1 top-0'} w-5 h-5 rounded-full text-white text-[10px] font-bold flex items-center justify-center shadow ring-2 ring-white ${active ? 'bg-amber-600 scale-110' : 'bg-amber-500'} transition-transform`}>
               {n}
             </span>
+            {/* Catatan hanya muncul di bawah kotak saat tanda dipilih / disorot kursor */}
             {m.note && (
-              <span className="absolute left-4 -top-3 max-w-[calc(100%-1.5rem)] truncate px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-semibold shadow-sm ring-2 ring-white pointer-events-none">
+              <span className={`absolute left-0 top-full mt-1 max-w-[min(18rem,100%)] w-max px-2 py-1 rounded-lg bg-amber-600 text-white text-[10px] leading-snug font-medium shadow-md pointer-events-none z-20 transition-opacity ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                 {m.note}
               </span>
             )}

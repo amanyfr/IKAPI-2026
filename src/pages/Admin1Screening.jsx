@@ -260,9 +260,17 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
   };
 
   // Sekretaris: tanda tangani pengajuan yang dokumen & pembayarannya sudah disetujui Admin
-  const startSignScreened = (sub, settings = {}) => {
-    setPassing({ submission: sub, settings, notes: '' });
+  // fromDetail: dibuka dari modal detail pengajuan; Batal kembali ke detail itu (bukan halaman kosong)
+  const startSignScreened = (sub, settings = {}, fromDetail = false) => {
+    setPassing({ submission: sub, settings, notes: '', fromDetail });
     setIsVerifyModalOpen(false);
+  };
+
+  const cancelSign = () => {
+    const backToDetail = passing?.fromDetail && selectedSubDetail;
+    setPassing(null);
+    if (backToDetail) setIsVerifyModalOpen(true);
+    else if (detailOnly) onDetailClosed?.();
   };
 
   const confirmPassToKetua = async (signaturePositions) => {
@@ -270,6 +278,8 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     try {
       await handleAdmin1Action(passing.submission.id, 'pass_to_admin2', passing.notes, { signaturePositions });
       setPassing(null);
+      // Dibuka dari kartu Dashboard: kembali ke Dashboard (segarkan) agar kartu bisa diklik lagi
+      if (detailOnly) onDetailClosed?.();
     } catch (err) {
       notify('Gagal meneruskan: ' + err.message);
     } finally {
@@ -698,7 +708,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           onScreenDocument={handleScreenDoc}
           onVerifyPayment={handleVerifyPayment}
           onAdmin1Action={handleAdmin1Action}
-          onSignSecretary={() => startSignScreened(selectedSubDetail.submission, selectedSubDetail.settings)}
+          onSignSecretary={() => startSignScreened(selectedSubDetail.submission, selectedSubDetail.settings, true)}
           onRejectSecretary={isSekretaris ? handleRejectSecretary : undefined}
           onReceivePhysical={handleReceivePhysical}
           onSendCentral={handleSendCentral}
@@ -719,7 +729,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           confirmLabel="Bubuhkan TTD (4 dokumen) & Teruskan"
           processing={processingPass}
           onConfirm={confirmPassToKetua}
-          onClose={() => setPassing(null)}
+          onClose={cancelSign}
         />
       )}
 

@@ -21,6 +21,10 @@ const SIGNER_LABEL = { chairman: 'Ketua', secretary: 'Sekretaris' };
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
+// Batas ukuran TTD (lebar relatif area tanda tangan), sama dengan slider "Ukuran TTD"
+export const SIGNATURE_MIN_W = 0.12;
+export const SIGNATURE_MAX_W = 0.45;
+
 function parseJson(raw) {
   try {
     return typeof raw === 'string' ? JSON.parse(raw) : raw || null;
@@ -85,30 +89,73 @@ function SignatureZone({ placed, signing, className = '', children }) {
     dragRef.current = null;
   };
 
+  // Ubah ukuran: tarik pegangan di sudut kotak TTD; titik tengah tetap di tempat
+  const resizeRef = useRef(false);
+  const handleResizeDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeRef.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const handleResizeMove = (e) => {
+    const rect = areaRef.current?.getBoundingClientRect();
+    if (!resizeRef.current || !rect) return;
+    e.stopPropagation();
+    const { x } = signing.pos;
+    const centerX = rect.left + x * rect.width;
+    const maxW = Math.min(SIGNATURE_MAX_W, 2 * Math.min(x, 1 - x));
+    const w = clamp((2 * Math.abs(e.clientX - centerX)) / rect.width, SIGNATURE_MIN_W, Math.max(SIGNATURE_MIN_W, maxW));
+    signing.onChange({ ...signing.pos, w, x: clamp(x, w / 2, 1 - w / 2) });
+  };
+  const handleResizeUp = (e) => {
+    e?.stopPropagation?.();
+    resizeRef.current = false;
+  };
+
   return (
     <div
       ref={areaRef}
       className={`relative rounded-xl ${signing ? 'outline-2 outline-dashed outline-offset-8 outline-blue-300 bg-blue-50/30' : ''} ${className}`}
     >
-      {[placed.chairman, placed.secretary].filter(Boolean).map((sig) => (
+      {[placed.chairman, placed.secretary].filter(Boolean).map((sig) => (sig.active ? (
+        <div
+          key={sig.role}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          className="absolute -translate-x-1/2 -translate-y-1/2 select-none z-30 cursor-grab active:cursor-grabbing touch-none ring-2 ring-blue-500 ring-offset-2 rounded-md bg-white/30"
+          style={{ left: `${sig.pos.x * 100}%`, top: `${sig.pos.y * 100}%`, width: `${sig.pos.w * 100}%` }}
+        >
+          <img src={sig.img} alt={`Tanda Tangan ${SIGNER_LABEL[sig.role]}`} draggable={false} className="block w-full h-auto pointer-events-none" />
+          {/* Pegangan ubah ukuran (sudut kanan bawah) */}
+          <span
+            role="slider"
+            aria-label="Ubah ukuran tanda tangan"
+            aria-valuemin={SIGNATURE_MIN_W}
+            aria-valuemax={SIGNATURE_MAX_W}
+            aria-valuenow={sig.pos.w}
+            title="Tarik untuk mengubah ukuran"
+            onPointerDown={handleResizeDown}
+            onPointerMove={handleResizeMove}
+            onPointerUp={handleResizeUp}
+            onPointerCancel={handleResizeUp}
+            className="absolute -right-2.5 -bottom-2.5 w-5 h-5 rounded-full bg-blue-600 border-2 border-white shadow cursor-nwse-resize touch-none no-print"
+          />
+        </div>
+      ) : (
         <img
           key={sig.role}
           src={sig.img}
           alt={`Tanda Tangan ${SIGNER_LABEL[sig.role]}`}
           draggable={false}
-          onPointerDown={sig.active ? handlePointerDown : undefined}
-          onPointerMove={sig.active ? handlePointerMove : undefined}
-          onPointerUp={sig.active ? handlePointerUp : undefined}
-          onPointerCancel={sig.active ? handlePointerUp : undefined}
-          className={`absolute -translate-x-1/2 -translate-y-1/2 select-none ${
-            sig.active ? 'z-30 cursor-grab active:cursor-grabbing touch-none ring-2 ring-blue-500 ring-offset-2 rounded-md bg-white/30' : 'z-20 pointer-events-none'
-          }`}
+          className="absolute -translate-x-1/2 -translate-y-1/2 select-none z-20 pointer-events-none"
           style={{ left: `${sig.pos.x * 100}%`, top: `${sig.pos.y * 100}%`, width: `${sig.pos.w * 100}%` }}
         />
-      ))}
+      )))}
       {signing && (
         <span className="absolute -top-7 left-0 text-[11px] font-sans font-medium text-blue-700 flex items-center gap-1 no-print">
-          <Move className="w-3.5 h-3.5" /> Geser tanda tangan {SIGNER_LABEL[signing.role]} ke posisi yang diinginkan
+          <Move className="w-3.5 h-3.5" /> Geser tanda tangan {SIGNER_LABEL[signing.role]} ke posisi yang diinginkan · tarik titik biru di sudut untuk ubah ukuran
         </span>
       )}
       {children}

@@ -5,9 +5,10 @@ import SignaturePad from './SignaturePad';
 import OfficialLetterGenerator from './OfficialLetterGenerator';
 import OfficialApplicationFormPdf from './OfficialApplicationFormPdf';
 import { BeritaAcaraVerifikasi, SuratKeputusan } from './PengurusDocuments';
-import { DEFAULT_SIGNATURE_POS, SIGNABLE_DOCS } from './PengurusSignature';
+import { DEFAULT_SIGNATURE_POS, SIGNABLE_DOCS, SIGNATURE_MIN_W, SIGNATURE_MAX_W } from './PengurusSignature';
 import { notify } from './AppDialog';
 import { fileUrl } from '../utils/fileUrl';
+import { loadViewed, addViewed, docViewKey, paymentViewKey } from '../utils/viewedDocs';
 
 // Tab tambahan di modal TTD: berkas unggahan pemohon (bukan dokumen yang ditandatangani)
 const FILES_TAB = 'berkas_pemohon';
@@ -147,7 +148,19 @@ export function SignLetterModal({
 }) {
   const [positions, setPositions] = useState(() => initialPositions(role));
   const [activeDoc, setActiveDoc] = useState(SIGNABLE_DOCS[0].key);
-  const [visited, setVisited] = useState(() => new Set([SIGNABLE_DOCS[0].key]));
+  // Progres buka dokumen disimpan per pengguna & pengajuan: tidak hilang saat Batal lalu dibuka lagi.
+  // Berkas yang sudah dibuka di modal verifikasi ikut terhitung (kunci yang sama).
+  const [viewed, setViewed] = useState(() => {
+    const set = loadViewed(submission.id);
+    set.add(`letter-${SIGNABLE_DOCS[0].key}`);
+    return set;
+  });
+  const markViewed = (key) => {
+    setViewed((s) => new Set(s).add(key));
+    addViewed(submission.id, key);
+  };
+  useEffect(() => { addViewed(submission.id, `letter-${SIGNABLE_DOCS[0].key}`); }, [submission.id]);
+  const visited = { has: (key) => viewed.has(`letter-${key}`) };
   const [detail, setDetail] = useState(null);
 
   // Data lengkap pengajuan (berkas, pembayaran, pengaturan surat) untuk semua dokumen
@@ -169,17 +182,16 @@ export function SignLetterModal({
 
   const openDoc = (key) => {
     setActiveDoc(key);
-    setVisited((v) => new Set(v).add(key));
+    markViewed(`letter-${key}`);
   };
 
   // Berkas unggahan pemohon + bukti transfer wajib dibuka sebelum menandatangani
-  const [openedFiles, setOpenedFiles] = useState(() => new Set());
   const files = detail ? [
-    ...(detail.documents || []).filter((d) => d.file_path).map((d) => ({ key: `doc-${d.id}`, title: d.document_title, name: d.file_name, path: d.file_path })),
-    ...(detail.payment?.proof_file ? [{ key: 'payment', title: 'Bukti transfer pembayaran', name: detail.payment.proof_filename, path: detail.payment.proof_file }] : []),
+    ...(detail.documents || []).filter((d) => d.file_path).map((d) => ({ key: docViewKey(d), title: d.document_title, name: d.file_name, path: d.file_path })),
+    ...(detail.payment?.proof_file ? [{ key: paymentViewKey(detail.payment.proof_file), title: 'Bukti transfer pembayaran', name: detail.payment.proof_filename, path: detail.payment.proof_file }] : []),
   ] : [];
   const docsSeen = SIGNABLE_DOCS.filter((d) => visited.has(d.key)).length;
-  const filesSeen = files.filter((f) => openedFiles.has(f.key)).length;
+  const filesSeen = files.filter((f) => viewed.has(f.key)).length;
   const totalToReview = SIGNABLE_DOCS.length + files.length;
   const allReviewed = Boolean(detail) && docsSeen + filesSeen === totalToReview;
   const isFilesTab = activeDoc === FILES_TAB;
@@ -263,12 +275,12 @@ export function SignLetterModal({
                         href={fileUrl(f.path)}
                         target="_blank"
                         rel="noreferrer"
-                        onClick={() => setOpenedFiles((s) => new Set(s).add(f.key))}
+                        onClick={() => markViewed(f.key)}
                         className={`flex-shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border flex items-center gap-1 transition ${
-                          openedFiles.has(f.key) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-[#f0f9ff] text-[#0884c4] border-[#b8e6fc] hover:bg-[#dff2fd]'
+                          viewed.has(f.key) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-[#f0f9ff] text-[#0884c4] border-[#b8e6fc] hover:bg-[#dff2fd]'
                         }`}
                       >
-                        {openedFiles.has(f.key) ? <><Check className="w-3.5 h-3.5" /> Sudah dibuka</> : <><ExternalLink className="w-3.5 h-3.5" /> Buka berkas</>}
+                        {viewed.has(f.key) ? <><Check className="w-3.5 h-3.5" /> Sudah dibuka</> : <><ExternalLink className="w-3.5 h-3.5" /> Buka berkas</>}
                       </a>
                     </div>
                   ))}
@@ -293,8 +305,8 @@ export function SignLetterModal({
                 <span className="whitespace-nowrap">Ukuran TTD</span>
                 <input
                   type="range"
-                  min="0.12"
-                  max="0.45"
+                  min={SIGNATURE_MIN_W}
+                  max={SIGNATURE_MAX_W}
                   step="0.01"
                   value={pos.w}
                   onChange={(e) => {

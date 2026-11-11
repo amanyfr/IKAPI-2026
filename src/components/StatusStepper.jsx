@@ -10,19 +10,21 @@ import {
   BadgeCheck,
   PenLine,
   Truck,
-  HelpCircle
+  HelpCircle,
+  Clock
 } from 'lucide-react';
 
 // Alur: dokumen dulu (Tahap 1), baru pembayaran (Tahap 2), lalu TTD pengurus, berkas fisik,
 // pemohon mengirim berkas langsung ke IKAPI Pusat, lalu mengisi No. KTA dari Pusat
+// estimate: perkiraan lama proses tiap tahap (hari kerja), ditampilkan ke pemohon
 export const STEPS = [
-  { key: 'Draf',                    label: 'Isi Formulir',       hint: 'Formulir & unggah dokumen', icon: FileEdit },
-  { key: 'Menunggu Verifikasi',     label: 'Screening Dokumen',  hint: 'Tahap 1 · diperiksa Admin', icon: Search },
-  { key: 'Menunggu Pembayaran',     label: 'Pembayaran',         hint: 'Tahap 2 · transfer & verifikasi', icon: CreditCard },
-  { key: 'Menunggu TTD Sekretaris', label: 'TTD Sekretaris',     hint: 'Ditandatangani Sekretaris', icon: PenLine },
-  { key: 'Menunggu Approval',       label: 'TTD Ketua',          hint: 'Persetujuan Ketua', icon: Award },
-  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Kirim berkas ke IKAPI Pusat', icon: Truck },
-  { key: 'Dikirim ke Pusat',        label: 'Input KTA',          hint: 'Isi No. KTA · dicek Admin', icon: HelpCircle },
+  { key: 'Draf',                    label: 'Isi Formulir',       hint: 'Formulir & unggah dokumen', icon: FileEdit,    estimate: 'Sesuai kesiapan pemohon' },
+  { key: 'Menunggu Verifikasi',     label: 'Screening Dokumen',  hint: 'Tahap 1 · diperiksa Admin', icon: Search,       estimate: 'Maks. 2×24 jam kerja' },
+  { key: 'Menunggu Pembayaran',     label: 'Pembayaran',         hint: 'Tahap 2 · transfer & verifikasi', icon: CreditCard, estimate: 'Verifikasi maks. 1×24 jam kerja' },
+  { key: 'Menunggu TTD Sekretaris', label: 'TTD Sekretaris',     hint: 'Ditandatangani Sekretaris', icon: PenLine,      estimate: 'Maks. 2×24 jam kerja' },
+  { key: 'Menunggu Approval',       label: 'TTD Ketua',          hint: 'Persetujuan Ketua', icon: Award,                estimate: 'Maks. 2×24 jam kerja' },
+  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Kirim berkas ke IKAPI Pusat', icon: Truck,      estimate: '± 2–5 hari kerja (ekspedisi)' },
+  { key: 'Dikirim ke Pusat',        label: 'Input KTA',          hint: 'Isi No. KTA · dicek Admin', icon: HelpCircle,   estimate: 'Cek KTA maks. 2×24 jam kerja' },
   { key: 'Aktif',                   label: 'Anggota Aktif',      hint: 'KTA diverifikasi Admin', icon: BadgeCheck },
 ];
 
@@ -138,6 +140,16 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
     return (state === 'current' || state === 'waiting') && CURRENT_HINT[currentStatus] ? CURRENT_HINT[currentStatus] : step.hint;
   };
 
+  // Estimasi hanya untuk tahap yang sedang berjalan / belum dilalui
+  const showEstimate = (step, state) => Boolean(step.estimate) && !['done', 'rejected', 'stopped'].includes(state);
+  const estimateChip = (step, state, extra = '') => showEstimate(step, state) && (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium ${
+      state === 'todo' ? 'bg-slate-50 text-slate-400' : state === 'revision' || state === 'waiting' ? 'bg-amber-50 text-amber-700' : 'bg-[#eaf6fe] text-[#0884c4]'
+    } ${extra}`}>
+      <Clock className="w-3 h-3" /> {step.estimate}
+    </span>
+  );
+
   const statusText = isRejected
     ? 'Pengajuan Ditolak'
     : (currentStatus === 'Perlu Revisi' || hasDocRejection)
@@ -201,6 +213,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
               <span className={`mt-1 text-[11px] leading-snug max-w-[9rem] ${state === 'todo' || state === 'stopped' ? 'text-slate-300' : state === 'rejected' ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
                 {stepHint(step, state)}
               </span>
+              {estimateChip(step, state, 'mt-1.5 max-w-[9rem] text-center leading-tight')}
             </li>
           );
         })}
@@ -220,6 +233,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
               <div className="pt-1.5 min-w-0">
                 <p className={`text-sm font-semibold ${labelClass[state]}`}>{idx + 1}. {step.label}</p>
                 <p className={`text-xs mt-0.5 ${state === 'todo' || state === 'stopped' ? 'text-slate-300' : state === 'rejected' ? 'text-red-600 font-medium' : 'text-slate-500'}`}>{stepHint(step, state)}</p>
+                {estimateChip(step, state, 'mt-1')}
               </div>
             </li>
           );

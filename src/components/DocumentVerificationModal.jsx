@@ -10,6 +10,7 @@ import { notify } from './AppDialog';
 import { fileUrl } from '../utils/fileUrl';
 import DocumentMarker, { canMarkFile, parseMarks } from './DocumentMarker';
 import { FILTERS, NUMERIC } from '../utils/inputFilters';
+import { loadViewed, addViewed, docViewKey, paymentViewKey } from '../utils/viewedDocs';
 
 // Label cepat alasan "Tidak sesuai" (mengisi komentar, tetap bisa diubah)
 const REASON_LABELS = [
@@ -89,7 +90,8 @@ export default function DocumentVerificationModal({
     : ['Pengiriman Berkas', 'Berkas Diterima', 'Dikirim ke Pusat'].includes(status) ? 'physical' : 'documents';
   const [activeTab, setActiveTab] = useState(initialTab);
   const [activeDocId, setActiveDocId] = useState(documents[0]?.id || null);
-  const [opened, setOpened] = useState(() => new Set());   // dokumen yang sudah dibuka (pratinjau) di sesi ini
+  // Dokumen yang sudah dibuka (pratinjau); disimpan per pengguna & pengajuan agar tidak perlu dibuka ulang
+  const [opened, setOpened] = useState(() => loadViewed(submission?.id));
   const [openedAt, setOpenedAt] = useState({});             // waktu dibuka yang baru dicatat server
   const [rejecting, setRejecting] = useState(null);         // docId yang sedang diberi komentar
   const [comment, setComment] = useState('');
@@ -101,6 +103,10 @@ export default function DocumentVerificationModal({
   const [rejectingSub, setRejectingSub] = useState(false);
   const [busy, setBusy] = useState(false);
   const [central, setCentral] = useState({ courier: '', trackingNo: '', notes: '' });
+
+  useEffect(() => {
+    if (submission?.id) setOpened(loadViewed(submission.id));
+  }, [submission?.id]);
 
   useEffect(() => {
     if (isOpen && submission) {
@@ -149,7 +155,8 @@ export default function DocumentVerificationModal({
   const openDoc = (doc) => {
     setActiveDocId(doc.id);
     if (doc.file_path) {
-      setOpened((prev) => new Set(prev).add(doc.id));
+      setOpened((prev) => new Set(prev).add(docViewKey(doc)));
+      addViewed(submission.id, docViewKey(doc));
       if (!doc.opened_at) recordOpen(doc.id, `/api/documents/${doc.id}/opened`);
     }
     setRejecting(null);
@@ -157,7 +164,9 @@ export default function DocumentVerificationModal({
   };
 
   const openPayment = () => {
-    setOpened((p) => new Set(p).add('payment'));
+    const key = paymentViewKey(payment?.proof_file);
+    setOpened((p) => new Set(p).add(key));
+    addViewed(submission.id, key);
     if (!payment?.proof_opened_at) recordOpen('payment', `/api/submissions/${submission.id}/payment/opened`);
   };
 
@@ -193,7 +202,7 @@ export default function DocumentVerificationModal({
     if (next) setActiveDocId(next.id);
   });
 
-  const docsOpened = documents.every((d) => !d.file_path || opened.has(d.id) || docOpenInfo(d) || d.screening_status !== 'Menunggu');
+  const docsOpened = documents.every((d) => !d.file_path || opened.has(docViewKey(d)) || docOpenInfo(d) || d.screening_status !== 'Menunggu');
 
   const tabs = [
     { key: 'documents', icon: FileText, label: `Dokumen (${okCount}/${documents.length})` },
@@ -284,7 +293,7 @@ export default function DocumentVerificationModal({
                 </p>
                 {documents.map((doc, i) => {
                   const active = activeDoc?.id === doc.id;
-                  const seen = opened.has(doc.id);
+                  const seen = opened.has(docViewKey(doc));
                   const fresh = isFreshRevision(doc);
                   return (
                     <button
@@ -342,7 +351,7 @@ export default function DocumentVerificationModal({
 
               <div className="flex flex-col">
                 <div className="flex-1 border-b border-slate-200">
-                  {activeDoc && opened.has(activeDoc.id) ? (
+                  {activeDoc && opened.has(docViewKey(activeDoc)) ? (
                     rejecting === activeDoc.id && canMarkFile(activeDoc) ? (
                       <DocumentMarker key={`mark-${activeDoc.id}`} file={activeDoc} marks={marks} onChange={setMarks} editable />
                     ) : activeDoc.screening_status === 'Perlu Revisi' && canMarkFile(activeDoc) ? (
@@ -394,7 +403,7 @@ export default function DocumentVerificationModal({
                         </span>
                       </div>
                     )}
-                    {!opened.has(activeDoc.id) && !docOpenInfo(activeDoc) ? (
+                    {!opened.has(docViewKey(activeDoc)) && !docOpenInfo(activeDoc) ? (
                       <p className="text-xs text-slate-500 flex items-center gap-1.5"><Lock className="w-3.5 h-3.5" /> Buka dokumen dulu untuk menilai.</p>
                     ) : rejecting === activeDoc.id ? (
                       <div className="space-y-2.5">
@@ -512,7 +521,7 @@ export default function DocumentVerificationModal({
               </div>
               <div className="flex flex-col">
                 <div className="flex-1 border-b border-slate-200">
-                  {paymentFile && opened.has('payment') ? (
+                  {paymentFile && opened.has(paymentViewKey(payment?.proof_file)) ? (
                     <FilePreview file={paymentFile} />
                   ) : (
                     <div className="h-full min-h-[300px] flex flex-col items-center justify-center gap-3 p-6 text-center">
@@ -529,7 +538,7 @@ export default function DocumentVerificationModal({
                 </div>
                 {canVerifyPayment && (
                   <div className="p-4 bg-slate-50 space-y-2">
-                    {!opened.has('payment') && !paymentOpenInfo ? (
+                    {!opened.has(paymentViewKey(payment?.proof_file)) && !paymentOpenInfo ? (
                       <p className="text-xs text-slate-500 flex items-center gap-1.5"><Lock className="w-3.5 h-3.5" /> Buka bukti transfer dulu untuk memverifikasi.</p>
                     ) : payReject ? (
                       <>
