@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import NotificationBell from '../components/NotificationBell';
 import Admin1Dashboard from '../pages/Admin1Dashboard';
 import Admin1Screening from '../pages/Admin1Screening';
 import MembersManagement from '../pages/MembersManagement';
@@ -71,7 +70,6 @@ export default function Admin1Portal() {
                   <div className="text-[10px] text-sky-300 font-semibold">Sekretaris PD IKAPI Jabar</div>
                 </div>
               </div>
-              <NotificationBell tone="dark" />
               <button
                 onClick={logout}
                 aria-label="Keluar"

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import NotificationBell from '../components/NotificationBell';
 import AdminDashboard from '../pages/AdminDashboard';
 import UserManagement from '../pages/UserManagement';
 import SystemSettings from '../pages/SystemSettings';
@@ -70,7 +69,6 @@ export default function AdminPortal() {
                   <div className="text-[10px] text-blue-200 font-semibold">Administrator Sistem</div>
                 </div>
               </div>
-              <NotificationBell tone="dark" />
               <button
                 onClick={logout}
                 aria-label="Keluar"

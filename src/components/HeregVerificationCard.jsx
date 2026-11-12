@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { ShieldCheck, Clock, XCircle, RefreshCw, Edit3, IdCard, CheckCircle2 } from 'lucide-react';
+import { Clock, XCircle, RefreshCw, Edit3, IdCard, CheckCircle2 } from 'lucide-react';
 
 /**
  * Anggota lama belum boleh mengisi formulir & dokumen sebelum Admin
@@ -46,16 +46,6 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
     { label: 'Isi formulir & unggah dokumen', done: false },
   ];
 
-  // Estimasi verifikasi Admin: maks. 2×24 jam kerja (2 hari kerja, Sabtu–Minggu tidak dihitung)
-  const sentAt = user?.hereg_requested_at ? new Date(String(user.hereg_requested_at).replace(' ', 'T')) : null;
-  const dueAt = (() => {
-    if (!sentAt || Number.isNaN(sentAt.getTime())) return null;
-    const d = new Date(sentAt);
-    let left = 2;
-    while (left > 0) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) left -= 1; }
-    return d;
-  })();
-  const fmtDay = (d) => d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
     <div className="relative w-full max-w-3xl mx-auto lg:min-h-[calc(100vh-14rem)] flex items-center">
@@ -74,13 +64,11 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
             <h2 className="mt-1 text-xl sm:text-2xl font-semibold text-slate-900 tracking-tight">
               {rejected ? 'Data KTA lama ditolak Admin' : 'Menunggu verifikasi data KTA lama'}
             </h2>
-            <p className="text-sm text-slate-500 mt-1.5">
-              {rejected
-                ? 'Perbaiki Nomor KTA lama sesuai alasan di bawah, lalu kirim ulang untuk diverifikasi.'
-                : full
-                  ? 'Admin memeriksa data & bukti KTA Anda. KTA masih berlaku langsung aktif; KTA habis lanjut ke formulir perpanjangan yang sudah terisi.'
-                  : 'Admin mencocokkan Nomor KTA lama Anda dengan data keanggotaan IKAPI. Formulir registrasi & unggah dokumen terbuka setelah disetujui.'}
-            </p>
+            {rejected && (
+              <p className="text-sm text-slate-500 mt-1.5">
+                Perbaiki Nomor KTA lama sesuai alasan di bawah, lalu kirim ulang untuk diverifikasi.
+              </p>
+            )}
           </div>
         </div>
 
@@ -132,20 +120,10 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
               <div className="min-w-0 text-sm">
                 <p className="text-xs text-slate-500">Estimasi waktu verifikasi Admin</p>
                 <p className="font-semibold text-slate-900">Maks. 2×24 jam kerja</p>
-                <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  {dueAt
-                    ? <>Dikirim {fmtDay(sentAt)} · perkiraan selesai paling lambat <strong className="font-semibold text-slate-700">{fmtDay(dueAt)}</strong>. </>
-                    : null}
-                  Hari Sabtu, Minggu & libur nasional tidak dihitung. Anda akan mendapat notifikasi begitu Admin selesai memeriksa.
-                </p>
               </div>
             </div>
           )}
 
-          <p className="flex items-start gap-2 text-xs text-slate-500">
-            <ShieldCheck className="w-4 h-4 flex-shrink-0 text-[#0884c4]" />
-            Langkah ini memastikan hanya anggota yang benar-benar pernah terdaftar yang memakai jalur registrasi (perpanjangan).
-          </p>
         </div>
 
         <div className="border-t border-slate-100 px-5 sm:px-7 py-4 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5">
