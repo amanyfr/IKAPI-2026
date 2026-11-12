@@ -315,13 +315,18 @@ export function SignLetterModal({
                     <RotateCcw className="w-3.5 h-3.5" /> Reset posisi
                   </button>
                 )}
-                {isFilesTab && <p className="text-[11px] text-slate-500">Posisi TTD diatur di tab dokumen surat.</p>}
+                {/* Syarat TTD: semua dokumen surat & berkas pemohon wajib dibuka dulu */}
+                {allReviewed ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-semibold">
+                    <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" /> Semua dokumen sudah dibuka, siap TTD
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold">
+                    <Lock className="w-3.5 h-3.5 flex-shrink-0" />
+                    Buka semua dokumen dulu untuk bisa TTD ({docsSeen + filesSeen}/{detail ? totalToReview : '…'})
+                  </span>
+                )}
               </div>
-              {!allReviewed && (
-                <p className="text-[11px] text-amber-700 flex items-center gap-1">
-                  <Lock className="w-3.5 h-3.5" /> Buka semua dokumen dulu ({docsSeen + filesSeen}/{detail ? totalToReview : '…'})
-                </p>
-              )}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
