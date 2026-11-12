@@ -21,7 +21,7 @@ const SIGNER_LABEL = { chairman: 'Ketua', secretary: 'Sekretaris' };
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
-// Batas ukuran TTD (lebar relatif area tanda tangan), sama dengan slider "Ukuran TTD"
+// Batas ukuran TTD (lebar relatif area tanda tangan) saat ditarik lewat pegangan sudut
 export const SIGNATURE_MIN_W = 0.12;
 export const SIGNATURE_MAX_W = 0.45;
 

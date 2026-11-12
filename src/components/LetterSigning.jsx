@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PenLine, PenTool, CheckCircle, Check, X, Paperclip, ExternalLink, Lock } from 'lucide-react';
+import { PenLine, PenTool, CheckCircle, Check, X, Paperclip, ExternalLink, Lock, RotateCcw } from 'lucide-react';
 import SignaturePad from './SignaturePad';
 import OfficialLetterGenerator from './OfficialLetterGenerator';
 import OfficialApplicationFormPdf from './OfficialApplicationFormPdf';
 import { BeritaAcaraVerifikasi, SuratKeputusan } from './PengurusDocuments';
-import { DEFAULT_SIGNATURE_POS, SIGNABLE_DOCS, SIGNATURE_MIN_W, SIGNATURE_MAX_W } from './PengurusSignature';
+import { DEFAULT_SIGNATURE_POS, SIGNABLE_DOCS } from './PengurusSignature';
 import { notify } from './AppDialog';
 import { fileUrl } from '../utils/fileUrl';
 import { loadViewed, addViewed, docViewKey, paymentViewKey } from '../utils/viewedDocs';
@@ -19,6 +19,8 @@ const DOC_COMPONENTS = {
   berita_acara: BeritaAcaraVerifikasi,
   sk: SuratKeputusan,
 };
+
+const isDocKey = (key) => SIGNABLE_DOCS.some((d) => d.key === key);
 
 const initialPositions = (role) =>
   Object.fromEntries(SIGNABLE_DOCS.map((d) => [d.key, DEFAULT_SIGNATURE_POS[role]]));
@@ -140,7 +142,7 @@ export function MySignatureCard({ roleLabel, signature, saving, onSave }) {
 }
 
 // Pratinjau semua dokumen pengurus + pembubuhan TTD (seperti e-meterai): pindah tab per dokumen,
-// geser & atur ukuran TTD di tiap dokumen, lalu konfirmasi sekaligus.
+// geser & atur ukuran TTD sekali (berlaku di semua dokumen), lalu konfirmasi sekaligus.
 // role: 'chairman' (Ketua) | 'secretary' (Sekretaris). onConfirm menerima { [docKey]: {x, y, w} }.
 export function SignLetterModal({
   role, submission, settings, signature, savingSignature, onSaveSignature,
@@ -176,9 +178,13 @@ export function SignLetterModal({
     : submission;
   const docSettings = detail?.settings || settings;
 
-  const pos = positions[activeDoc];
+  // Posisi & ukuran TTD sama di semua dokumen: geser/ubah di satu tab, tab lain ikut
+  const pos = positions[isDocKey(activeDoc) ? activeDoc : SIGNABLE_DOCS[0].key];
   const setPos = (updater) =>
-    setPositions((all) => ({ ...all, [activeDoc]: typeof updater === 'function' ? updater(all[activeDoc]) : updater }));
+    setPositions((all) => {
+      const next = typeof updater === 'function' ? updater(pos) : updater;
+      return Object.fromEntries(Object.keys(all).map((k) => [k, next]));
+    });
 
   const openDoc = (key) => {
     setActiveDoc(key);
@@ -298,28 +304,19 @@ export function SignLetterModal({
             </div>
 
             <div className="border-t border-slate-200 bg-white px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
-              {isFilesTab ? (
-                <p className="flex-1 text-xs text-slate-500">Posisi TTD diatur di tab dokumen surat.</p>
-              ) : (
-              <label className="flex items-center gap-3 text-xs text-slate-600 flex-1">
-                <span className="whitespace-nowrap">Ukuran TTD</span>
-                <input
-                  type="range"
-                  min={SIGNATURE_MIN_W}
-                  max={SIGNATURE_MAX_W}
-                  step="0.01"
-                  value={pos.w}
-                  onChange={(e) => {
-                    const w = Number(e.target.value);
-                    setPos((p) => ({ ...p, w, x: Math.min(1 - w / 2, Math.max(w / 2, p.x)) }));
-                  }}
-                  className="w-full sm:max-w-[200px] accent-blue-600"
-                />
-                <button type="button" onClick={() => setPos(DEFAULT_SIGNATURE_POS[role])} className="text-blue-600 hover:underline whitespace-nowrap">
-                  Reset posisi
-                </button>
-              </label>
-              )}
+              {/* Ukuran diatur lewat titik biru di sudut TTD; posisi & ukuran berlaku untuk semua dokumen */}
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                {!isFilesTab && (
+                  <button
+                    type="button"
+                    onClick={() => setPos(DEFAULT_SIGNATURE_POS[role])}
+                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Reset posisi
+                  </button>
+                )}
+                {isFilesTab && <p className="text-[11px] text-slate-500">Posisi TTD diatur di tab dokumen surat.</p>}
+              </div>
               {!allReviewed && (
                 <p className="text-[11px] text-amber-700 flex items-center gap-1">
                   <Lock className="w-3.5 h-3.5" /> Buka semua dokumen dulu ({docsSeen + filesSeen}/{detail ? totalToReview : '…'})
