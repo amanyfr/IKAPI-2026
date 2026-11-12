@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import StatusStepper, { POST_APPROVAL_STATUSES } from '../components/StatusStepper';
@@ -7,8 +7,7 @@ import { centralAddressLines } from '../utils/centralAddress';
 import ModalFrame from '../components/ModalFrame';
 import ActiveMemberDashboard from '../components/ActiveMemberDashboard';
 import ProfileEditModal from '../components/ProfileEditModal';
-import HeregVerificationCard from '../components/HeregVerificationCard';
-import HeregMigrationForm from '../components/HeregMigrationForm';
+import HeregMigrationForm, { HeregApplyPage } from '../components/HeregMigrationForm';
 import SubmissionTimeline from '../components/SubmissionTimeline';
 import PaymentInvoice, { downloadInvoicePdf, invoiceNumber, isInvoicePaid } from '../components/PaymentInvoice';
 import { feesFromSettings, formatRupiah } from '../utils/fees';
@@ -137,8 +136,11 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   });
   const [submittingPay, setSubmittingPay] = useState(false);
 
+  // Spinner layar penuh hanya saat pemuatan pertama; pemuatan ulang berikutnya (mis. data akun
+  // diperbarui oleh polling) berjalan senyap agar halaman tidak berkedip
+  const loadedOnce = useRef(false);
   const loadSubmissions = async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const res  = await fetch('/api/submissions', { headers: { Authorization: `Bearer ${token()}` } });
       const data = await res.json();
@@ -151,7 +153,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         setDetailData(null);
       }
     } catch (e) { console.error(e); }
-    finally    { setLoading(false); }
+    finally    { loadedOnce.current = true; setLoading(false); }
   };
 
   const loadDetail = async (id) => {
@@ -392,9 +394,9 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
      (jenis & kategori dipilih di pertanyaan awal; bisa diubah lewat "Ubah jawaban")
      ══════════════════════════════════════════════════════════ */
   if (submissions.length === 0) {
-    // Anggota lama: formulir & dokumen terkunci sampai Admin menyetujui data KTA lama
+    // Anggota lama: isi KTA + data keanggotaan dulu, terkunci sampai Admin memvalidasi
     if (defaultType === 'Heregistrasi' && user?.hereg_status !== 'Disetujui') {
-      return <HeregVerificationCard onEditProfile={onEditProfile} />;
+      return <HeregApplyPage onEditProfile={onEditProfile} />;
     }
     // Jalur "masih aktif" (dipilih Admin): tanpa formulir & bayar, cukup lengkapi data keanggotaan
     if (defaultType === 'Heregistrasi' && user?.hereg_track === 'Masih Aktif') {
@@ -411,7 +413,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
       <p className="text-xs sm:text-sm text-slate-500">
         Anda terdaftar sebagai <strong className="font-medium text-slate-700">{typeText}</strong> kategori{' '}
         <strong className="font-medium text-slate-700">{isLB ? 'Anggota Luar Biasa' : 'Anggota Biasa'}</strong>, jadi pengajuan Anda adalah {subText}.{' '}
-        {onEditProfile && (
+        {/* Anggota lama yang formulir KTA-nya sudah divalidasi Admin tidak bisa mengubah jawaban lagi */}
+        {onEditProfile && pickType !== 'Heregistrasi' && (
           <button type="button" onClick={onEditProfile} className="text-[#0884c4] hover:underline font-semibold">
             Salah pilih? Ubah jawaban
           </button>

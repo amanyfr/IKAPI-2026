@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import DocumentVerificationModal from '../components/DocumentVerificationModal';
 import CentralPacketExporter from '../components/CentralPacketExporter';
@@ -94,8 +94,10 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     }
   };
 
+  // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
+  const loadedOnce = useRef(false);
   const fetchSubmissions = async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const queryParams = new URLSearchParams();
       if (filterStatus !== 'Semua') queryParams.append('status', filterStatus);
@@ -111,6 +113,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     } catch (err) {
       console.error('Failed to load submissions:', err);
     } finally {
+      loadedOnce.current = true;
       setLoading(false);
     }
   };
@@ -277,25 +280,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     : status === 'Menunggu Verifikasi' ? 'bg-sky-100 text-[#0884c4] border border-sky-200'
     : 'bg-slate-100 text-slate-700 border border-slate-200';
 
-  // Keterangan singkat apa yang sedang ditunggu pada setiap pengajuan
-  const waitingText = (sub) => {
-    if (sub.status === 'Menunggu Pembayaran') return sub.payment_status === 'Perlu Revisi' ? 'Bukti transfer dikembalikan' : 'Menunggu pembayaran pemohon';
-    if (sub.status === 'Pengiriman Berkas') return 'Pemohon mengirim berkas fisik ke IKAPI Pusat';
-    if (sub.status === 'Dikirim ke Pusat') {
-      if (sub.kta_review_status === 'Menunggu') return 'Data KTA masuk · perlu diverifikasi';
-      if (sub.kta_review_status === 'Ditolak') return 'KTA ditolak · menunggu perbaikan pemohon';
-      return 'Menunggu pemohon isi data KTA';
-    }
-    if (sub.status === 'Perlu Revisi') {
-      const fresh = Number(sub.fresh_revision_count) || 0;
-      return fresh > 0
-        ? `${fresh} berkas revisi masuk · siap di-screening`
-        : `Menunggu revisi ke-${sub.revision_round || 1} dari pemohon`;
-    }
-    if (sub.status === 'Menunggu Verifikasi' && sub.revision_round > 0) return `Hasil revisi ke-${sub.revision_round} masuk`;
-    return null;
-  };
-
   // Tombol utama sesuai tugas peran pada tahap ini
   const primaryLabel = (sub) => {
     if (isAdmin && sub.status === 'Menunggu Verifikasi') return Number(sub.revision_round) > 0 ? `Screening revisi ke-${sub.revision_round}` : 'Screening dokumen';
@@ -315,7 +299,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
         {readyToSign && (
           <button
             onClick={() => startSignScreened(sub)}
-            className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow transition flex items-center gap-1"
+            className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border border-transparent rounded-lg text-xs font-semibold shadow-sm whitespace-nowrap transition inline-flex items-center gap-1"
             title="Bubuhkan TTD Sekretaris & teruskan ke Ketua"
           >
             <PenTool className="w-3.5 h-3.5" />
@@ -327,7 +311,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
         {isAdmin && sub.status === 'Dikirim ke Pusat' && sub.kta_review_status === 'Menunggu' && (
           <button
             onClick={() => openKtaReview(sub)}
-            className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold shadow transition flex items-center gap-1"
+            className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white border border-transparent rounded-lg text-xs font-semibold shadow-sm whitespace-nowrap transition inline-flex items-center gap-1"
             title="Cek data KTA dari pemohon, lalu setujui atau tolak"
           >
             <BadgeCheck className="w-3.5 h-3.5" />
@@ -338,10 +322,10 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
         {/* Semua peran bisa membuka dokumen, bukti transfer & riwayat; aksi hanya untuk peran yang bertugas */}
         <button
           onClick={() => openVerificationModal(sub.id)}
-          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1 ${
+          className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold whitespace-nowrap transition inline-flex items-center gap-1 ${
             primary
-              ? 'bg-[#0da2e7] hover:bg-[#0884c4] text-white shadow'
-              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+              ? 'bg-[#0da2e7] hover:bg-[#0884c4] text-white border-transparent shadow-sm'
+              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
           }`}
           title="Dokumen, pembayaran & riwayat alur berkas"
         >
@@ -353,7 +337,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
         {isApproved && (
           <button
             onClick={() => openPacketModal(sub.id)}
-            className="px-2.5 py-1.5 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] rounded-lg text-xs font-bold transition flex items-center gap-1"
+            className="px-2.5 py-1.5 bg-[#f0f9ff] hover:bg-[#dff2fd] text-[#0884c4] border border-[#b8e6fc] rounded-lg text-xs font-semibold whitespace-nowrap transition inline-flex items-center gap-1"
             title="Lihat Paket Dokumen"
           >
             <FileText className="w-3.5 h-3.5" />
@@ -379,11 +363,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
             <h2 className="text-2xl font-light tracking-tight text-slate-900">
               {isAdmin ? 'Screening Dokumen, Pembayaran & KTA' : 'Pengajuan & Tanda Tangan Sekretaris'}
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {isAdmin
-                ? 'Tahap 1: periksa setiap dokumen. Tahap 2: verifikasi bukti transfer. Setelah TTD Sekretaris & Ketua, pemohon mengirim berkas ke IKAPI Pusat lalu mengisi No. KTA untuk diverifikasi.'
-                : 'Pengajuan yang dokumen & pembayarannya sudah disetujui Admin tinggal ditandatangani. Semua dokumen & bukti transfer bisa dilihat.'}
-            </p>
           </div>
         </div>
 
@@ -495,9 +474,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           <span className="text-xs font-bold text-slate-700">
             Daftar Pengajuan ({submissions.length})
           </span>
-          <span className="hidden sm:inline text-[11px] text-slate-500">
-            Klik tombol aksi untuk membuka dokumen, bukti transfer & riwayat
-          </span>
         </div>
 
         {/* ── HP: daftar kartu ── */}
@@ -530,7 +506,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                         </span>
                       )}
                     </span>
-                    {waitingText(sub) && <span className="text-[10px] font-medium text-slate-500">{waitingText(sub)}</span>}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -630,11 +605,10 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                           </span>
                         )}
                       </div>
-                      {waitingText(sub) && <span className="block mt-1 text-[10px] font-medium text-slate-500">{waitingText(sub)}</span>}
                     </td>
 
                     <td className="py-3.5 px-4">
-                      <div className="font-semibold text-slate-900">
+                      <div className="font-semibold text-slate-900 whitespace-nowrap">
                         Rp {sub.payment_amount ? sub.payment_amount.toLocaleString('id-ID') : '-'}
                       </div>
                       <span className={`text-[10px] font-bold ${sub.payment_status === 'Valid' ? 'text-emerald-700' : 'text-amber-700'
@@ -644,7 +618,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                     </td>
 
                     <td className="py-3.5 px-4 text-center">
-                      <div className="flex items-center justify-center space-x-1.5">
+                      <div className="flex items-center justify-center gap-1.5">
                         {renderActions(sub)}
                       </div>
                     </td>

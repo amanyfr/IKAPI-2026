@@ -100,7 +100,7 @@ export default function Admin2Portal() {
             scrollToMonitoring={approvalFilters.scroll}
           />
         )}
-        {/* Sesuai PRD, No. KTA diisi pemohon & diverifikasi Sekretaris — Ketua hanya melihat direktori */}
+        {/* Sesuai PRD, No. KTA diisi pemohon & divalidasi Admin — Ketua hanya melihat direktori */}
         {activeTab === 'members'   && <MembersManagement canEditKta={false} />}
       </main>
 

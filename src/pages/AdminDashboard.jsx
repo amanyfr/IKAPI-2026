@@ -12,13 +12,16 @@ import {
   ShieldCheck, CreditCard, BadgeCheck, Activity
 } from 'lucide-react';
 
-const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota'];
+// Akun peran Anggota yang belum aktif dihitung sebagai Pemohon
+const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota', 'Pemohon'];
+const groupOf = (u) => (u.role === 'Anggota' && !u.membership ? 'Pemohon' : u.role);
 
 const ROLE_STYLE = {
   Admin:      { dot: 'bg-blue-800',   bar: 'bg-blue-800 text-white',   chip: 'bg-blue-100 text-blue-900 ring-1 ring-blue-200' },
   Sekretaris: { dot: 'bg-[#0da2e7]',   bar: 'bg-[#0da2e7] text-white',   chip: 'bg-sky-100 text-[#0884c4] ring-1 ring-sky-200' },
   Ketua:      { dot: 'bg-indigo-600',  bar: 'bg-indigo-600 text-white',  chip: 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200' },
   Anggota:    { dot: 'bg-emerald-500', bar: 'bg-white text-slate-800 ring-1 ring-slate-200', chip: 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200' },
+  Pemohon:    { dot: 'bg-amber-400',   bar: 'bg-white text-slate-800 ring-1 ring-slate-200', chip: 'bg-amber-100 text-amber-800 ring-1 ring-amber-200' },
 };
 
 // Grafik: akun baru (tabel pengguna) dan pengajuan masuk, dalam satu daftar gabungan
@@ -83,7 +86,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   }, []);
 
   const total = users.length;
-  const byRole = Object.fromEntries(ROLES.map((r) => [r, users.filter((u) => u.role === r).length]));
+  const byRole = Object.fromEntries(ROLES.map((r) => [r, users.filter((u) => groupOf(u) === r).length]));
   const monthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const newAccounts = users.filter((u) => (parseDate(u.created_at)?.getTime() || 0) >= monthAgo).length;
   const notOnboarded = users.filter((u) => u.role === 'Anggota' && !u.onboarded_at).length;

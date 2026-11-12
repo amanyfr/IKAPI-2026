@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Users, UserPlus, Search, Pencil, X, AlertCircle, RefreshCw } from 'lucide-react';
+import { Users, UserPlus, Search, Pencil, X, AlertCircle, RefreshCw, CalendarClock } from 'lucide-react';
 import { FILTERS, PHONE } from '../utils/inputFilters';
 
 const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota'];
@@ -10,7 +10,19 @@ const ROLE_BADGE = {
   Sekretaris: 'bg-sky-50 text-[#0884c4] border-sky-200',
   Ketua:      'bg-indigo-50 text-indigo-700 border-indigo-200',
   Anggota:    'bg-emerald-50 text-emerald-700 border-emerald-200',
+  Pemohon:    'bg-amber-50 text-amber-700 border-amber-200',
 };
+
+// Akun peran Anggota baru disebut "Anggota" bila keanggotaannya sudah aktif; selain itu "Pemohon"
+const GROUPS = ['Admin', 'Sekretaris', 'Ketua', 'Anggota', 'Pemohon'];
+const GROUP_DESC = {
+  Admin:      'Kelola akun & pengaturan sistem',
+  Sekretaris: 'Screening berkas, verifikasi pembayaran & No. KTA',
+  Ketua:      'Approval pengajuan & tanda tangan surat',
+  Anggota:    'Penerbit dengan keanggotaan aktif',
+  Pemohon:    'Penerbit yang belum aktif (belum/sedang mengajukan)',
+};
+const groupOf = (u) => (u.role === 'Anggota' && !u.membership ? 'Pemohon' : u.role);
 
 const ROLE_DESC = {
   Admin:      'Kelola akun & pengaturan sistem',
@@ -30,8 +42,13 @@ const authHeaders = () => ({
 const memberInfo = (u) => {
   if (u.role !== 'Anggota') return null;
   if (!u.onboarded_at) return 'Belum menjawab pertanyaan awal';
-  return `Anggota ${u.member_type?.toLowerCase()} · ${u.member_category}`;
+  const type = u.member_type === 'Lama' ? 'anggota lama' : 'anggota baru';
+  return u.membership ? `Anggota ${u.member_type?.toLowerCase()} · ${u.member_category}` : `Mendaftar sebagai ${type} · ${u.member_category}`;
 };
+
+// Tanggal 'YYYY-MM-DD' -> '1 Jun 2027'
+const fmtDay = (v) => (v ? new Date(v + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-');
+const periodText = (m) => `Masa aktif s.d. ${fmtDay(m.end)} · ${m.left > 0 ? `${m.left} hari lagi` : 'sudah berakhir'}`;
 
 export default function UserManagement({ initialRole = 'Semua', initialSearch = '', startWithCreate = false }) {
   const { user: me } = useAuth();
@@ -45,8 +62,10 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
+  // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
+  const loadedOnce = useRef(false);
   const loadUsers = async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const res = await fetch('/api/admin/users', { headers: authHeaders() });
       const data = await res.json();
@@ -54,6 +73,7 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
     } catch (err) {
       console.error('Failed to load users:', err);
     } finally {
+      loadedOnce.current = true;
       setLoading(false);
     }
   };
@@ -61,14 +81,14 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
   useEffect(() => { loadUsers(); }, []);
 
   const counts = useMemo(
-    () => Object.fromEntries(ROLES.map((r) => [r, users.filter((u) => u.role === r).length])),
+    () => Object.fromEntries(GROUPS.map((r) => [r, users.filter((u) => groupOf(u) === r).length])),
     [users]
   );
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return users.filter((u) =>
-      (roleFilter === 'Semua' || u.role === roleFilter) &&
+      (roleFilter === 'Semua' || groupOf(u) === roleFilter) &&
       (!q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
     );
   }, [users, search, roleFilter]);
@@ -77,9 +97,39 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
   const openEdit = (u) => {
     setEditing(u);
     setForm({ name: u.name, email: u.email, phone: u.phone || '', role: u.role, password: '' });
+    setPeriod(u.membership ? { start: u.membership.start, end: u.membership.end } : null);
+    setPeriodMsg(null);
     setError('');
   };
-  const closeModal = () => { setEditing(null); setError(''); setConfirmDelete(false); };
+  const closeModal = () => { setEditing(null); setError(''); setConfirmDelete(false); setPeriod(null); setPeriodMsg(null); };
+
+  // Masa aktif keanggotaan (khusus anggota aktif), disimpan terpisah dari data akun
+  const [period, setPeriod] = useState(null);
+  const [periodMsg, setPeriodMsg] = useState(null); // { ok, text }
+  const [savingPeriod, setSavingPeriod] = useState(false);
+  const periodChanged = period && editing?.membership
+    && (period.start !== editing.membership.start || period.end !== editing.membership.end);
+  const savePeriod = async () => {
+    if (!period?.start || !period?.end) { setPeriodMsg({ ok: false, text: 'Isi tanggal mulai & berakhir.' }); return; }
+    if (period.end <= period.start) { setPeriodMsg({ ok: false, text: 'Tanggal berakhir harus setelah tanggal mulai.' }); return; }
+    setSavingPeriod(true);
+    setPeriodMsg(null);
+    try {
+      const res = await fetch(`/api/admin/users/${editing.id}/membership`, {
+        method: 'PUT', headers: authHeaders(),
+        body: JSON.stringify({ issuedAt: period.start, validUntil: period.end }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Gagal mengubah masa aktif.');
+      setPeriodMsg({ ok: true, text: data.message });
+      setEditing((e) => ({ ...e, membership: { ...e.membership, start: period.start, end: period.end } }));
+      loadUsers();
+    } catch (err) {
+      setPeriodMsg({ ok: false, text: err.message });
+    } finally {
+      setSavingPeriod(false);
+    }
+  };
 
   // Klik pertama meminta konfirmasi, klik kedua menghapus
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -142,7 +192,6 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
           </div>
           <div>
             <h2 className="text-2xl font-light tracking-tight text-slate-900">Kelola Akun Pengguna</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Tambah akun dan atur peran Admin, Sekretaris, Ketua, atau Anggota.</p>
           </div>
         </div>
         <button
@@ -163,8 +212,8 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
       )}
 
       {/* Jumlah per peran (klik untuk memfilter) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {ROLES.map((r) => (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {GROUPS.map((r) => (
           <button
             key={r}
             onClick={() => setRoleFilter(roleFilter === r ? 'Semua' : r)}
@@ -172,7 +221,7 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
           >
             <span className={`inline-block text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${ROLE_BADGE[r]}`}>{r}</span>
             <div className="text-2xl font-extrabold text-slate-900 mt-2">{counts[r] ?? 0}</div>
-            <div className="text-[11px] text-slate-500 leading-snug">{ROLE_DESC[r]}</div>
+            <div className="text-[11px] text-slate-500 leading-snug">{GROUP_DESC[r]}</div>
           </button>
         ))}
       </div>
@@ -192,7 +241,7 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
           <div className="flex gap-2">
             <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label="Filter peran" className={`${field} sm:w-44`}>
               <option value="Semua">Semua peran</option>
-              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+              {GROUPS.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
             <button onClick={loadUsers} title="Muat ulang" className="p-2.5 border border-slate-200 hover:bg-slate-50 rounded-xl text-slate-600 transition">
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -220,9 +269,20 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
                   {memberInfo(u) && (
                     <div className={`text-[11px] mt-0.5 ${u.onboarded_at ? 'text-slate-500' : 'text-blue-700'}`}>{memberInfo(u)}</div>
                   )}
+                  {u.role === 'Anggota' && u.onboarded_at && !u.membership && (
+                    <div className="text-[11px] mt-0.5 flex items-center gap-1 text-slate-400">
+                      <CalendarClock className="w-3 h-3 flex-shrink-0" />
+                      Belum ada masa aktif · {u.submission_status ? `pengajuan ${u.submission_status.toLowerCase()}` : 'belum mengirim pengajuan'}
+                    </div>
+                  )}
+                  {u.membership && (
+                    <div className={`text-[11px] mt-0.5 flex items-center gap-1 ${u.membership.left > 30 ? 'text-emerald-700' : u.membership.left > 0 ? 'text-amber-700' : 'text-red-600'}`}>
+                      <CalendarClock className="w-3 h-3 flex-shrink-0" /> {periodText(u.membership)}
+                    </div>
+                  )}
                 </div>
-                <span className={`hidden sm:inline-block flex-shrink-0 text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>
-                  {u.role}
+                <span className={`hidden sm:inline-block flex-shrink-0 text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${ROLE_BADGE[groupOf(u)]}`}>
+                  {groupOf(u)}
                 </span>
                 <button
                   onClick={() => openEdit(u)}
@@ -287,6 +347,49 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
                 />
               </div>
             </div>
+
+            {!isNew && editing.role === 'Anggota' && !editing.membership && (
+              <p className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-500">
+                <CalendarClock className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                Masa aktif bisa diubah setelah akun ini menjadi anggota aktif
+                {editing.submission_status ? ` (pengajuan saat ini: ${editing.submission_status}).` : ' (belum mengirim pengajuan).'}
+              </p>
+            )}
+
+            {!isNew && editing.membership && period && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <CalendarClock className="w-4 h-4 text-[#0884c4] flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800">Masa aktif keanggotaan</p>
+                    <p className="text-[11px] text-slate-500">
+                      Saat ini {fmtDay(editing.membership.start)} s.d. {fmtDay(editing.membership.end)}. Anggota mendapat notifikasi bila diubah.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 block mb-1">Mulai</label>
+                    <input type="date" value={period.start} max={period.end || undefined}
+                      onChange={(e) => { setPeriod({ ...period, start: e.target.value }); setPeriodMsg(null); }} className={field} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 block mb-1">Berakhir</label>
+                    <input type="date" value={period.end} min={period.start || undefined}
+                      onChange={(e) => { setPeriod({ ...period, end: e.target.value }); setPeriodMsg(null); }} className={field} />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {periodMsg && (
+                    <span className={`mr-auto text-xs ${periodMsg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{periodMsg.text}</span>
+                  )}
+                  <button type="button" onClick={savePeriod} disabled={savingPeriod || !periodChanged}
+                    className="px-4 py-2 bg-white border border-sky-200 text-[#0884c4] hover:bg-sky-50 disabled:opacity-50 text-xs font-bold rounded-lg transition">
+                    {savingPeriod ? 'Menyimpan...' : 'Simpan masa aktif'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {error && (
               <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">

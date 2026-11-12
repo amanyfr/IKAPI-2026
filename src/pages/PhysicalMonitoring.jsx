@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import DocumentVerificationModal from '../components/DocumentVerificationModal';
 import { STEPS, STATUS_LABEL } from '../components/StatusStepper';
@@ -80,8 +80,10 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
   const [rejectNote, setRejectNote] = useState('');
   const [reviewing, setReviewing] = useState(null);
 
+  // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
+  const loadedOnce = useRef(false);
   const load = async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const res = await fetch('/api/submissions', { headers: { Authorization: `Bearer ${token()}` } });
       const data = await res.json();
@@ -89,6 +91,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
     } catch (err) {
       console.error('Gagal memuat monitoring:', err);
     } finally {
+      loadedOnce.current = true;
       setLoading(false);
     }
   };
@@ -223,9 +226,6 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
             </div>
             <div className="min-w-0">
               <h2 className="text-2xl sm:text-3xl font-light tracking-tight">Monitoring Berkas Fisik</h2>
-              <p className="text-sm text-sky-100 mt-1 max-w-xl">
-                Pantau pengajuan sejak pemohon mengirim berkas fisik ke IKAPI Pusat, mengisi No. KTA, sampai Admin memverifikasinya dan keanggotaan aktif.
-              </p>
             </div>
           </div>
           <button onClick={load}
@@ -257,7 +257,6 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
       <div className="card-surface overflow-hidden p-5 sm:p-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
           <h3 className="text-base font-medium text-slate-800">Alur pendaftaran</h3>
-          <p className="text-xs text-slate-400">Klik tahap untuk membuka daftarnya</p>
         </div>
         <div className="-mx-5 sm:mx-0 px-5 sm:px-0 overflow-x-auto pb-1">
           <div className={`min-w-[760px] grid ${hasLegacy ? 'grid-cols-9' : 'grid-cols-8'}`}>

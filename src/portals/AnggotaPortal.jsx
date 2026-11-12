@@ -6,6 +6,38 @@ import RegistrationForm from '../pages/RegistrationForm';
 import OnboardingPage from '../pages/OnboardingPage';
 import { LogOut, User } from 'lucide-react';
 
+// Badan usaha di form anggota lama -> pilihan formulir registrasi
+const LEGAL_MAP = {
+  PT: 'Perseroan Terbatas (PT)',
+  CV: 'Commanditaire Vennootschap (CV)',
+  'Perguruan Tinggi': 'Perguruan Tinggi (University Press)',
+  Yayasan: 'Yayasan / Lembaga Pendidikan',
+  Lainnya: 'Koperasi / Badan Hukum Lainnya',
+};
+
+/** Data KTA & keanggotaan yang dikirim anggota lama -> isian awal formulir perpanjangan */
+function formFromHeregData(d = {}) {
+  const pick = (v) => (v ? String(v) : undefined);
+  const out = {
+    oldKtaNumber: pick(d.ktaNumber),
+    publisherName: pick(d.publisherName),
+    legalEntity: LEGAL_MAP[d.legalEntity],
+    nib: pick(d.nib),
+    address: pick(d.address),
+    city: pick(d.city),
+    postalCode: pick(d.postalCode),
+    phone: pick(d.phone),
+    email: pick(d.email),
+    website: pick(d.website),
+    leaderName: pick(d.leaderName),
+    leaderTitle: pick(d.leaderTitle),
+    leaderPhone: pick(d.leaderPhone),
+    personInCharge: pick(d.personInCharge),
+  };
+  Object.keys(out).forEach((k) => out[k] === undefined && delete out[k]);
+  return out;
+}
+
 export default function AnggotaPortal() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -46,7 +78,14 @@ export default function AnggotaPortal() {
     // Satu akun = satu pengajuan; jenisnya selalu mengikuti profil
     setInitSubType(profileType);
     setInitCategory(opts?.category || profileCategory);
-    setEditingDraft(null);
+    // Anggota lama jalur perpanjangan: formulir terisi dari data KTA & keanggotaan yang sudah divalidasi
+    const d = user?.hereg_mig_data;
+    if (user?.member_type === 'Lama' && user?.hereg_track === 'Perpanjangan' && d?.ktaNumber) {
+      const kta = user.old_kta_number || d.ktaNumber;
+      setEditingDraft({ id: null, form_data: { ...formFromHeregData(d), oldKtaNumber: kta }, submission_type: 'Heregistrasi', old_kta_number: kta, member_category: opts?.category || profileCategory });
+    } else {
+      setEditingDraft(null);
+    }
     setActiveTab('form');
   };
 

@@ -91,7 +91,9 @@ export function AuthProvider({ children }) {
   };
 
   // Perbarui data pengguna di memori (mis. setelah menjawab pertanyaan login pertama)
-  const updateUser = (nextUser) => setUser(nextUser);
+  // Data sama persis (mis. hasil polling /me) tidak memicu render ulang, supaya halaman tidak berkedip
+  const updateUser = (nextUser) =>
+    setUser((prev) => (prev && nextUser && JSON.stringify(prev) === JSON.stringify(nextUser) ? prev : nextUser));
 
   // Logout
   const logout = () => {

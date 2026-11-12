@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Users, Search, Download, Building2, Phone, Mail, MapPin, RefreshCw,
   X, ChevronRight
@@ -54,8 +54,10 @@ export default function MembersManagement({ canEditKta = true, initialStatus = '
   const [selectedMember, setSelectedMember] = useState(null);
 
   // Semua anggota dimuat sekali; pencarian & filter dilakukan di sini agar jumlah per status tetap terlihat
+  // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
+  const loadedOnce = useRef(false);
   const fetchMembers = async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const res = await fetch('/api/members', {
         headers: { Authorization: `Bearer ${token()}` }
@@ -65,6 +67,7 @@ export default function MembersManagement({ canEditKta = true, initialStatus = '
     } catch (err) {
       console.error('Failed to load members:', err);
     } finally {
+      loadedOnce.current = true;
       setLoading(false);
     }
   };
@@ -145,11 +148,6 @@ export default function MembersManagement({ canEditKta = true, initialStatus = '
             <h2 className="text-2xl font-light tracking-tight text-slate-900">
               Direktori anggota <span className="text-slate-400">{members.length}</span>
             </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              {canEditKta
-                ? 'Penerbit terdaftar di IKAPI Jawa Barat. Klik baris untuk detail. No. KTA diisi pemohon dan divalidasi Admin.'
-                : 'Penerbit terdaftar di IKAPI Jawa Barat. Klik baris untuk melihat detail.'}
-            </p>
           </div>
           <div className="flex items-center gap-2">
             <button

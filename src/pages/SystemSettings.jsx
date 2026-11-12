@@ -174,9 +174,6 @@ export default function SystemSettings() {
             <h2 className="text-2xl font-light tracking-tight text-slate-900">
               Pengaturan Sistem, Biaya, Template Surat & TTD Resmi
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Kelola biaya pendaftaran, informasi rekening resmi, template surat pengantar, serta unggah tanda tangan & stempel.
-            </p>
           </div>
         </div>
       </div>

@@ -50,12 +50,11 @@ export default function OnboardingPage({ onBack, onDone }) {
   const [memberType, setMemberType] = useState(onBack ? user?.member_type || '' : '');
   // Default anggota biasa; anggota luar biasa hanya opsi tambahan
   const [category, setCategory] = useState(onBack ? user?.member_category || 'Biasa' : 'Biasa');
-  const [oldKtaNumber, setOldKtaNumber] = useState(onBack ? user?.old_kta_number || '' : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // Anggota lama wajib menyebut Nomor KTA lama (diverifikasi Admin sebelum formulir dibuka)
-  const canSubmit = memberType && category && !saving && (memberType !== 'Lama' || oldKtaNumber.trim());
+  // Nomor KTA lama diisi di formulir anggota lama, bukan di sini
+  const canSubmit = memberType && category && !saving;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -69,7 +68,7 @@ export default function OnboardingPage({ onBack, onDone }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('ikapi_token')}`
         },
-        body: JSON.stringify({ memberType, category, oldKtaNumber })
+        body: JSON.stringify({ memberType, category })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Gagal menyimpan jawaban.');
@@ -137,22 +136,6 @@ export default function OnboardingPage({ onBack, onDone }) {
                 <OptionCard key={o.id} option={o} active={memberType === o.id} onSelect={setMemberType} />
               ))}
             </div>
-            {memberType === 'Lama' && (
-              <div className="panel-inner p-3.5">
-                <label htmlFor="old-kta" className="text-sm font-semibold text-slate-700 block mb-1.5">
-                  Nomor KTA lama <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="old-kta"
-                  value={oldKtaNumber}
-                  onChange={(e) => setOldKtaNumber(e.target.value)}
-                  placeholder="Contoh: 008/JBR/2024"
-                  className="soft-input focus:!border-[#0884c4] focus:!ring-sky-100"
-                  required
-                />
-                <p className="text-xs text-slate-500 mt-1.5">Admin memverifikasi nomor ini dulu. Formulir & dokumen registrasi terbuka setelah disetujui.</p>
-              </div>
-            )}
           </fieldset>
 
           <fieldset className="space-y-2.5">

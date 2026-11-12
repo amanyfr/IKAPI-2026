@@ -87,7 +87,7 @@ export default function Admin1Portal() {
             <div className="inline-flex gap-1 p-1 rounded-full bg-white/10 border border-white/15">
               {navBtn('dashboard', <LayoutDashboard className="w-4 h-4" />, 'Dashboard')}
               {navBtn('screening', <ShieldCheck className="w-4 h-4" />, 'Pengajuan & Screening', 'Screening')}
-              {navBtn('members', <Users className="w-4 h-4" />, 'Data Anggota & No. KTA', 'Anggota')}
+              {navBtn('members', <Users className="w-4 h-4" />, 'Data Anggota', 'Anggota')}
             </div>
           </div>
         </div>

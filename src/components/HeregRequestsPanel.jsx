@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   RefreshCw, UserCheck, XCircle, CheckCircle, X, AlertTriangle, BadgeCheck, RotateCcw, ShieldCheck, FileText, CalendarClock,
 } from 'lucide-react';
@@ -18,12 +18,12 @@ const TRACKS = [
   {
     key: 'Perpanjangan',
     title: 'Perpanjangan (heregistrasi)',
-    desc: 'KTA sudah/akan habis. Pemohon mengisi formulir, unggah dokumen, bayar iuran, lalu diproses seperti biasa.',
+    desc: 'KTA sudah/akan habis. Pemohon mengisi formulir (data terisi otomatis), unggah dokumen, bayar iuran, lalu diproses seperti biasa.',
   },
   {
     key: 'Masih Aktif',
     title: 'Masih aktif · pindah dari data manual',
-    desc: 'KTA masih berlaku. Pemohon langsung ke dashboard, mengisi data keanggotaan, lalu Admin memvalidasi masa aktifnya.',
+    desc: 'KTA masih berlaku. Pemohon langsung jadi Anggota Aktif dengan masa aktif sesuai KTA.',
   },
 ];
 
@@ -81,8 +81,10 @@ export default function HeregRequestsPanel() {
   const tracks = TRACKS.filter((t) => enabled.includes(t.key));
   const renewOn = enabled.includes('Perpanjangan');
 
+  // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
+  const loadedOnce = useRef(false);
   const load = async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const [r1, r2, r3] = await Promise.all([
         fetch('/api/admin/hereg-requests', { headers: authHeader() }),
@@ -97,6 +99,7 @@ export default function HeregRequestsPanel() {
     } catch (err) {
       console.error('Gagal memuat antrean anggota lama:', err);
     } finally {
+      loadedOnce.current = true;
       setLoading(false);
     }
   };
@@ -105,7 +108,11 @@ export default function HeregRequestsPanel() {
 
   const open = (item) => {
     setReview(item); setMode(null); setNote('');
-    const guess = item.kta_matches?.some((m) => m.membership_status === 'Aktif') ? 'Masih Aktif' : 'Perpanjangan';
+    // Form gabungan: saran jalur dari masa berlaku KTA; pengajuan lama: dari data anggota yang cocok
+    const vu = item.hereg_mig_data?.validUntil;
+    const guess = item.hereg_mig_data?.ktaNumber
+      ? (daysLeft(vu) > 0 ? 'Masih Aktif' : 'Perpanjangan')
+      : item.kta_matches?.some((m) => m.membership_status === 'Aktif') ? 'Masih Aktif' : 'Perpanjangan';
     setTrack(enabled.includes(guess) ? guess : enabled[0]);
   };
   const openMig = (item) => { setMigReview(item); setMode(null); setNote(''); };
@@ -154,6 +161,10 @@ export default function HeregRequestsPanel() {
   const total = items.length + migs.length;
   const md = migReview?.hereg_mig_data || {};
   const migLeft = daysLeft(md.validUntil);
+  const rd = review?.hereg_mig_data?.ktaNumber ? review.hereg_mig_data : null;
+  const rdLeft = rd ? daysLeft(rd.validUntil) : null;
+  // KTA habis tidak bisa diaktifkan langsung (server juga menolak)
+  const trackOff = (key) => key === 'Masih Aktif' && rd && !(rdLeft > 0);
 
   return (
     <div className="card-surface p-4 sm:p-5">
@@ -236,14 +247,52 @@ export default function HeregRequestsPanel() {
           <ModalHead eyebrow="Verifikasi anggota lama" title={review.name}
             subtitle="Pastikan pemohon benar pernah terdaftar, lalu tentukan jalurnya." onClose={close} saving={saving} />
 
-          <dl className="px-5 py-4 space-y-2.5 text-xs">
+          {rd && (
+            <div className="px-5 pt-4">
+              <div className={`rounded-xl p-3 border flex items-center gap-3 ${rdLeft > 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
+                <CalendarClock className={`w-5 h-5 flex-shrink-0 ${rdLeft > 0 ? 'text-emerald-600' : 'text-red-600'}`} />
+                <div className="min-w-0 text-xs">
+                  <p className="font-semibold text-slate-800">{rd.publisherName}</p>
+                  <p className={rdLeft > 0 ? 'text-emerald-700' : 'text-red-700'}>
+                    Terbit {fmtDate(rd.issuedAt)} · berlaku s.d. {fmtDate(rd.validUntil)}
+                    {rdLeft > 0 ? ` (${rdLeft} hari lagi)` : ' · sudah lewat'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <dl className={`px-5 py-4 space-y-2.5 text-xs ${rd ? 'max-h-[40vh] overflow-y-auto' : ''}`}>
             <Rows rows={[
               ['Nomor KTA lama', <span className="font-mono font-bold">{review.old_kta_number || '-'}</span>],
               ['Kategori', review.member_category === 'Luar Biasa' ? 'Anggota Luar Biasa' : 'Anggota Biasa'],
               ['Email', review.email],
               ['Telepon', review.phone || '-'],
               ['Akun dibuat', fmtDate(review.created_at)],
+              ...(rd ? [
+                ['Badan usaha', rd.legalEntity],
+                ['Pimpinan', [rd.leaderName, rd.leaderTitle].filter(Boolean).join(' · ')],
+                ['Penanggung jawab', rd.personInCharge],
+                ['NIB', rd.nib],
+                ['Alamat', [rd.address, rd.city, rd.postalCode].filter(Boolean).join(', ')],
+                ['Telepon penerbit', rd.phone],
+                ['Email penerbit', rd.email],
+                ['Website', rd.website],
+                ['Spesialisasi', rd.specialization],
+                ['Catatan pemohon', rd.notes],
+              ] : []),
             ]} />
+            {rd && review.hereg_mig_proof && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Bukti KTA</dt>
+                <dd className="min-w-0">
+                  <a href={fileUrl(review.hereg_mig_proof)} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-sky-700 hover:underline font-medium max-w-[14rem] truncate">
+                    <FileText className="w-3.5 h-3.5 flex-shrink-0" /> <span className="truncate">{review.hereg_mig_proof_name || 'Lihat bukti'}</span>
+                  </a>
+                </dd>
+              </div>
+            )}
             <div className="pt-1">
               <dt className="text-slate-500 mb-1">Pencocokan data anggota</dt>
               {review.kta_matches?.length ? (
@@ -278,14 +327,17 @@ export default function HeregRequestsPanel() {
               </legend>
               <div className="space-y-2">
                 {tracks.map((t) => (
-                  <label key={t.key} className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition ${
-                    track === t.key ? 'border-[#0884c4] bg-sky-50/70 ring-1 ring-[#0884c4]/30' : 'border-slate-200 hover:bg-slate-50'
+                  <label key={t.key} className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition ${
+                    trackOff(t.key) ? 'border-slate-200 opacity-50 cursor-not-allowed'
+                      : track === t.key ? 'border-[#0884c4] bg-sky-50/70 ring-1 ring-[#0884c4]/30 cursor-pointer' : 'border-slate-200 hover:bg-slate-50 cursor-pointer'
                   }`}>
-                    <input type="radio" name="hereg-track" value={t.key} checked={track === t.key} onChange={() => setTrack(t.key)}
+                    <input type="radio" name="hereg-track" value={t.key} checked={track === t.key} disabled={trackOff(t.key)} onChange={() => setTrack(t.key)}
                       className={`mt-0.5 accent-[#0884c4] ${tracks.length > 1 ? '' : 'hidden'}`} />
                     <span>
                       <span className="block text-xs font-semibold text-slate-800">{t.title}</span>
-                      <span className="block text-[11px] text-slate-500 leading-snug">{t.desc}</span>
+                      <span className="block text-[11px] text-slate-500 leading-snug">
+                        {trackOff(t.key) ? 'Tidak tersedia: masa berlaku KTA sudah lewat.' : !rd && t.key === 'Masih Aktif' ? 'KTA masih berlaku. Pemohon mengisi data keanggotaan di dashboard, lalu Admin memvalidasi masa aktifnya.' : t.desc}
+                      </span>
                     </span>
                   </label>
                 ))}
@@ -306,8 +358,8 @@ export default function HeregRequestsPanel() {
                 <button type="button" onClick={() => setMode('reject')} disabled={saving} className="px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 bg-white hover:bg-red-50 flex items-center gap-1">
                   <XCircle className="w-3.5 h-3.5" /> Tolak
                 </button>
-                <button type="button" onClick={() => submit('approve')} disabled={saving} className="px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 flex items-center gap-1">
-                  <CheckCircle className="w-3.5 h-3.5" /> {saving ? 'Menyimpan...' : track === 'Masih Aktif' ? 'Setujui · masih aktif' : 'Setujui · perpanjangan'}
+                <button type="button" onClick={() => submit('approve')} disabled={saving || trackOff(track)} className="px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" /> {saving ? 'Menyimpan...' : track === 'Masih Aktif' ? (rd ? 'Setujui · aktifkan' : 'Setujui · masih aktif') : 'Setujui · perpanjangan'}
                 </button>
               </>
             )}

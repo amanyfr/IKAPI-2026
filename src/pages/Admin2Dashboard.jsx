@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { STATUS_LABEL, POST_APPROVAL_STATUSES } from '../components/StatusStepper';
 import {
@@ -44,8 +44,10 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
   const [sortOrder, setSortOrder] = useState('oldest'); // 'newest' | 'oldest'
   const [search, setSearch] = useState('');
 
+  // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
+  const loadedOnce = useRef(false);
   const fetchSubmissions = async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const res = await fetch('/api/submissions', {
         headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` }
@@ -55,6 +57,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
     } catch (err) {
       console.error('Failed to load submissions:', err);
     } finally {
+      loadedOnce.current = true;
       setLoading(false);
     }
   };

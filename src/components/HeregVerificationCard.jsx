@@ -8,7 +8,7 @@ import { ShieldCheck, Clock, XCircle, RefreshCw, Edit3, IdCard, CheckCircle2 } f
  * status verifikasi masih "Menunggu" atau "Ditolak", dan memuat ulang
  * data akun berkala supaya langsung terbuka begitu Admin menyetujui.
  */
-export default function HeregVerificationCard({ onEditProfile }) {
+export default function HeregVerificationCard({ onEditProfile, onEdit }) {
   const { user, updateUser } = useAuth();
   const [checking, setChecking] = useState(false);
   const rejected = user?.hereg_status === 'Ditolak';
@@ -34,7 +34,13 @@ export default function HeregVerificationCard({ onEditProfile }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rejected]);
 
-  const steps = [
+  // Form gabungan (KTA + data keanggotaan) vs pengajuan lama (KTA saja)
+  const full = Boolean(user?.hereg_mig_data?.ktaNumber);
+  const steps = full ? [
+    { label: 'Data KTA & penerbit dikirim', done: true },
+    { label: 'Validasi Admin', done: false, current: true },
+    { label: 'Dashboard aktif / formulir perpanjangan', done: false },
+  ] : [
     { label: 'Data KTA lama dikirim', done: true },
     { label: 'Verifikasi Admin', done: false, current: true },
     { label: 'Isi formulir & unggah dokumen', done: false },
@@ -60,7 +66,9 @@ export default function HeregVerificationCard({ onEditProfile }) {
             <p className="text-sm text-slate-500 mt-1.5">
               {rejected
                 ? 'Perbaiki Nomor KTA lama sesuai alasan di bawah, lalu kirim ulang untuk diverifikasi.'
-                : 'Admin mencocokkan Nomor KTA lama Anda dengan data keanggotaan IKAPI. Formulir registrasi & unggah dokumen terbuka setelah disetujui.'}
+                : full
+                  ? 'Admin memeriksa data & bukti KTA Anda. KTA masih berlaku langsung aktif; KTA habis lanjut ke formulir perpanjangan yang sudah terisi.'
+                  : 'Admin mencocokkan Nomor KTA lama Anda dengan data keanggotaan IKAPI. Formulir registrasi & unggah dokumen terbuka setelah disetujui.'}
             </p>
           </div>
         </div>
@@ -112,6 +120,11 @@ export default function HeregVerificationCard({ onEditProfile }) {
         </div>
 
         <div className="border-t border-slate-100 px-5 sm:px-7 py-4 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5">
+          {onEdit && !rejected && (
+            <button type="button" onClick={onEdit} className="soft-pill justify-center !h-11">
+              <Edit3 className="w-4 h-4" /> Ubah data
+            </button>
+          )}
           {onEditProfile && (
             <button type="button" onClick={onEditProfile} className={rejected
               ? 'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl bg-[#0884c4] hover:bg-[#076fa5] text-white text-sm font-semibold transition-colors'

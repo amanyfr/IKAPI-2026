@@ -627,11 +627,6 @@ app.put('/api/auth/onboarding', authenticate, authorize('Anggota'), async (req, 
     if (!['Biasa', 'Luar Biasa'].includes(category)) {
       return res.status(400).json({ error: 'Pilih kategori keanggotaan: biasa atau luar biasa.' });
     }
-    const kta = memberType === 'Lama' && oldKtaNumber ? String(oldKtaNumber).trim() : null;
-    // Anggota lama wajib menyebut Nomor KTA lama: Admin memverifikasinya sebelum formulir dibuka
-    if (memberType === 'Lama' && !kta) {
-      return res.status(400).json({ error: 'Nomor KTA lama wajib diisi untuk anggota lama.' });
-    }
 
     // Jawaban profil masih bisa diubah selama belum ada pengajuan (jenis pengajuan mengikuti profil)
     const existing = await query.get('SELECT id FROM submissions WHERE user_id = ? LIMIT 1', [req.user.id]);
@@ -640,27 +635,33 @@ app.put('/api/auth/onboarding', authenticate, authorize('Anggota'), async (req, 
     }
 
     // Verifikasi KTA lama: tetap disetujui hanya bila jawaban (lama + nomor KTA) tidak berubah
-    const before = await query.get('SELECT member_type, old_kta_number, hereg_status FROM users WHERE id = ?', [req.user.id]);
-    const keepApproved = memberType === 'Lama' && before?.member_type === 'Lama'
-      && before?.old_kta_number === kta && before?.hereg_status === 'Disetujui';
-    const heregStatus = memberType === 'Lama' ? (keepApproved ? 'Disetujui' : 'Menunggu') : null;
-    const needsReview = heregStatus === 'Menunggu' && !(before?.hereg_status === 'Menunggu' && before?.old_kta_number === kta);
+    const before = await query.get('SELECT member_type, member_category, old_kta_number, hereg_status FROM users WHERE id = ?', [req.user.id]);
+    // Nomor KTA lama tidak lagi ditanyakan di sini: diisi di formulir anggota lama (hereg-apply).
+    // Bila dikirim tetap dipakai; bila tidak, nomor yang sudah tersimpan dipertahankan.
+    const kta = memberType === 'Lama'
+      ? (oldKtaNumber ? String(oldKtaNumber).trim() : (before?.member_type === 'Lama' ? before?.old_kta_number : null)) || null
+      : null;
+    // Anggota lama yang sudah mengirim formulir KTA (menunggu/sudah divalidasi Admin) tidak bisa mengubah jawaban
+    const changed = before?.member_type !== memberType || before?.member_category !== category || (before?.old_kta_number || null) !== kta;
+    if (before?.member_type === 'Lama' && ['Menunggu', 'Disetujui'].includes(before?.hereg_status) && changed) {
+      return res.status(400).json({ error: 'Jawaban profil tidak dapat diubah karena formulir anggota lama sudah dikirim.' });
+    }
+    const sameKta = memberType === 'Lama' && before?.member_type === 'Lama' && before?.old_kta_number === kta;
+    const keepApproved = sameKta && before?.hereg_status === 'Disetujui';
+    // Anggota lama melengkapi data KTA + penerbit dulu ("Belum Lengkap") sebelum masuk antrean Admin.
+    // Jawaban yang tidak mengubah KTA mempertahankan status verifikasinya.
+    const heregStatus = memberType === 'Lama' ? (sameKta && before?.hereg_status ? before.hereg_status : 'Belum Lengkap') : null;
 
     await query.run(
       `UPDATE users SET member_type = ?, member_category = ?, old_kta_number = ?,
          hereg_status = ?,
          hereg_note = CASE WHEN ? THEN hereg_note ELSE NULL END,
-         hereg_requested_at = CASE WHEN ? THEN NOW() ELSE hereg_requested_at END,
          hereg_track = CASE WHEN ? THEN hereg_track ELSE NULL END,
          hereg_mig_status = CASE WHEN ? THEN hereg_mig_status ELSE NULL END,
          onboarded_at = NOW()
        WHERE id = ?`,
-      [memberType, category, kta, heregStatus, keepApproved ? 1 : 0, needsReview ? 1 : 0, keepApproved ? 1 : 0, keepApproved ? 1 : 0, req.user.id]
+      [memberType, category, kta, heregStatus, sameKta ? 1 : 0, keepApproved ? 1 : 0, keepApproved ? 1 : 0, req.user.id]
     );
-    if (needsReview) {
-      await addNotification({ role: 'Admin' }, 'Verifikasi anggota lama',
-        `${req.user.name || 'Pemohon'} mengajukan registrasi anggota lama dengan KTA ${kta}. Periksa datanya sebelum formulir dibuka.`);
-    }
     await query.run(
       `UPDATE members SET category = ?, updated_at = NOW()
        WHERE user_id = ? AND membership_status = 'Calon'`,
@@ -1175,10 +1176,58 @@ app.delete('/api/auth/signature', authenticate, authorize('Ketua', 'Sekretaris')
 app.get('/api/admin/users', authenticate, authorize('Admin'), async (req, res) => {
   try {
     const users = await query.all('SELECT * FROM users ORDER BY role, name');
-    res.json({ users: users.map((u) => publicUser(u)) });
+    // Anggota aktif: sertakan masa aktif keanggotaan agar Admin bisa melihat & mengubahnya
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const out = [];
+    for (const u of users) {
+      const pu = publicUser(u);
+      if (u.role === 'Anggota') {
+        const m = await latestActiveMembership(u.id);
+        if (m?.period) pu.membership = { submissionId: m.sub.id, start: ymd(m.period.start), end: ymd(m.period.end), left: m.period.left };
+        else {
+          // Belum aktif: tampilkan status pengajuan terakhir sebagai keterangan
+          const last = await query.get('SELECT status FROM submissions WHERE user_id = ? ORDER BY id DESC LIMIT 1', [u.id]);
+          pu.submission_status = last?.status || null;
+        }
+      }
+      out.push(pu);
+    }
+    res.json({ users: out });
   } catch (err) {
     console.error('List users error:', err);
     res.status(500).json({ error: 'Gagal memuat daftar akun.' });
+  }
+});
+
+// Admin mengubah masa aktif keanggotaan anggota (pengajuan Aktif terakhir)
+app.put('/api/admin/users/:id/membership', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const issuedAt = String(req.body?.issuedAt || '');
+    const validUntil = String(req.body?.validUntil || '');
+    if (!validDate(issuedAt) || !validDate(validUntil)) {
+      return res.status(400).json({ error: 'Tanggal mulai & berakhir wajib diisi dengan format yang benar.' });
+    }
+    if (validUntil <= issuedAt) {
+      return res.status(400).json({ error: 'Tanggal berakhir harus setelah tanggal mulai.' });
+    }
+    const target = await query.get('SELECT id, name, role FROM users WHERE id = ?', [req.params.id]);
+    if (!target || target.role !== 'Anggota') return res.status(404).json({ error: 'Akun anggota tidak ditemukan.' });
+    const current = await latestActiveMembership(target.id);
+    if (!current) return res.status(400).json({ error: 'Akun ini belum memiliki keanggotaan aktif.' });
+
+    await query.run('UPDATE submissions SET kta_issued_at = ?, kta_valid_until = ?, updated_at = NOW() WHERE id = ?',
+      [issuedAt, validUntil, current.sub.id]);
+    // Pengingat lama mengacu tanggal lama: hapus, nanti dikirim ulang bila perlu
+    await clearRenewReminders(target.id);
+    const fmt = (v) => new Date(v + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    await logEvent(current.sub.id, req.user, 'Admin mengubah masa aktif keanggotaan', `${fmt(issuedAt)} s.d. ${fmt(validUntil)}`);
+    await addNotification(target.id, 'Masa aktif keanggotaan diperbarui',
+      `Admin memperbarui masa aktif keanggotaan Anda: ${fmt(issuedAt)} s.d. ${fmt(validUntil)}.`, current.sub.id);
+    remindExpiringMemberships();
+    res.json({ message: `Masa aktif ${target.name} diperbarui: ${fmt(issuedAt)} s.d. ${fmt(validUntil)}.` });
+  } catch (err) {
+    console.error('Update membership period error:', err);
+    res.status(500).json({ error: 'Gagal mengubah masa aktif.' });
   }
 });
 
@@ -2415,7 +2464,8 @@ app.get('/api/admin/hereg-requests', authenticate, authorize('Admin'), async (re
   try {
     const rows = await query.all(
       `SELECT u.id, u.name, u.email, u.phone, u.member_category, u.old_kta_number,
-              u.hereg_status, u.hereg_note, u.hereg_requested_at, u.onboarded_at, u.created_at
+              u.hereg_status, u.hereg_note, u.hereg_requested_at, u.onboarded_at, u.created_at,
+              u.hereg_mig_data, u.hereg_mig_proof, u.hereg_mig_proof_name
        FROM users u
        WHERE u.role = 'Anggota' AND u.member_type = 'Lama'
          AND COALESCE(u.hereg_status, 'Menunggu') = 'Menunggu'
@@ -2424,6 +2474,7 @@ app.get('/api/admin/hereg-requests', authenticate, authorize('Admin'), async (re
     );
     // Bantu Admin: cari KTA yang sama di data anggota yang sudah tercatat
     for (const r of rows) {
+      r.hereg_mig_data = parseJsonSafe(r.hereg_mig_data) || null;
       r.kta_matches = r.old_kta_number
         ? await query.all(
           `SELECT publisher_name, membership_status, category, kta_number
@@ -2460,21 +2511,37 @@ app.post('/api/admin/hereg-requests/:userId/review', authenticate, authorize('Ad
       track = tracks.length === 1 ? tracks[0] : (req.body.track === 'Masih Aktif' ? 'Masih Aktif' : 'Perpanjangan');
       if (!tracks.includes(track)) return res.status(400).json({ error: `Jalur ${track} sedang dinonaktifkan.` });
     }
+    const reviewer = req.user.name || req.user.email;
+    // Form gabungan: data keanggotaan sudah dikirim bersama KTA, jadi jalur "masih aktif" langsung diaktifkan
+    const d = parseJsonSafe(u.hereg_mig_data);
+    if (decision === 'approve' && track === 'Masih Aktif' && d?.ktaNumber) {
+      const validUntil = DATE_RE.test(String(req.body.validUntil || '')) ? req.body.validUntil : d.validUntil;
+      if (!validDate(validUntil) || new Date(`${validUntil}T23:59:59`) < new Date()) {
+        return res.status(400).json({ error: 'Masa berlaku KTA sudah lewat. Pilih jalur perpanjangan.' });
+      }
+      const done = await activateOldMember({ u, d, validUntil, note, reviewer, actor: req.user });
+      if (done.error) return res.status(400).json({ error: done.error });
+      await query.run(
+        `UPDATE users SET hereg_status = 'Disetujui', hereg_note = ?, hereg_track = 'Masih Aktif',
+           hereg_reviewed_by = ?, hereg_reviewed_at = NOW() WHERE id = ?`,
+        [note || null, reviewer, u.id]);
+      return res.json({ message: `KTA ${done.kta} tervalidasi. Pemohon kini Anggota Aktif.`, status: 'Disetujui', track, submissionId: done.submissionId });
+    }
     const status = decision === 'approve' ? 'Disetujui' : 'Ditolak';
     await query.run(
       `UPDATE users SET hereg_status = ?, hereg_note = ?, hereg_reviewed_by = ?, hereg_reviewed_at = NOW(),
          hereg_track = ?, hereg_mig_status = NULL, hereg_mig_note = NULL
        WHERE id = ?`,
-      [status, decision === 'reject' ? note : (note || null), req.user.name || req.user.email, track, u.id]
+      [status, decision === 'reject' ? note : (note || null), reviewer, track, u.id]
     );
     if (decision === 'approve' && track === 'Masih Aktif') {
       await addNotification(u.id, 'Data anggota lama disetujui',
         `KTA ${u.old_kta_number} diverifikasi Admin sebagai anggota yang masih aktif. Lengkapi data keanggotaan Anda di dashboard untuk divalidasi.`);
     } else if (decision === 'approve') {
       await addNotification(u.id, 'Data anggota lama disetujui',
-        `KTA lama ${u.old_kta_number} sudah diverifikasi Admin. Silakan isi formulir registrasi & unggah dokumennya.`);
+        `KTA lama ${u.old_kta_number} sudah diverifikasi Admin. Silakan isi formulir perpanjangan${d?.ktaNumber ? " (data sudah terisi otomatis)" : ""} & unggah dokumennya.`);
     } else {
-      await addNotification(u.id, 'Data anggota lama ditolak', `Alasan: ${note}. Perbaiki data KTA lama lalu kirim ulang.`);
+      await addNotification(u.id, 'Data anggota lama ditolak', `Alasan: ${note}. Perbaiki data lalu kirim ulang.`);
     }
     res.json({
       message: decision === 'approve'
@@ -2496,6 +2563,133 @@ const MIG_TEXT_FIELDS = [
   'postalCode', 'phone', 'email', 'website', 'personInCharge', 'specialization', 'notes',
 ];
 
+// Validasi isian data keanggotaan + KTA (dipakai form gabungan anggota lama & jalur masih aktif)
+function readMigForm(body) {
+  const data = {};
+  for (const k of MIG_TEXT_FIELDS) {
+    const v = String(body[k] ?? '').trim();
+    if (v.length > 2000) return { error: 'Isian terlalu panjang.' };
+    data[k] = v;
+  }
+  const missing = [
+    ['publisherName', 'nama penerbit'], ['leaderName', 'nama pimpinan'], ['address', 'alamat'],
+    ['city', 'kota/kabupaten'], ['phone', 'telepon penerbit'], ['email', 'email penerbit'], ['personInCharge', 'penanggung jawab'],
+  ].filter(([k]) => !data[k]).map(([, label]) => label);
+  if (missing.length) return { error: `Lengkapi: ${missing.join(', ')}.` };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return { error: 'Format email penerbit tidak valid.' };
+
+  const kta = String(body.ktaNumber || '').trim().toUpperCase();
+  if (!kta) return { error: 'Nomor KTA wajib diisi.' };
+  if (kta.length > 100 || !/^[A-Z0-9./ -]+$/.test(kta)) {
+    return { error: 'Nomor KTA hanya boleh berisi huruf, angka, titik, garis miring, atau tanda hubung.' };
+  }
+  const issuedAt = String(body.issuedAt || '').trim();
+  const validUntil = String(body.validUntil || '').trim();
+  if (!validDate(issuedAt)) return { error: 'Isi tanggal terbit KTA.' };
+  if (!validDate(validUntil)) return { error: 'Isi tanggal berlaku sampai.' };
+  if (new Date(issuedAt) > new Date()) return { error: 'Tanggal terbit tidak boleh di masa depan.' };
+  if (new Date(validUntil) <= new Date(issuedAt)) return { error: 'Tanggal berlaku sampai harus setelah tanggal terbit.' };
+  return { data, kta, issuedAt, validUntil };
+}
+
+// Aktifkan anggota lama dari data keanggotaan yang dikirim pemohon (tanpa formulir & pembayaran)
+async function activateOldMember({ u, d, validUntil, note, reviewer, actor }) {
+  const kta = d.ktaNumber;
+  if (!kta || !validDate(d.issuedAt) || !validDate(validUntil)) return { error: 'Data KTA pemohon tidak lengkap.' };
+  const dup = await query.get(
+    'SELECT publisher_name FROM members WHERE kta_number = ? AND user_id IS NOT NULL AND user_id <> ?', [kta, u.id]);
+  if (dup) return { error: `Nomor KTA ${kta} sudah terdaftar atas ${dup.publisher_name}. Tolak dan minta pemohon memeriksa ulang.` };
+  const category = u.member_category === 'Luar Biasa' ? 'Luar Biasa' : 'Biasa';
+  const dash = (v) => v || '-';
+
+  // Pakai data anggota milik akun ini; bila belum ada, ambil alih data impor (tanpa akun) dengan KTA yang sama
+  let member = await query.get('SELECT id FROM members WHERE user_id = ?', [u.id])
+    || await query.get('SELECT id FROM members WHERE kta_number = ? AND user_id IS NULL ORDER BY id LIMIT 1', [kta]);
+  const memberVals = [
+    d.publisherName, category, d.leaderName, dash(d.leaderTitle), dash(d.leaderPhone || u.phone), dash(d.legalEntity),
+    dash(d.nib), d.address, d.city, dash(d.postalCode), d.phone, d.email, dash(d.website), d.personInCharge,
+    dash(d.specialization), kta,
+  ];
+  if (member) {
+    await query.run(
+      `UPDATE members SET publisher_name = ?, category = ?, leader_name = ?, leader_title = ?, leader_phone = ?,
+         legal_entity = ?, nib = ?, address = ?, city = ?, postal_code = ?, phone = ?, email = ?, website = ?,
+         person_in_charge = ?, specialization = ?, kta_number = ?, user_id = ?, membership_status = 'Aktif', updated_at = NOW()
+       WHERE id = ?`, [...memberVals, u.id, member.id]);
+  } else {
+    const r = await query.run(
+      `INSERT INTO members (publisher_name, category, leader_name, leader_title, leader_phone, legal_entity, nib,
+         address, city, postal_code, phone, email, website, person_in_charge, specialization, kta_number,
+         user_id, membership_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Aktif')`, [...memberVals, u.id]);
+    member = { id: r.lastID };
+  }
+
+  const formData = { ...d, source: 'Migrasi', category, submissionType: 'Heregistrasi', oldKtaNumber: u.old_kta_number };
+  const subRes = await query.run(
+    `INSERT INTO submissions (member_id, user_id, submission_type, status, old_kta_number, form_data,
+       submitted_at, approved_at, activated_at, kta_number_submitted, kta_issued_at, kta_valid_until,
+       kta_proof_file, kta_proof_name, kta_notes, kta_confirmed_at, kta_review_status, kta_review_note,
+       kta_reviewed_at, kta_reviewed_by, last_notified_status)
+     VALUES (?, ?, 'Heregistrasi', 'Aktif', ?, ?, ?, NOW(), NOW(), ?, ?, ?, ?, ?, ?, ?, 'Disetujui', ?, NOW(), ?, 'Aktif')`,
+    [member.id, u.id, u.old_kta_number, JSON.stringify(formData), u.hereg_mig_at || nowSql(), kta, d.issuedAt, validUntil,
+      u.hereg_mig_proof, u.hereg_mig_proof_name, d.notes || null, u.hereg_mig_at || nowSql(), note || null, reviewer]
+  );
+  await query.run(
+    `UPDATE users SET hereg_mig_status = 'Disetujui', hereg_mig_note = ?, hereg_reviewed_by = ?, hereg_reviewed_at = NOW() WHERE id = ?`,
+    [note || null, reviewer, u.id]);
+  await logEvent(subRes.lastID, actor,
+    `Anggota lama (data manual) divalidasi Admin. KTA ${kta} aktif s.d. ${validUntil}`, note || null);
+  await addNotification(u.id, 'Keanggotaan aktif',
+    `Masa aktif KTA ${kta} tervalidasi (berlaku s.d. ${validUntil}). Dashboard anggota Anda sudah aktif.`, subRes.lastID);
+  return { kta, submissionId: subRes.lastID };
+}
+
+// Anggota lama: kirim No. KTA + masa berlaku + data penerbit + bukti KTA sekaligus.
+// Admin memvalidasi SEKALI lalu menentukan jalur (masih aktif -> langsung aktif; perpanjangan -> formulir).
+app.post('/api/auth/hereg-apply', authenticate, authorize('Anggota'), upload.single('ktaFile'), async (req, res) => {
+  try {
+    const u = await query.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    if (u.member_type !== 'Lama') return res.status(403).json({ error: 'Akun ini bukan anggota lama.' });
+    if (u.hereg_status === 'Disetujui') return res.status(400).json({ error: 'Data KTA lama Anda sudah divalidasi Admin.' });
+    const hasSub = await query.get('SELECT id FROM submissions WHERE user_id = ? LIMIT 1', [u.id]);
+    if (hasSub) return res.status(400).json({ error: 'Keanggotaan akun ini sudah tercatat.' });
+
+    const form = readMigForm(req.body);
+    if (form.error) return res.status(400).json({ error: form.error });
+    const { data, kta, issuedAt, validUntil } = form;
+    // Data anggota hasil impor (tanpa akun) justru pencocok yang sah; yang ditolak hanya KTA milik akun lain
+    const dup = await query.get(
+      'SELECT publisher_name FROM members WHERE kta_number = ? AND user_id IS NOT NULL AND user_id <> ?', [kta, u.id]);
+    if (dup) return res.status(400).json({ error: `Nomor KTA ${kta} sudah dipakai akun lain. Periksa kembali nomornya.` });
+    if (!req.file && !u.hereg_mig_proof) return res.status(400).json({ error: 'Unggah foto/scan KTA.' });
+
+    let proof = u.hereg_mig_proof;
+    let proofName = u.hereg_mig_proof_name;
+    if (req.file) {
+      proof = await storeUpload(req.file);
+      proofName = req.file.originalname;
+      if (u.hereg_mig_proof) await deleteStoredFile(u.hereg_mig_proof);
+    }
+    Object.assign(data, { ktaNumber: kta, issuedAt, validUntil });
+    const resubmit = ['Menunggu', 'Ditolak'].includes(u.hereg_status) && u.hereg_mig_data;
+    await query.run(
+      `UPDATE users SET old_kta_number = ?, hereg_mig_data = ?, hereg_mig_proof = ?, hereg_mig_proof_name = ?,
+         hereg_status = 'Menunggu', hereg_note = NULL, hereg_track = NULL, hereg_mig_status = NULL, hereg_mig_note = NULL,
+         hereg_requested_at = NOW(), hereg_mig_at = NOW()
+       WHERE id = ?`,
+      [kta, JSON.stringify(data), proof, proofName, u.id]
+    );
+    await addNotification({ role: 'Admin' }, 'Verifikasi anggota lama',
+      `${u.name} ${resubmit ? 'mengirim ulang' : 'mengirim'} data anggota lama (KTA ${kta}, berlaku s.d. ${validUntil}). Validasi lalu tentukan jalurnya.`);
+    const fresh = await query.get('SELECT * FROM users WHERE id = ?', [u.id]);
+    res.json({ message: 'Data terkirim. Admin akan memvalidasi KTA & data Anda.', user: publicUser(fresh) });
+  } catch (err) {
+    console.error('Hereg apply error:', err);
+    res.status(500).json({ error: 'Gagal mengirim data anggota lama.' });
+  }
+});
+
 // Pemohon: kirim data keanggotaan + bukti KTA untuk divalidasi Admin
 app.post('/api/auth/hereg-migration', authenticate, authorize('Anggota'), upload.single('ktaFile'), async (req, res) => {
   try {
@@ -2509,30 +2703,9 @@ app.post('/api/auth/hereg-migration', authenticate, authorize('Anggota'), upload
       return res.status(400).json({ error: 'Data keanggotaan Anda sedang divalidasi Admin. Tunggu hasilnya.' });
     }
 
-    const data = {};
-    for (const k of MIG_TEXT_FIELDS) {
-      const v = String(req.body[k] ?? '').trim();
-      if (v.length > 2000) return res.status(400).json({ error: 'Isian terlalu panjang.' });
-      data[k] = v;
-    }
-    const missing = [
-      ['publisherName', 'nama penerbit'], ['leaderName', 'nama pimpinan'], ['address', 'alamat'],
-      ['city', 'kota/kabupaten'], ['phone', 'telepon penerbit'], ['email', 'email penerbit'], ['personInCharge', 'penanggung jawab'],
-    ].filter(([k]) => !data[k]).map(([, label]) => label);
-    if (missing.length) return res.status(400).json({ error: `Lengkapi: ${missing.join(', ')}.` });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return res.status(400).json({ error: 'Format email penerbit tidak valid.' });
-
-    const kta = String(req.body.ktaNumber || '').trim().toUpperCase();
-    if (!kta) return res.status(400).json({ error: 'Nomor KTA wajib diisi.' });
-    if (kta.length > 100 || !/^[A-Z0-9./ -]+$/.test(kta)) {
-      return res.status(400).json({ error: 'Nomor KTA hanya boleh berisi huruf, angka, titik, garis miring, atau tanda hubung.' });
-    }
-    const issuedAt = String(req.body.issuedAt || '').trim();
-    const validUntil = String(req.body.validUntil || '').trim();
-    if (!validDate(issuedAt)) return res.status(400).json({ error: 'Isi tanggal terbit KTA.' });
-    if (!validDate(validUntil)) return res.status(400).json({ error: 'Isi tanggal berlaku sampai.' });
-    if (new Date(issuedAt) > new Date()) return res.status(400).json({ error: 'Tanggal terbit tidak boleh di masa depan.' });
-    if (new Date(validUntil) <= new Date(issuedAt)) return res.status(400).json({ error: 'Tanggal berlaku sampai harus setelah tanggal terbit.' });
+    const form = readMigForm(req.body);
+    if (form.error) return res.status(400).json({ error: form.error });
+    const { data, kta, issuedAt, validUntil } = form;
     const dup = await query.get(
       'SELECT publisher_name FROM members WHERE kta_number = ? AND (user_id IS NULL OR user_id <> ?)', [kta, u.id]);
     if (dup) return res.status(400).json({ error: `Nomor KTA ${kta} sudah terdaftar atas penerbit lain. Periksa kembali nomornya.` });
@@ -2647,54 +2820,10 @@ app.post('/api/admin/hereg-migrations/:userId/review', authenticate, authorize('
     }
 
     const d = parseJsonSafe(u.hereg_mig_data) || {};
-    const kta = d.ktaNumber;
     const validUntil = DATE_RE.test(String(req.body.validUntil || '')) ? req.body.validUntil : d.validUntil;
-    if (!kta || !validDate(d.issuedAt) || !validDate(validUntil)) return res.status(400).json({ error: 'Data KTA pemohon tidak lengkap.' });
-    const dup = await query.get(
-      'SELECT publisher_name FROM members WHERE kta_number = ? AND (user_id IS NULL OR user_id <> ?)', [kta, u.id]);
-    if (dup) return res.status(400).json({ error: `Nomor KTA ${kta} sudah terdaftar atas ${dup.publisher_name}. Tolak dan minta pemohon memeriksa ulang.` });
-    const category = u.member_category === 'Luar Biasa' ? 'Luar Biasa' : 'Biasa';
-    const dash = (v) => v || '-';
-
-    let member = await query.get('SELECT id FROM members WHERE user_id = ?', [u.id]);
-    const memberVals = [
-      d.publisherName, category, d.leaderName, dash(d.leaderTitle), dash(d.leaderPhone || u.phone), dash(d.legalEntity),
-      dash(d.nib), d.address, d.city, dash(d.postalCode), d.phone, d.email, dash(d.website), d.personInCharge,
-      dash(d.specialization), kta,
-    ];
-    if (member) {
-      await query.run(
-        `UPDATE members SET publisher_name = ?, category = ?, leader_name = ?, leader_title = ?, leader_phone = ?,
-           legal_entity = ?, nib = ?, address = ?, city = ?, postal_code = ?, phone = ?, email = ?, website = ?,
-           person_in_charge = ?, specialization = ?, kta_number = ?, membership_status = 'Aktif', updated_at = NOW()
-         WHERE id = ?`, [...memberVals, member.id]);
-    } else {
-      const r = await query.run(
-        `INSERT INTO members (publisher_name, category, leader_name, leader_title, leader_phone, legal_entity, nib,
-           address, city, postal_code, phone, email, website, person_in_charge, specialization, kta_number,
-           user_id, membership_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Aktif')`, [...memberVals, u.id]);
-      member = { id: r.lastID };
-    }
-
-    const formData = { ...d, source: 'Migrasi', category, submissionType: 'Heregistrasi', oldKtaNumber: u.old_kta_number };
-    const subRes = await query.run(
-      `INSERT INTO submissions (member_id, user_id, submission_type, status, old_kta_number, form_data,
-         submitted_at, approved_at, activated_at, kta_number_submitted, kta_issued_at, kta_valid_until,
-         kta_proof_file, kta_proof_name, kta_notes, kta_confirmed_at, kta_review_status, kta_review_note,
-         kta_reviewed_at, kta_reviewed_by, last_notified_status)
-       VALUES (?, ?, 'Heregistrasi', 'Aktif', ?, ?, ?, NOW(), NOW(), ?, ?, ?, ?, ?, ?, ?, 'Disetujui', ?, NOW(), ?, 'Aktif')`,
-      [member.id, u.id, u.old_kta_number, JSON.stringify(formData), u.hereg_mig_at || nowSql(), kta, d.issuedAt, validUntil,
-        u.hereg_mig_proof, u.hereg_mig_proof_name, d.notes || null, u.hereg_mig_at || nowSql(), note || null, reviewer]
-    );
-    await query.run(
-      `UPDATE users SET hereg_mig_status = 'Disetujui', hereg_mig_note = ?, hereg_reviewed_by = ?, hereg_reviewed_at = NOW() WHERE id = ?`,
-      [note || null, reviewer, u.id]);
-    await logEvent(subRes.lastID, req.user,
-      `Anggota lama (data manual) divalidasi Admin. KTA ${kta} aktif s.d. ${validUntil}`, note || null);
-    await addNotification(u.id, 'Keanggotaan aktif',
-      `Masa aktif KTA ${kta} tervalidasi (berlaku s.d. ${validUntil}). Dashboard anggota Anda sudah aktif.`, subRes.lastID);
-    res.json({ message: `KTA ${kta} tervalidasi. Pemohon kini Anggota Aktif.`, submissionId: subRes.lastID });
+    const done = await activateOldMember({ u, d, validUntil, note, reviewer, actor: req.user });
+    if (done.error) return res.status(400).json({ error: done.error });
+    res.json({ message: `KTA ${done.kta} tervalidasi. Pemohon kini Anggota Aktif.`, submissionId: done.submissionId });
   } catch (err) {
     console.error('Hereg migration review error:', err);
     res.status(500).json({ error: 'Gagal menyimpan validasi anggota aktif.' });

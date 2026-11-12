@@ -9,6 +9,7 @@ import ActiveMemberDashboard from './ActiveMemberDashboard';
 import { FILTERS, NUMERIC, PHONE } from '../utils/inputFilters';
 import { feesFromSettings } from '../utils/fees';
 import RenewConfirm from './RenewConfirm';
+import HeregVerificationCard from './HeregVerificationCard';
 
 /**
  * Jalur anggota lama "masih aktif": KTA masih berlaku tapi dulu didata manual.
@@ -62,13 +63,16 @@ function SectionTitle({ icon: Icon, title, subtitle }) {
   );
 }
 
-function MigrationForm({ onDone, onCancel }) {
+function MigrationForm({ onDone, onCancel, apply = false, onEditProfile }) {
   const { user, updateUser } = useAuth();
-  const rejected = user?.hereg_mig_status === 'Ditolak';
+  // apply: form gabungan anggota lama (KTA + data) sebelum masuk dashboard
+  const rejected = apply ? user?.hereg_status === 'Ditolak' : user?.hereg_mig_status === 'Ditolak';
+  const rejectNote = apply ? user?.hereg_note : user?.hereg_mig_note;
   const [form, setForm] = useState(() => ({
     ...EMPTY,
     ...(user?.hereg_mig_data || {}),
-    ktaNumber: user?.hereg_mig_data?.ktaNumber || user?.old_kta_number || '',
+    // Formulir anggota lama: No. KTA kosong sampai pemohon mengisinya sendiri (hanya terisi bila formulir pernah dikirim)
+    ktaNumber: apply ? (user?.hereg_mig_data?.ktaNumber || '') : (user?.hereg_mig_data?.ktaNumber || user?.old_kta_number || ''),
     email: user?.hereg_mig_data?.email || user?.email || '',
     phone: user?.hereg_mig_data?.phone || user?.phone || '',
   }));
@@ -107,7 +111,7 @@ function MigrationForm({ onDone, onCancel }) {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ''));
       if (file) fd.append('ktaFile', file);
-      const res = await fetch('/api/auth/hereg-migration', { method: 'POST', headers: authHeader(), body: fd });
+      const res = await fetch(apply ? '/api/auth/hereg-apply' : '/api/auth/hereg-migration', { method: 'POST', headers: authHeader(), body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Gagal mengirim data keanggotaan.');
       if (data.user) updateUser({ ...user, ...data.user });
@@ -123,7 +127,7 @@ function MigrationForm({ onDone, onCancel }) {
   const input = 'soft-input w-full';
 
   return (
-    <form onSubmit={submit} className="w-full bg-slate-50 p-3 sm:p-5 space-y-4">
+    <form onSubmit={submit} className={apply ? 'w-full max-w-4xl mx-auto space-y-4' : 'w-full bg-slate-50 p-3 sm:p-5 space-y-4'}>
       {/* Header */}
       <div className="overflow-hidden rounded-[24px] bg-white border border-slate-200/80">
         <div className="px-5 sm:px-7 py-6 flex items-start gap-4">
@@ -131,12 +135,20 @@ function MigrationForm({ onDone, onCancel }) {
             <ShieldCheck className="w-6 h-6" />
           </span>
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-600">KTA lama terverifikasi · anggota masih aktif</p>
-            <h2 className="mt-1 text-xl sm:text-2xl font-semibold text-slate-900 tracking-tight">Data keanggotaan</h2>
-            <p className="text-sm text-slate-500 mt-1.5">
-              Keanggotaan Anda sebelumnya didata manual. Isi data penerbit & masa berlaku KTA sesuai kartu anggota Anda, tanpa formulir pengajuan atau pembayaran.
-              Admin memvalidasi bahwa keanggotaan Anda masih aktif.
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-600">
+              {apply ? 'Registrasi anggota lama' : 'KTA lama terverifikasi · anggota masih aktif'}
             </p>
+            <h2 className="mt-1 text-xl sm:text-2xl font-semibold text-slate-900 tracking-tight">{apply ? 'Data KTA & keanggotaan' : 'Data keanggotaan'}</h2>
+            <p className="text-sm text-slate-500 mt-1.5">
+              {apply
+                ? 'Isi Nomor KTA, masa berlaku & data penerbit sesuai kartu anggota Anda. Admin memvalidasi sekali: KTA masih berlaku langsung aktif, KTA habis lanjut ke perpanjangan dengan data terisi otomatis.'
+                : 'Keanggotaan Anda sebelumnya didata manual. Isi data penerbit & masa berlaku KTA sesuai kartu anggota Anda, tanpa formulir pengajuan atau pembayaran. Admin memvalidasi bahwa keanggotaan Anda masih aktif.'}
+            </p>
+            {apply && onEditProfile && (
+              <button type="button" onClick={onEditProfile} className="mt-1.5 text-xs text-[#0884c4] font-semibold hover:underline">
+                Bukan anggota lama? Ubah jawaban profil
+              </button>
+            )}
           </div>
         </div>
         {rejected && (
@@ -144,7 +156,7 @@ function MigrationForm({ onDone, onCancel }) {
             <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-xs font-semibold text-red-700 mb-0.5">Data dikembalikan Admin</p>
-              <p className="text-sm text-red-800 whitespace-pre-line">{user?.hereg_mig_note || '—'}</p>
+              <p className="text-sm text-red-800 whitespace-pre-line">{rejectNote || '—'}</p>
             </div>
           </div>
         )}
@@ -167,7 +179,7 @@ function MigrationForm({ onDone, onCancel }) {
         {expired && (
           <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            Tanggal berlaku sudah lewat. Admin kemungkinan akan mengalihkan Anda ke jalur perpanjangan.
+            {apply ? 'Tanggal berlaku sudah lewat. Setelah divalidasi Admin, Anda lanjut ke formulir perpanjangan.' : 'Tanggal berlaku sudah lewat. Admin kemungkinan akan mengalihkan Anda ke jalur perpanjangan.'}
           </p>
         )}
         <div className="mt-4">
@@ -248,7 +260,7 @@ function MigrationForm({ onDone, onCancel }) {
       <div className="card-surface px-5 sm:px-6 py-4 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="flex items-center gap-2 text-xs text-slate-500">
           <CalendarClock className="w-4 h-4 text-[#0884c4] flex-shrink-0" />
-          Masa aktif di dashboard mengikuti tanggal berlaku yang divalidasi Admin.
+          {apply ? 'Data ini juga mengisi otomatis formulir perpanjangan bila diperlukan.' : 'Masa aktif di dashboard mengikuti tanggal berlaku yang divalidasi Admin.'}
         </p>
         <div className="flex flex-col-reverse sm:flex-row gap-2.5">
           {onCancel && (
@@ -261,6 +273,25 @@ function MigrationForm({ onDone, onCancel }) {
         </div>
       </div>
     </form>
+  );
+}
+
+/**
+ * Anggota lama sebelum masuk dashboard: satu formulir KTA + data keanggotaan,
+ * lalu menunggu validasi Admin. Pengajuan lama (KTA saja, tanpa data) tetap
+ * memakai kartu verifikasi biasa.
+ */
+export function HeregApplyPage({ onEditProfile }) {
+  const { user } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const waiting = user?.hereg_status === 'Menunggu';
+  const hasData = Boolean(user?.hereg_mig_data?.ktaNumber);
+  if (waiting && !editing) {
+    return <HeregVerificationCard onEditProfile={hasData ? undefined : onEditProfile} onEdit={hasData ? () => setEditing(true) : undefined} />;
+  }
+  return (
+    <MigrationForm apply onEditProfile={waiting ? undefined : onEditProfile}
+      onDone={() => setEditing(false)} onCancel={editing ? () => setEditing(false) : undefined} />
   );
 }
 

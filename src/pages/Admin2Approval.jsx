@@ -81,8 +81,10 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
   const isKetua = user?.role === 'Ketua';
   const mySignature = useMySignature(isKetua);
 
+  // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
+  const loadedOnce = useRef(false);
   const fetchData = async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` };
       const [resStats, resSubs, resSettings] = await Promise.all([
@@ -101,6 +103,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
     } catch (err) {
       console.error('Failed to load admin 2 data:', err);
     } finally {
+      loadedOnce.current = true;
       setLoading(false);
     }
   };
@@ -189,9 +192,6 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
             <h2 className="text-2xl font-light tracking-tight text-slate-900">
               Dashboard Monitoring, Approval & Tanda Tangan Surat (Ketua)
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Wewenang Ketua & Sekretaris PD IKAPI Jawa Barat: Monitoring tahapan pengajuan, keputusan kelayakan, dan pembubuhan TTD digital.
-            </p>
           </div>
         </div>
 
