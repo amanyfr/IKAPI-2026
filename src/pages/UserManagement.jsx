@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Users, UserPlus, Search, Pencil, X, AlertCircle, RefreshCw, CalendarClock } from 'lucide-react';
+import { Users, UserPlus, Search, Pencil, X, AlertCircle, RefreshCw, CalendarClock, Building2 } from 'lucide-react';
 import { FILTERS, PHONE } from '../utils/inputFilters';
+import AdminMemberDataModal from '../components/AdminMemberDataModal';
 
 const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota'];
 
@@ -61,6 +62,7 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [memberData, setMemberData] = useState(null); // akun anggota aktif yang data penerbitnya dikelola
 
   // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
   const loadedOnce = useRef(false);
@@ -284,6 +286,15 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
                 <span className={`hidden sm:inline-block flex-shrink-0 text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${ROLE_BADGE[groupOf(u)]}`}>
                   {groupOf(u)}
                 </span>
+                {u.membership && (
+                  <button
+                    onClick={() => setMemberData(u)}
+                    title="Kelola data penerbit"
+                    className="flex-shrink-0 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition flex items-center gap-1.5"
+                  >
+                    <Building2 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Data penerbit</span>
+                  </button>
+                )}
                 <button
                   onClick={() => openEdit(u)}
                   className="flex-shrink-0 px-3 py-1.5 text-xs font-semibold text-[#0884c4] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition flex items-center gap-1.5"
@@ -380,6 +391,10 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button type="button" onClick={() => { const u = editing; closeModal(); setMemberData(u); }}
+                    className="mr-auto px-3 py-2 text-xs font-semibold text-emerald-700 bg-white border border-emerald-200 hover:bg-emerald-50 rounded-lg transition flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5" /> Kelola data penerbit
+                  </button>
                   {periodMsg && (
                     <span className={`mr-auto text-xs ${periodMsg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{periodMsg.text}</span>
                   )}
@@ -419,6 +434,14 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
             </div>
           </form>
         </div>
+      )}
+
+      {memberData && (
+        <AdminMemberDataModal
+          user={memberData}
+          onClose={() => setMemberData(null)}
+          onSaved={(msg) => { setMemberData(null); setNotice(msg); loadUsers(); }}
+        />
       )}
     </div>
   );

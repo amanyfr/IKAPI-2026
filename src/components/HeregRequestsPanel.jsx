@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  RefreshCw, UserCheck, XCircle, CheckCircle, X, AlertTriangle, BadgeCheck, RotateCcw, ShieldCheck, FileText, CalendarClock,
+  RefreshCw, UserCheck, XCircle, CheckCircle, X, AlertTriangle, BadgeCheck, RotateCcw, ShieldCheck, FileText, CalendarClock, Pencil, Save,
 } from 'lucide-react';
 import { notify } from './AppDialog';
 import { fileUrl } from '../utils/fileUrl';
@@ -17,13 +17,13 @@ const daysLeft = (v) => {
 const TRACKS = [
   {
     key: 'Perpanjangan',
-    title: 'Perpanjangan (heregistrasi)',
-    desc: 'KTA sudah/akan habis. Pemohon mengisi formulir (data terisi otomatis), unggah dokumen, bayar iuran, lalu diproses seperti biasa.',
+    title: 'Perpanjangan',
+    desc: 'KTA habis/hampir habis. Pemohon isi formulir & bayar iuran.',
   },
   {
     key: 'Masih Aktif',
-    title: 'Masih aktif · pindah dari data manual',
-    desc: 'KTA masih berlaku. Pemohon langsung jadi Anggota Aktif dengan masa aktif sesuai KTA.',
+    title: 'Masih aktif',
+    desc: 'KTA masih berlaku. Langsung jadi Anggota Aktif.',
   },
 ];
 
@@ -52,13 +52,131 @@ function ModalHead({ eyebrow, title, subtitle, onClose, saving, tone = 'text-amb
   );
 }
 
-function Rows({ rows }) {
-  return rows.filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => (
-    <div key={k} className="flex justify-between gap-3">
-      <dt className="text-slate-500 flex-shrink-0">{k}</dt>
-      <dd className="text-slate-800 font-medium text-right break-words min-w-0">{v}</dd>
+// Kelompok data ringkas: label di atas nilai, 2 kolom; isian panjang selebar penuh
+function Section({ title, items }) {
+  const list = items.map(([k, v, full]) => [k, v === null || v === undefined || v === '' ? '-' : v, full]);
+  return (
+    <section>
+      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">{title}</h4>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+        {list.map(([k, v, full]) => (
+          <div key={k} className={`min-w-0 ${full ? 'col-span-2' : ''}`}>
+            <dt className="text-[10px] text-slate-500">{k}</dt>
+            <dd className="text-xs font-medium text-slate-800 break-words leading-snug">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+
+// Status masa berlaku KTA + tombol ubah data
+function KtaCard({ validUntil, left, action }) {
+  const ok = left > 0;
+  return (
+    <div className={`rounded-xl p-3 border flex items-center gap-3 ${ok ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
+      <CalendarClock className={`w-5 h-5 flex-shrink-0 ${ok ? 'text-emerald-600' : 'text-red-600'}`} />
+      <div className="min-w-0 flex-1 text-xs">
+        <p className={`font-semibold ${ok ? 'text-emerald-800' : 'text-red-800'}`}>
+          {ok ? `KTA masih berlaku · ${left} hari lagi` : 'Masa berlaku KTA sudah lewat'}
+        </p>
+        <p className={ok ? 'text-emerald-700' : 'text-red-700'}>Berlaku sampai {fmtDate(validUntil)}</p>
+      </div>
+      {action}
     </div>
-  ));
+  );
+}
+
+// Isian data penerbit pada formulir anggota lama — urutan & label sama dengan formulir pemohon.
+// [key, label, wajib, tipe, lebar penuh]
+const EDIT_FIELDS = [
+  ['publisherName', 'Nama penerbit', true, 'text', true], ['legalEntity', 'Badan usaha'], ['nib', 'NIB'],
+  ['leaderName', 'Nama pimpinan', true], ['leaderTitle', 'Jabatan pimpinan'],
+  ['personInCharge', 'Penanggung jawab / PIC', true], ['leaderPhone', 'No. HP pimpinan'],
+  ['address', 'Alamat', true, 'textarea', true], ['city', 'Kota / kabupaten', true], ['postalCode', 'Kode pos'],
+  ['phone', 'Telepon penerbit', true], ['email', 'Email penerbit', true, 'email'],
+  ['website', 'Website'], ['specialization', 'Spesialisasi terbitan'],
+  ['notes', 'Catatan untuk Admin', false, 'textarea', true],
+];
+
+// Tampilan baca: semua isian formulir pemohon, satu per satu
+const ktaItems = (d, proof, proofName) => [
+  ['Nomor KTA', <span className="font-mono font-bold">{d.ktaNumber || '-'}</span>, true],
+  ['Tanggal terbit', fmtDate(d.issuedAt)],
+  ['Berlaku sampai', fmtDate(d.validUntil)],
+  ['Bukti KTA', proof ? (
+    <a href={fileUrl(proof)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sky-700 hover:underline max-w-full">
+      <FileText className="w-3.5 h-3.5 flex-shrink-0" /> <span className="truncate">{proofName || 'Lihat bukti'}</span>
+    </a>
+  ) : '-', true],
+];
+const publisherItems = (d) => EDIT_FIELDS.map(([k, label, , , full]) => [label, d[k], full]);
+
+function EditMigForm({ userId, initial, onCancel, onSaved }) {
+  const [f, setF] = useState(() => {
+    const o = {};
+    for (const [k] of EDIT_FIELDS) o[k] = initial?.[k] || '';
+    o.ktaNumber = initial?.ktaNumber || '';
+    o.issuedAt = String(initial?.issuedAt || '').slice(0, 10);
+    o.validUntil = String(initial?.validUntil || '').slice(0, 10);
+    return o;
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setF((p) => ({ ...p, [k]: k === 'ktaNumber' ? e.target.value.toUpperCase() : e.target.value }));
+  const input = 'w-full text-xs px-2.5 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-200 focus:border-sky-400 outline-none';
+
+  const save = async () => {
+    setSaving(true); setErr('');
+    try {
+      const res = await fetch(`/api/admin/hereg-requests/${userId}/data`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeader() }, body: JSON.stringify(f),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Gagal menyimpan.');
+      onSaved(data);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="px-5 py-4 space-y-3 max-h-[55vh] overflow-y-auto">
+      <p className="text-[11px] text-slate-500">Perbaiki isian yang keliru. Pemohon mendapat notifikasi daftar data yang diubah.</p>
+      <div className="grid grid-cols-2 gap-2.5">
+        <label className="col-span-2 block">
+          <span className="block text-[11px] font-semibold text-slate-600 mb-1">Nomor KTA <span className="text-red-500">*</span></span>
+          <input value={f.ktaNumber} onChange={set('ktaNumber')} className={`${input} font-mono`} />
+        </label>
+        <label className="block">
+          <span className="block text-[11px] font-semibold text-slate-600 mb-1">Tanggal terbit <span className="text-red-500">*</span></span>
+          <input type="date" value={f.issuedAt} onChange={set('issuedAt')} className={input} />
+        </label>
+        <label className="block">
+          <span className="block text-[11px] font-semibold text-slate-600 mb-1">Berlaku sampai <span className="text-red-500">*</span></span>
+          <input type="date" value={f.validUntil} onChange={set('validUntil')} className={input} />
+        </label>
+        {EDIT_FIELDS.map(([k, label, req, type, full]) => (
+          <label key={k} className={`block ${full ? 'col-span-2' : ''}`}>
+            <span className="block text-[11px] font-semibold text-slate-600 mb-1">{label}{req && <span className="text-red-500"> *</span>}</span>
+            {type === 'textarea'
+              ? <textarea rows={2} value={f[k]} onChange={set(k)} className={input} />
+              : <input type={type || 'text'} value={f[k]} onChange={set(k)} className={input} />}
+          </label>
+        ))}
+      </div>
+      {err && <p className="text-[11px] text-red-600 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />{err}</p>}
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onCancel} disabled={saving} className="px-3 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100">Batal</button>
+        <button type="button" onClick={save} disabled={saving} className="px-3 py-2 rounded-lg text-xs font-semibold bg-[#0884c4] hover:bg-[#076fa5] text-white disabled:opacity-50 flex items-center gap-1">
+          <Save className="w-3.5 h-3.5" /> {saving ? 'Menyimpan...' : 'Simpan perubahan'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -76,6 +194,7 @@ export default function HeregRequestsPanel() {
   const [track, setTrack] = useState('Perpanjangan');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
   // Jalur yang dibuka Admin di Pengaturan Sistem (default keduanya)
   const [enabled, setEnabled] = useState(TRACKS.map((t) => t.key));
   const tracks = TRACKS.filter((t) => enabled.includes(t.key));
@@ -107,7 +226,7 @@ export default function HeregRequestsPanel() {
   useEffect(() => { load(); }, []);
 
   const open = (item) => {
-    setReview(item); setMode(null); setNote('');
+    setReview(item); setMode(null); setNote(''); setEditing(false);
     // Form gabungan: saran jalur dari masa berlaku KTA; pengajuan lama: dari data anggota yang cocok
     const vu = item.hereg_mig_data?.validUntil;
     const guess = item.hereg_mig_data?.ktaNumber
@@ -115,8 +234,29 @@ export default function HeregRequestsPanel() {
       : item.kta_matches?.some((m) => m.membership_status === 'Aktif') ? 'Masih Aktif' : 'Perpanjangan';
     setTrack(enabled.includes(guess) ? guess : enabled[0]);
   };
-  const openMig = (item) => { setMigReview(item); setMode(null); setNote(''); };
-  const close = () => { setReview(null); setMigReview(null); };
+  const openMig = (item) => { setMigReview(item); setMode(null); setNote(''); setEditing(false); };
+  const close = () => { setReview(null); setMigReview(null); setEditing(false); };
+
+  // Data hasil koreksi Admin: perbarui modal & daftar tanpa menutup modal
+  const onEdited = (data) => {
+    const patch = (it) => ({
+      ...it, hereg_mig_data: data.hereg_mig_data, old_kta_number: data.old_kta_number,
+      ...(data.kta_matches ? { kta_matches: data.kta_matches } : {}),
+    });
+    const id = (review || migReview)?.id;
+    if (review) setReview(patch);
+    if (migReview) setMigReview(patch);
+    setItems((l) => l.map((it) => (it.id === id ? patch(it) : it)));
+    setMigs((l) => l.map((it) => (it.id === id ? patch(it) : it)));
+    setEditing(false);
+    notify(data.message);
+  };
+  const editBtn = (
+    <button type="button" onClick={() => { setEditing(true); setMode(null); }} disabled={saving}
+      className="ml-auto flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#0884c4] bg-white hover:bg-sky-50 border border-sky-200">
+      <Pencil className="w-3 h-3" /> Ubah data
+    </button>
+  );
 
   const post = async (url, body) => {
     setSaving(true);
@@ -249,68 +389,48 @@ export default function HeregRequestsPanel() {
 
           {rd && (
             <div className="px-5 pt-4">
-              <div className={`rounded-xl p-3 border flex items-center gap-3 ${rdLeft > 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
-                <CalendarClock className={`w-5 h-5 flex-shrink-0 ${rdLeft > 0 ? 'text-emerald-600' : 'text-red-600'}`} />
-                <div className="min-w-0 text-xs">
-                  <p className="font-semibold text-slate-800">{rd.publisherName}</p>
-                  <p className={rdLeft > 0 ? 'text-emerald-700' : 'text-red-700'}>
-                    Terbit {fmtDate(rd.issuedAt)} · berlaku s.d. {fmtDate(rd.validUntil)}
-                    {rdLeft > 0 ? ` (${rdLeft} hari lagi)` : ' · sudah lewat'}
-                  </p>
-                </div>
-              </div>
+              <KtaCard validUntil={rd.validUntil} left={rdLeft} action={!editing && editBtn} />
             </div>
           )}
 
-          <dl className={`px-5 py-4 space-y-2.5 text-xs ${rd ? 'max-h-[40vh] overflow-y-auto' : ''}`}>
-            <Rows rows={[
-              ['Nomor KTA lama', <span className="font-mono font-bold">{review.old_kta_number || '-'}</span>],
-              ['Kategori', review.member_category === 'Luar Biasa' ? 'Anggota Luar Biasa' : 'Anggota Biasa'],
-              ['Email', review.email],
-              ['Telepon', review.phone || '-'],
-              ['Akun dibuat', fmtDate(review.created_at)],
-              ...(rd ? [
-                ['Badan usaha', rd.legalEntity],
-                ['Pimpinan', [rd.leaderName, rd.leaderTitle].filter(Boolean).join(' · ')],
-                ['Penanggung jawab', rd.personInCharge],
-                ['NIB', rd.nib],
-                ['Alamat', [rd.address, rd.city, rd.postalCode].filter(Boolean).join(', ')],
-                ['Telepon penerbit', rd.phone],
-                ['Email penerbit', rd.email],
-                ['Website', rd.website],
-                ['Spesialisasi', rd.specialization],
-                ['Catatan pemohon', rd.notes],
-              ] : []),
-            ]} />
-            {rd && review.hereg_mig_proof && (
-              <div className="flex justify-between gap-3">
-                <dt className="text-slate-500">Bukti KTA</dt>
-                <dd className="min-w-0">
-                  <a href={fileUrl(review.hereg_mig_proof)} target="_blank" rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-sky-700 hover:underline font-medium max-w-[14rem] truncate">
-                    <FileText className="w-3.5 h-3.5 flex-shrink-0" /> <span className="truncate">{review.hereg_mig_proof_name || 'Lihat bukti'}</span>
-                  </a>
-                </dd>
-              </div>
+          {editing && rd ? (
+            <EditMigForm userId={review.id} initial={rd} onCancel={() => setEditing(false)} onSaved={onEdited} />
+          ) : (<>
+          <div className={`px-5 py-4 space-y-3 ${rd ? 'max-h-[42vh] overflow-y-auto' : ''}`}>
+            {rd ? (<>
+              <Section title="Data KTA" items={ktaItems(rd, review.hereg_mig_proof, review.hereg_mig_proof_name)} />
+              <Section title="Data penerbit" items={publisherItems(rd)} />
+              <Section title="Akun pemohon" items={[
+                ['Kategori', review.member_category === 'Luar Biasa' ? 'Luar Biasa' : 'Biasa'],
+                ['Akun dibuat', fmtDate(review.created_at)],
+                ['Telepon akun', review.phone],
+                ['Email akun', review.email, true],
+              ]} />
+            </>) : (
+              <Section title="Data pendaftaran" items={[
+                ['Nomor KTA lama', <span className="font-mono font-bold">{review.old_kta_number || '-'}</span>, true],
+                ['Kategori', review.member_category === 'Luar Biasa' ? 'Luar Biasa' : 'Biasa'],
+                ['Akun dibuat', fmtDate(review.created_at)],
+                ['Email', review.email],
+                ['Telepon', review.phone || '-'],
+              ]} />
             )}
-            <div className="pt-1">
-              <dt className="text-slate-500 mb-1">Pencocokan data anggota</dt>
-              {review.kta_matches?.length ? (
-                <dd className="space-y-1">
-                  {review.kta_matches.map((m, i) => (
-                    <div key={i} className="p-2 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-800">
-                      <span className="font-semibold">{m.publisher_name || '-'}</span> · {m.membership_status} · {m.category}
-                    </div>
-                  ))}
-                </dd>
-              ) : (
-                <dd className="p-2 rounded-lg bg-amber-50 border border-amber-100 text-amber-800 flex items-start gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                  Nomor ini belum tercatat di data anggota sistem. Cek arsip / IKAPI Pusat dulu.
-                </dd>
-              )}
-            </div>
-          </dl>
+            {review.kta_matches?.length ? (
+              <div className="space-y-1">
+                {review.kta_matches.map((m, i) => (
+                  <p key={i} className="p-2 rounded-lg bg-emerald-50 border border-emerald-100 text-[11px] text-emerald-800 flex items-start gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>Cocok dengan data anggota: <b>{m.publisher_name || '-'}</b> · {m.membership_status} · {m.category}</span>
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="p-2 rounded-lg bg-amber-50 border border-amber-100 text-[11px] text-amber-800 flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                KTA belum tercatat di sistem. Cek arsip / IKAPI Pusat dulu.
+              </p>
+            )}
+          </div>
 
           {mode === 'reject' ? (
             <div className="px-5 pb-3">
@@ -321,11 +441,12 @@ export default function HeregRequestsPanel() {
               <p className="text-[10px] text-slate-500 mt-1">Alasan ini dikirim ke pemohon untuk diperbaiki.</p>
             </div>
           ) : (
-            <fieldset className="px-5 pb-4">
-              <legend className="text-[11px] font-semibold text-slate-600 mb-1.5">
-                {tracks.length > 1 ? 'Jalur bila disetujui' : 'Jalur yang dibuka (diatur di Pengaturan Sistem)'}
-              </legend>
-              <div className="space-y-2">
+            <fieldset className="px-5 pt-3 pb-4 border-t border-slate-100">
+              <legend className="sr-only">Jalur bila disetujui</legend>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                {tracks.length > 1 ? 'Jalur bila disetujui' : 'Jalur yang dibuka'}
+              </p>
+              <div className={tracks.length > 1 ? 'grid grid-cols-1 sm:grid-cols-2 gap-2' : ''}>
                 {tracks.map((t) => (
                   <label key={t.key} className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition ${
                     trackOff(t.key) ? 'border-slate-200 opacity-50 cursor-not-allowed'
@@ -336,7 +457,7 @@ export default function HeregRequestsPanel() {
                     <span>
                       <span className="block text-xs font-semibold text-slate-800">{t.title}</span>
                       <span className="block text-[11px] text-slate-500 leading-snug">
-                        {trackOff(t.key) ? 'Tidak tersedia: masa berlaku KTA sudah lewat.' : !rd && t.key === 'Masih Aktif' ? 'KTA masih berlaku. Pemohon mengisi data keanggotaan di dashboard, lalu Admin memvalidasi masa aktifnya.' : t.desc}
+                        {trackOff(t.key) ? 'Tidak tersedia: KTA sudah lewat.' : !rd && t.key === 'Masih Aktif' ? 'KTA masih berlaku. Pemohon isi data, lalu Admin validasi.' : t.desc}
                       </span>
                     </span>
                   </label>
@@ -364,6 +485,7 @@ export default function HeregRequestsPanel() {
               </>
             )}
           </div>
+          </>)}
         </Modal>
       )}
 
@@ -374,16 +496,7 @@ export default function HeregRequestsPanel() {
             subtitle="Cocokkan data & bukti KTA. Bila masih berlaku, pemohon langsung jadi Anggota Aktif." onClose={close} saving={saving} />
 
           <div className="px-5 pt-4">
-            <div className={`rounded-xl p-3 border flex items-center gap-3 ${migLeft > 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
-              <CalendarClock className={`w-5 h-5 flex-shrink-0 ${migLeft > 0 ? 'text-emerald-600' : 'text-red-600'}`} />
-              <div className="min-w-0 text-xs">
-                <p className="font-mono font-bold text-slate-800">{md.ktaNumber}</p>
-                <p className={migLeft > 0 ? 'text-emerald-700' : 'text-red-700'}>
-                  Terbit {fmtDate(md.issuedAt)} · berlaku s.d. {fmtDate(md.validUntil)}
-                  {migLeft > 0 ? ` (${migLeft} hari lagi)` : ' · sudah lewat'}
-                </p>
-              </div>
-            </div>
+            <KtaCard validUntil={md.validUntil} left={migLeft} action={!editing && editBtn} />
             {md.ktaNumber && migReview.old_kta_number && md.ktaNumber !== String(migReview.old_kta_number).toUpperCase() && (
               <p className="mt-2 text-[11px] text-amber-700 flex items-start gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> Berbeda dengan KTA lama saat daftar: {migReview.old_kta_number}
@@ -391,34 +504,18 @@ export default function HeregRequestsPanel() {
             )}
           </div>
 
-          <dl className="px-5 py-4 space-y-2 text-xs max-h-[40vh] overflow-y-auto">
-            <Rows rows={[
-              ['Penerbit', md.publisherName],
-              ['Badan usaha', md.legalEntity],
-              ['Pimpinan', [md.leaderName, md.leaderTitle].filter(Boolean).join(' · ')],
-              ['Penanggung jawab', md.personInCharge],
-              ['NIB', md.nib],
-              ['Alamat', [md.address, md.city, md.postalCode].filter(Boolean).join(', ')],
-              ['Telepon', md.phone],
-              ['Email', md.email],
-              ['Website', md.website],
-              ['Spesialisasi', md.specialization],
-              ['Catatan pemohon', md.notes],
-              ['Kategori', migReview.member_category === 'Luar Biasa' ? 'Anggota Luar Biasa' : 'Anggota Biasa'],
-              ['Akun', `${migReview.name} · ${migReview.email}`],
+          {editing ? (
+            <EditMigForm userId={migReview.id} initial={md} onCancel={() => setEditing(false)} onSaved={onEdited} />
+          ) : (<>
+          <div className="px-5 py-4 space-y-3 max-h-[42vh] overflow-y-auto">
+            <Section title="Data KTA" items={ktaItems(md, migReview.hereg_mig_proof, migReview.hereg_mig_proof_name)} />
+            <Section title="Data penerbit" items={publisherItems(md)} />
+            <Section title="Akun pemohon" items={[
+              ['Nama akun', migReview.name],
+              ['Kategori', migReview.member_category === 'Luar Biasa' ? 'Luar Biasa' : 'Biasa'],
+              ['Email akun', migReview.email, true],
             ]} />
-            {migReview.hereg_mig_proof && (
-              <div className="flex justify-between gap-3">
-                <dt className="text-slate-500">Bukti KTA</dt>
-                <dd className="min-w-0">
-                  <a href={fileUrl(migReview.hereg_mig_proof)} target="_blank" rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-sky-700 hover:underline font-medium max-w-[14rem] truncate">
-                    <FileText className="w-3.5 h-3.5 flex-shrink-0" /> <span className="truncate">{migReview.hereg_mig_proof_name || 'Lihat bukti'}</span>
-                  </a>
-                </dd>
-              </div>
-            )}
-          </dl>
+          </div>
 
           {mode && (
             <div className="px-5 pb-3">
@@ -464,6 +561,7 @@ export default function HeregRequestsPanel() {
               </>
             )}
           </div>
+          </>)}
         </Modal>
       )}
     </div>

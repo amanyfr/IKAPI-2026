@@ -273,6 +273,7 @@ function publicUser(user, member = null) {
     old_kta_number: user.old_kta_number || null,
     hereg_status: user.hereg_status || null,
     hereg_note: user.hereg_note || null,
+    hereg_requested_at: user.hereg_requested_at || null,
     hereg_track: user.hereg_track || null,
     hereg_mig_status: user.hereg_mig_status || null,
     hereg_mig_note: user.hereg_mig_note || null,
@@ -1228,6 +1229,79 @@ app.put('/api/admin/users/:id/membership', authenticate, authorize('Admin'), asy
   } catch (err) {
     console.error('Update membership period error:', err);
     res.status(500).json({ error: 'Gagal mengubah masa aktif.' });
+  }
+});
+
+// Admin mengelola data penerbit anggota aktif (baris members dari pengajuan Aktif terakhir)
+const ADMIN_MEMBER_FIELDS = [
+  ['publisher_name', 'publisherName', 255, 'Nama penerbit'], ['legal_entity', 'legalEntity', 100, 'Badan usaha'],
+  ['leader_name', 'leaderName', 255, 'Nama pimpinan'], ['leader_title', 'leaderTitle', 255, 'Jabatan pimpinan'],
+  ['leader_phone', 'leaderPhone', 50, 'Telepon pimpinan'], ['nib', 'nib', 100, 'NIB'], ['npwp', 'npwp', 100, 'NPWP'],
+  ['address', 'address', 2000, 'Alamat'], ['city', 'city', 150, 'Kota/kabupaten'], ['postal_code', 'postalCode', 20, 'Kode pos'],
+  ['phone', 'phone', 50, 'Telepon'], ['fax', 'fax', 50, 'Faks'], ['email', 'email', 255, 'Email'],
+  ['website', 'website', 255, 'Website'], ['person_in_charge', 'personInCharge', 255, 'PJ redaksi / editor'],
+  ['specialization', 'specialization', 2000, 'Spesialisasi'],
+];
+const activeMemberRow = async (userId) => {
+  const sub = await query.get(
+    `SELECT id, member_id FROM submissions
+     WHERE user_id = ? AND status = 'Aktif' AND member_id IS NOT NULL ORDER BY id DESC LIMIT 1`, [userId]);
+  if (!sub) return null;
+  const m = await query.get('SELECT * FROM members WHERE id = ?', [sub.member_id]);
+  return m ? { sub, m } : null;
+};
+
+app.get('/api/admin/users/:id/member', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const row = await activeMemberRow(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Akun ini belum memiliki keanggotaan aktif.' });
+    const out = { kta_number: row.m.kta_number, category: row.m.category, membership_status: row.m.membership_status };
+    for (const [col, key] of ADMIN_MEMBER_FIELDS) out[key] = row.m[col] && row.m[col] !== '-' ? row.m[col] : '';
+    res.json({ member: out });
+  } catch (err) {
+    console.error('Admin member get error:', err);
+    res.status(500).json({ error: 'Gagal memuat data penerbit.' });
+  }
+});
+
+app.put('/api/admin/users/:id/member', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const target = await query.get('SELECT id, name, role FROM users WHERE id = ?', [req.params.id]);
+    if (!target || target.role !== 'Anggota') return res.status(404).json({ error: 'Akun anggota tidak ditemukan.' });
+    const row = await activeMemberRow(target.id);
+    if (!row) return res.status(400).json({ error: 'Akun ini belum memiliki keanggotaan aktif.' });
+
+    const b = req.body || {};
+    const data = {};
+    for (const [col, key, max] of ADMIN_MEMBER_FIELDS) {
+      const v = b[key] == null ? '' : String(b[key]).trim();
+      if (v.length > max) return res.status(400).json({ error: 'Isian terlalu panjang.' });
+      data[col] = v;
+    }
+    const required = ['publisher_name', 'leader_name', 'address', 'city', 'phone', 'email', 'person_in_charge'];
+    const missing = ADMIN_MEMBER_FIELDS.filter(([col]) => required.includes(col) && !data[col]).map(([, , , label]) => label);
+    if (missing.length) return res.status(400).json({ error: `${missing.join(', ')} wajib diisi.` });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return res.status(400).json({ error: 'Format email tidak valid.' });
+    const category = b.category === 'Luar Biasa' ? 'Luar Biasa' : b.category === 'Biasa' ? 'Biasa' : row.m.category;
+
+    const norm = (v) => (v && v !== '-' ? String(v) : '');
+    const changed = ADMIN_MEMBER_FIELDS.filter(([col]) => norm(row.m[col]) !== data[col]).map(([, , , label]) => label);
+    if (category !== row.m.category) changed.push('Kategori');
+    if (!changed.length) return res.json({ message: 'Tidak ada perubahan.' });
+
+    const cols = Object.keys(data);
+    await query.run(
+      `UPDATE members SET ${cols.map((c) => `${c} = ?`).join(', ')}, category = ?, updated_at = NOW() WHERE id = ?`,
+      [...cols.map((c) => data[c] || null), category, row.m.id]);
+    if (category !== row.m.category) await query.run('UPDATE users SET member_category = ? WHERE id = ?', [category, target.id]);
+    const list = changed.join(', ');
+    await logEvent(row.sub.id, req.user, 'Admin memperbarui data penerbit anggota', list);
+    await addNotification(target.id, 'Data penerbit diperbarui Admin',
+      `Admin memperbarui data penerbit Anda: ${list}.`, row.sub.id);
+    res.json({ message: `Data penerbit ${target.name} diperbarui (${list}).` });
+  } catch (err) {
+    console.error('Admin member update error:', err);
+    res.status(500).json({ error: 'Gagal memperbarui data penerbit.' });
   }
 });
 
@@ -2591,6 +2665,48 @@ function readMigForm(body) {
   if (new Date(validUntil) <= new Date(issuedAt)) return { error: 'Tanggal berlaku sampai harus setelah tanggal terbit.' };
   return { data, kta, issuedAt, validUntil };
 }
+
+const MIG_LABELS = {
+  publisherName: 'Nama penerbit', legalEntity: 'Badan usaha', leaderName: 'Pimpinan', leaderTitle: 'Jabatan pimpinan',
+  leaderPhone: 'Telepon pimpinan', nib: 'NIB', address: 'Alamat', city: 'Kota/kabupaten', postalCode: 'Kode pos',
+  phone: 'Telepon penerbit', email: 'Email penerbit', website: 'Website', personInCharge: 'Penanggung jawab',
+  specialization: 'Spesialisasi', notes: 'Catatan', ktaNumber: 'Nomor KTA', issuedAt: 'Tanggal terbit', validUntil: 'Berlaku sampai',
+};
+
+// Admin memperbaiki isian formulir anggota lama selama masih menunggu verifikasi / validasi
+app.put('/api/admin/hereg-requests/:userId/data', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const u = await query.get('SELECT * FROM users WHERE id = ? AND role = ?', [req.params.userId, 'Anggota']);
+    if (!u || u.member_type !== 'Lama') return res.status(404).json({ error: 'Akun anggota lama tidak ditemukan.' });
+    const hasSub = await query.get('SELECT id FROM submissions WHERE user_id = ? LIMIT 1', [u.id]);
+    const pending = (u.hereg_status || 'Menunggu') === 'Menunggu'
+      || (u.hereg_status === 'Disetujui' && u.hereg_track === 'Masih Aktif' && u.hereg_mig_status === 'Menunggu');
+    if (hasSub || !pending) return res.status(400).json({ error: 'Data hanya bisa diubah selama masih menunggu verifikasi Admin.' });
+
+    const form = readMigForm(req.body || {});
+    if (form.error) return res.status(400).json({ error: form.error });
+    const { data, kta, issuedAt, validUntil } = form;
+    const dup = await query.get(
+      'SELECT publisher_name FROM members WHERE kta_number = ? AND user_id IS NOT NULL AND user_id <> ?', [kta, u.id]);
+    if (dup) return res.status(400).json({ error: `Nomor KTA ${kta} sudah dipakai ${dup.publisher_name}.` });
+
+    const before = parseJsonSafe(u.hereg_mig_data) || {};
+    const next = { ...before, ...data, ktaNumber: kta, issuedAt, validUntil };
+    const changed = Object.keys(MIG_LABELS).filter((k) => String(before[k] ?? '') !== String(next[k] ?? ''));
+    if (!changed.length) return res.json({ message: 'Tidak ada perubahan.', hereg_mig_data: next, old_kta_number: kta, changed });
+
+    await query.run('UPDATE users SET hereg_mig_data = ?, old_kta_number = ? WHERE id = ?', [JSON.stringify(next), kta, u.id]);
+    const labels = changed.map((k) => MIG_LABELS[k]).join(', ');
+    await addNotification(u.id, 'Data formulir anggota lama diperbarui Admin',
+      `Admin memperbaiki data formulir Anda: ${labels}. Periksa kembali di dashboard.`);
+    const kta_matches = await query.all(
+      'SELECT publisher_name, membership_status, category, kta_number FROM members WHERE kta_number = ? LIMIT 5', [kta]);
+    res.json({ message: `Data ${u.name} diperbarui (${labels}).`, hereg_mig_data: next, old_kta_number: kta, kta_matches, changed });
+  } catch (err) {
+    console.error('Hereg data edit error:', err);
+    res.status(500).json({ error: 'Gagal memperbarui data anggota lama.' });
+  }
+});
 
 // Aktifkan anggota lama dari data keanggotaan yang dikirim pemohon (tanpa formulir & pembayaran)
 async function activateOldMember({ u, d, validUntil, note, reviewer, actor }) {

@@ -46,6 +46,17 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
     { label: 'Isi formulir & unggah dokumen', done: false },
   ];
 
+  // Estimasi verifikasi Admin: maks. 2×24 jam kerja (2 hari kerja, Sabtu–Minggu tidak dihitung)
+  const sentAt = user?.hereg_requested_at ? new Date(String(user.hereg_requested_at).replace(' ', 'T')) : null;
+  const dueAt = (() => {
+    if (!sentAt || Number.isNaN(sentAt.getTime())) return null;
+    const d = new Date(sentAt);
+    let left = 2;
+    while (left > 0) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) left -= 1; }
+    return d;
+  })();
+  const fmtDay = (d) => d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
   return (
     <div className="relative w-full max-w-3xl mx-auto lg:min-h-[calc(100vh-14rem)] flex items-center">
       <div className="overflow-hidden w-full rounded-[28px] bg-white border border-slate-200/80 shadow-[0_30px_80px_-40px_rgba(11,26,74,0.45)]">
@@ -111,6 +122,24 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
                 </li>
               ))}
             </ol>
+          )}
+
+          {!rejected && (
+            <div className="rounded-2xl border border-sky-100 bg-sky-50/60 p-4 flex items-start gap-3">
+              <span className="w-10 h-10 rounded-xl bg-white text-[#0884c4] ring-1 ring-sky-100 flex items-center justify-center flex-shrink-0">
+                <Clock className="w-5 h-5" />
+              </span>
+              <div className="min-w-0 text-sm">
+                <p className="text-xs text-slate-500">Estimasi waktu verifikasi Admin</p>
+                <p className="font-semibold text-slate-900">Maks. 2×24 jam kerja</p>
+                <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                  {dueAt
+                    ? <>Dikirim {fmtDay(sentAt)} · perkiraan selesai paling lambat <strong className="font-semibold text-slate-700">{fmtDay(dueAt)}</strong>. </>
+                    : null}
+                  Hari Sabtu, Minggu & libur nasional tidak dihitung. Anda akan mendapat notifikasi begitu Admin selesai memeriksa.
+                </p>
+              </div>
+            </div>
           )}
 
           <p className="flex items-start gap-2 text-xs text-slate-500">
