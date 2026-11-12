@@ -74,18 +74,8 @@ export default function AnggotaPortal() {
 
             {/* Logo */}
             <div className="flex items-center gap-3 min-w-0">
-              <img src="/logo-ikapi.jpg" alt="IKAPI" className="w-9 h-9 sm:w-11 sm:h-11 flex-shrink-0 rounded-2xl object-cover bg-white ring-1 ring-slate-200/70 shadow-sm" />
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-base sm:text-lg text-slate-900 whitespace-nowrap">IKAPI Jawa Barat</span>
-                  <span className="hidden sm:inline-flex soft-chip">
-                    <span className={`w-1.5 h-1.5 rounded-full ${verified ? 'bg-[#12c26f]' : 'bg-amber-400'}`} />
-                    {roleLabel}
-                  </span>
-                </div>
-                <p className={`sm:hidden text-[11px] font-medium ${verified ? 'text-emerald-600' : 'text-amber-600'}`}>{roleLabel}</p>
-                <p className="hidden md:block text-xs text-slate-500">Pendaftaran & Registrasi Keanggotaan IKAPI Jawa Barat</p>
-              </div>
+              <img src="/logo-ikapi.jpg" alt="IKAPI" className="w-9 h-9 sm:w-10 sm:h-10 flex-shrink-0 object-contain" />
+              <span className="font-semibold text-base sm:text-lg text-slate-900 whitespace-nowrap">IKAPI Jawa Barat</span>
             </div>
 
             {/* User & Logout */}

@@ -2365,7 +2365,8 @@ app.post('/api/submissions/:id/kta-confirm', authenticate, authorize('Anggota'),
     const subId = req.params.id;
     const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
     if (!sub || sub.user_id !== req.user.id) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
-    if (sub.status !== 'Dikirim ke Pusat') {
+    // 'Berkas Diterima' = data alur lama; tetap boleh mengisi KTA dan dipindah ke 'Dikirim ke Pusat'
+    if (sub.status !== 'Dikirim ke Pusat' && sub.status !== 'Berkas Diterima') {
       return res.status(400).json({ error: 'Nomor KTA diisi setelah berkas dikirim ke IKAPI Pusat.' });
     }
     if (sub.kta_review_status === 'Menunggu') {
@@ -2393,14 +2394,15 @@ app.post('/api/submissions/:id/kta-confirm', authenticate, authorize('Anggota'),
     await query.run(
       `UPDATE submissions SET kta_number_submitted = ?, kta_issued_at = ?, kta_proof_file = ?, kta_proof_name = ?,
          kta_notes = ?, kta_confirmed_at = NOW(), kta_review_status = 'Menunggu', kta_review_note = NULL,
-         kta_reviewed_at = NULL, kta_reviewed_by = NULL, updated_at = NOW()
+         kta_reviewed_at = NULL, kta_reviewed_by = NULL, updated_at = NOW(),
+         status = 'Dikirim ke Pusat', sent_to_central_at = COALESCE(sent_to_central_at, NOW())
        WHERE id = ?`,
       [kta, issuedAt, filePath, req.file.originalname, notes, subId]
     );
     await logEvent(subId, req.user, `Pemohon ${resubmit ? 'mengirim ulang' : 'mengisi'} Nomor KTA ${kta}, menunggu verifikasi Admin`, notes);
     await addNotification({ role: 'Admin' }, 'Nomor KTA perlu diverifikasi',
       `Pengajuan #${subId} ${resubmit ? 'mengirim ulang' : 'mengisi'} No. KTA ${kta}. Periksa bukti dari IKAPI Pusat di Monitoring Berkas.`, Number(subId));
-    res.json({ message: 'Data KTA terkirim. Admin akan memeriksa datanya sebelum keanggotaan Anda diaktifkan.', status: sub.status });
+    res.json({ message: 'Data KTA terkirim. Admin akan memeriksa datanya sebelum keanggotaan Anda diaktifkan.', status: 'Dikirim ke Pusat' });
   } catch (err) {
     console.error('KTA confirm error:', err);
     res.status(500).json({ error: 'Gagal menyimpan data KTA.' });
@@ -2746,62 +2748,11 @@ app.post('/api/submissions/:id/kta-review', authenticate, authorize('Admin'), as
 });
 
 // Admin: berkas fisik sudah sampai di sekretariat -> pemohon resmi menjadi anggota
-app.post('/api/submissions/:id/physical-received', authenticate, authorize('Admin'), async (req, res) => {
-  try {
-    const subId = req.params.id;
-    const { notes } = req.body;
-    const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
-    if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
-    if (sub.status !== 'Pengiriman Berkas') {
-      return res.status(400).json({ error: 'Pengajuan ini tidak sedang menunggu berkas fisik.' });
-    }
-    // Berkas fisik hanya bisa dikonfirmasi diterima setelah pemohon menandainya sudah dikirim
-    if (sub.physical_status !== 'Dikirim') {
-      return res.status(400).json({ error: 'Pemohon belum menandai berkas fisik sudah dikirim.' });
-    }
-    await query.run(
-      `UPDATE submissions SET status = 'Berkas Diterima', physical_status = 'Diterima',
-         physical_received_at = NOW(), physical_received_by = ?, updated_at = NOW()
-       WHERE id = ?`,
-      [req.user.name, subId]
-    );
-    await logEvent(subId, req.user, 'Berkas fisik diterima sekretariat IKAPI Jawa Barat, siap dikirim ke IKAPI Pusat', notes || null);
-    res.json({ message: 'Berkas fisik dikonfirmasi diterima. Langkah berikutnya: kirim paket ke IKAPI Pusat.', status: 'Berkas Diterima' });
-  } catch (err) {
-    console.error('Physical received error:', err);
-    res.status(500).json({ error: 'Gagal mengonfirmasi berkas fisik.' });
-  }
-});
-
-// Admin mencatat paket berkas dikirim ke IKAPI Pusat; status menjadi menunggu No. KTA dari Pusat
-app.post('/api/submissions/:id/sent-to-central', authenticate, authorize('Admin'), async (req, res) => {
-  try {
-    const subId = req.params.id;
-    const { courier, trackingNo, notes } = req.body;
-    const sub = await query.get('SELECT id, status FROM submissions WHERE id = ?', [subId]);
-    if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
-    if (sub.status !== 'Berkas Diterima') {
-      return res.status(400).json({ error: 'Hanya pengajuan yang berkas fisiknya sudah diterima yang bisa dikirim ke Pusat.' });
-    }
-    if (!String(courier || '').trim()) {
-      return res.status(400).json({ error: 'Isi jasa pengiriman / cara pengiriman ke IKAPI Pusat.' });
-    }
-    const trackFormatErr = formatError(req.body, { trackingNo: ['digits', 'Nomor resi'] });
-    if (trackFormatErr) return res.status(400).json({ error: trackFormatErr });
-    await query.run(
-      `UPDATE submissions SET status = 'Dikirim ke Pusat', sent_to_central_at = NOW(),
-         central_courier = ?, central_tracking_no = ?, central_notes = ?, central_sent_by = ?, updated_at = NOW()
-       WHERE id = ?`,
-      [String(courier).trim(), trackingNo ? String(trackingNo).trim() : null, notes || null, req.user.name, subId]
-    );
-    const detail = [String(courier).trim(), trackingNo ? `resi ${String(trackingNo).trim()}` : null].filter(Boolean).join(' · ');
-    await logEvent(subId, req.user, `Berkas dikirim ke IKAPI Pusat (${detail}), menunggu Nomor KTA`, notes || null);
-    res.json({ message: 'Pengiriman ke IKAPI Pusat tercatat. Pemohon mengisi Nomor KTA setelah terbit dari Pusat, lalu Sekretaris memverifikasi.', status: 'Dikirim ke Pusat' });
-  } catch (err) {
-    console.error('Sent to central error:', err);
-    res.status(500).json({ error: 'Gagal mencatat pengiriman ke Pusat.' });
-  }
-});
+// Alur berkas fisik lama (kirim ke sekretariat + resi -> Admin terima -> Admin kirim ke Pusat) sudah tidak dipakai.
+// Alur berlaku: pemohon kirim langsung ke IKAPI Pusat (/physical-sent), isi No. KTA (/kta-confirm), Admin validasi (/kta-review).
+const LEGACY_PHYSICAL_GONE = { error: 'Alur ini sudah tidak dipakai. Pemohon mengirim berkas langsung ke IKAPI Pusat, mengisi Nomor KTA, lalu Admin memvalidasi.' };
+app.post('/api/submissions/:id/physical-received', authenticate, (req, res) => res.status(410).json(LEGACY_PHYSICAL_GONE));
+app.post('/api/submissions/:id/sent-to-central', authenticate, (req, res) => res.status(410).json(LEGACY_PHYSICAL_GONE));
 
 // ==========================================
 // 6. DASHBOARD & STATS (ADMIN 2 MONITORING)
@@ -2916,8 +2867,6 @@ app.get('/api/members', authenticate, authorize('Sekretaris', 'Ketua'), async (r
   }
 });
 
-// Input / koreksi No. KTA dari IKAPI Pusat (tugas Sekretaris).
-// Pengajuan berstatus 'Dikirim ke Pusat' otomatis menjadi Aktif saat KTA diinput.
 // Anggota aktif memperbarui data penerbitnya sendiri (tanpa pengajuan baru).
 // Nama penerbit, kategori & nomor KTA tidak bisa diubah di sini (tercantum di KTA).
 app.put('/api/members/me/profile', authenticate, authorize('Anggota'), async (req, res) => {

@@ -254,7 +254,7 @@ export default function AuthPage() {
 
             {/* Logo (HP/tablet) */}
             <div className="lg:hidden flex items-center gap-3 mb-7">
-              <img src="/logo-ikapi.jpg" alt="Logo IKAPI" className="auth-logo w-10 h-10 rounded-full object-cover bg-white ring-1 ring-slate-200" />
+              <img src="/logo-ikapi.jpg" alt="Logo IKAPI" className="auth-logo w-10 h-10 rounded-full object-cover bg-white" />
               <div className="leading-tight">
                 <p className="text-sm font-semibold text-slate-900">IKAPI Jawa Barat</p>
                 <p className="text-xs text-slate-500">Sistem keanggotaan</p>

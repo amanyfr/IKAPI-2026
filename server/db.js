@@ -90,10 +90,10 @@ export function nowSql(date = new Date()) {
 // Draf -> Menunggu Verifikasi (Tahap 1: screening dokumen oleh Admin) <-> Perlu Revisi
 // -> Menunggu Pembayaran (Tahap 2: bayar & verifikasi bukti transfer oleh Admin)
 // -> Menunggu TTD Sekretaris -> Menunggu Approval (TTD Ketua)
-// -> Pengiriman Berkas (pemohon cetak & kirim berkas fisik ke IKAPI Jabar)
-// -> Berkas Diterima (Admin konfirmasi berkas fisik sampai di sekretariat)
-// -> Dikirim ke Pusat (Admin kirim paket ke IKAPI Pusat, menunggu No. KTA)
-// -> Aktif (Sekretaris input No. KTA dari Pusat)
+// -> Pengiriman Berkas (pemohon cetak & kirim sendiri berkas fisik langsung ke IKAPI Pusat)
+// -> Dikirim ke Pusat (pemohon mengisi No. KTA dari Pusat, Admin memvalidasi)
+// -> Aktif (No. KTA divalidasi Admin)
+// 'Berkas Diterima' hanya untuk data alur lama.
 // 'Disetujui' hanya untuk data lama.
 export const SUBMISSION_STATUSES = [
   'Draf', 'Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris',

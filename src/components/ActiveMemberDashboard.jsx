@@ -246,7 +246,7 @@ export default function ActiveMemberDashboard({
             <div className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white/80 pl-4 pr-2 py-2 shadow-sm max-w-full">
               <div className="min-w-0">
                 <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Nomor KTA</p>
-                <p className="font-mono text-lg font-semibold tracking-wider text-slate-800 truncate">{kta || 'Sedang dicatat'}</p>
+                <p className="font-mono text-lg font-semibold tracking-wider text-slate-800 truncate">{kta || 'Belum tercatat'}</p>
               </div>
               {kta && (
                 <button type="button" onClick={copyKta} title="Salin nomor KTA"
@@ -303,7 +303,7 @@ export default function ActiveMemberDashboard({
 
                 <div>
                   <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.2em] text-white/70">Nomor KTA</p>
-                  <p className="font-mono text-lg sm:text-2xl tracking-[0.12em] font-medium break-all">{kta || 'Sedang dicatat'}</p>
+                  <p className="font-mono text-lg sm:text-2xl tracking-[0.12em] font-medium break-all">{kta || 'Belum tercatat'}</p>
                 </div>
 
                 <div className="flex items-end justify-between gap-4">
@@ -381,7 +381,7 @@ export default function ActiveMemberDashboard({
             <p className="text-sm text-slate-500">
               {pending
                 ? 'Isi tanggal terbit & tanggal berlaku KTA lewat tombol lengkapi data, supaya sisa masa aktif tampil di sini.'
-                : 'Tanggal aktif keanggotaan sedang dicatat oleh pengurus.'}
+                : 'Tanggal aktif keanggotaan belum tercatat.'}
             </p>
           )}
         </div>

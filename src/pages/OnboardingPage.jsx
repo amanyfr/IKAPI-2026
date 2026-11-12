@@ -94,11 +94,8 @@ export default function OnboardingPage({ onBack, onDone }) {
       <header className="soft-header relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <img src="/logo-ikapi.jpg" alt="IKAPI" className="w-9 h-9 sm:w-11 sm:h-11 flex-shrink-0 rounded-2xl object-cover bg-white ring-1 ring-slate-200/70 shadow-sm" />
-            <div className="min-w-0">
-              <span className="font-medium text-base sm:text-lg text-slate-900 whitespace-nowrap">IKAPI Jawa Barat</span>
-              <p className="text-[11px] sm:text-xs text-slate-500 truncate">Halo, {user?.name}</p>
-            </div>
+            <img src="/logo-ikapi.jpg" alt="IKAPI" className="w-9 h-9 sm:w-10 sm:h-10 flex-shrink-0 object-contain" />
+            <span className="font-semibold text-base sm:text-lg text-slate-900 whitespace-nowrap">IKAPI Jawa Barat</span>
           </div>
           <button
             onClick={logout}

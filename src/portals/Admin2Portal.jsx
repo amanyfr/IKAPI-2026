@@ -47,17 +47,8 @@ export default function Admin2Portal() {
 
             {/* Logo */}
             <div className="flex items-center gap-3 min-w-0">
-              <img src="/logo-ikapi.jpg" alt="IKAPI" className="w-9 h-9 sm:w-11 sm:h-11 flex-shrink-0 rounded-xl object-cover bg-white ring-2 ring-white/20 shadow-md" />
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-extrabold text-base sm:text-lg text-white whitespace-nowrap">IKAPI Jawa Barat</span>
-                  <span className="hidden sm:inline text-[11px] bg-white/10 text-indigo-200 font-bold px-2.5 py-0.5 rounded-full border border-indigo-300/30 whitespace-nowrap">
-                    KETUA
-                  </span>
-                </div>
-                <p className="sm:hidden text-[10px] text-indigo-200 font-bold uppercase tracking-wide">KETUA</p>
-                <p className="hidden md:block text-xs text-white/55 font-medium">Approval pengajuan & tanda tangan surat pengantar</p>
-              </div>
+              <img src="/logo-ikapi.jpg" alt="IKAPI" className="w-9 h-9 sm:w-11 sm:h-11 flex-shrink-0 rounded-lg object-cover bg-white" />
+              <span className="font-semibold text-base sm:text-lg text-white whitespace-nowrap">IKAPI Jawa Barat</span>
             </div>
 
             {/* User & Logout */}

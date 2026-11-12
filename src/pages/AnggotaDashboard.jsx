@@ -88,7 +88,7 @@ function PrintNotice({ compact = false }) {
       <p>
         <strong className="font-semibold">Berkas fisik wajib dicetak sendiri.</strong>{' '}
         Setelah disetujui Sekretaris & Ketua, Anda mencetak surat pengantar, formulir, dan fotokopi berkas persyaratan,
-        lalu mengirimnya langsung ke IKAPI Pusat. Setelah Pusat menyetujui, Anda mengisi Nomor KTA di sistem dan keanggotaan langsung aktif.
+        lalu mengirimnya langsung ke IKAPI Pusat. Setelah Pusat menerbitkan KTA, Anda mengisi Nomor KTA di sistem, lalu Admin memvalidasi sebelum keanggotaan aktif.
       </p>
     </div>
   );
