@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
 import { fileUrl } from '../utils/fileUrl';
+import { isMeaningfulNote, NOTE_HINT } from '../utils/noteRules';
 
 const token = () => localStorage.getItem('ikapi_token');
 
@@ -110,15 +111,9 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
     notify(data.message);
   };
 
-  const handleReceive = async (id, notes) => {
-    await postAction(`/api/submissions/${id}/physical-received`, { notes });
-    await openDetail(id);
-    load();
-  };
-
   const handleKtaReview = async (id, decision) => {
-    if (decision === 'reject' && !rejectNote.trim()) {
-      notify('Tulis alasan penolakan agar pemohon tahu yang harus diperbaiki.', { tone: 'error' });
+    if (decision === 'reject' && !isMeaningfulNote(rejectNote)) {
+      notify(`Tulis alasan penolakan agar pemohon tahu yang harus diperbaiki. ${NOTE_HINT}`, { tone: 'error' });
       return;
     }
     setReviewing(id);
@@ -134,12 +129,6 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
     }
   };
 
-  const handleSendCentral = async (id, data) => {
-    await postAction(`/api/submissions/${id}/sent-to-central`, data);
-    await openDetail(id);
-    load();
-  };
-
   const stageCounts = useMemo(() => {
     const map = {};
     submissions.forEach((s) => {
@@ -150,32 +139,27 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
   }, [submissions]);
 
   const sectionCount = (sec) => submissions.filter((s) => sec.statuses.includes(s.status)).length;
-  const activeSection = SECTIONS.find((s) => s.key === section) || SECTIONS[0];
+  // Tahap 'Berkas Diterima' (alur lama lewat sekretariat) hanya ditampilkan bila masih ada datanya
+  const hasLegacy = submissions.some((s) => s.status === 'Berkas Diterima');
+  const sections = hasLegacy ? SECTIONS : SECTIONS.filter((sec) => sec.key !== 'pusat');
+  const tiles = hasLegacy ? TILES : TILES.filter((t) => t.key !== 'Berkas Diterima');
+  const activeSection = sections.find((s) => s.key === section) || sections[0];
   const q = search.trim().toLowerCase();
   const list = submissions
     .filter((s) => activeSection.statuses.includes(s.status))
     .filter((s) => !q || `${s.publisher_name} ${s.applicant_name} ${s.physical_tracking_no || ''} ${s.central_tracking_no || ''} ${s.member_kta || ''}`.toLowerCase().includes(q));
 
-  const shipped = submissions.filter((s) => s.status === 'Pengiriman Berkas' && s.physical_status === 'Dikirim').length;
-  const notShipped = submissions.filter((s) => s.status === 'Pengiriman Berkas' && s.physical_status !== 'Dikirim').length;
-  const readyCentral = stageCounts['Berkas Diterima'] || 0;
+  const notShipped = submissions.filter((s) => s.status === 'Pengiriman Berkas').length;
   const waitingKta = submissions.filter((s) => s.status === 'Dikirim ke Pusat');
   const overdueKta = waitingKta.filter((s) => (daysSince(s.sent_to_central_at) ?? 0) > 30).length;
   const totalActive = stageCounts.Aktif || 0;
   const ktaToReview = waitingKta.filter((s) => s.kta_review_status === 'Menunggu').length;
-  const needAction = shipped + readyCentral + ktaToReview;
+  const needAction = ktaToReview;
 
   const rowInfo = (s) => {
     if (s.status === 'Pengiriman Berkas') {
-      return s.physical_status === 'Dikirim'
-        ? { badge: 'Sudah dikirim · perlu dikonfirmasi', tone: 'bg-sky-50 text-[#0884c4] border-sky-200',
-            meta: [
-              s.physical_courier && { icon: Truck, text: s.physical_courier },
-              s.physical_tracking_no && { icon: Hash, text: `Resi ${s.physical_tracking_no}` },
-              { icon: CalendarDays, text: `Dikirim ${formatDate(s.physical_sent_at)}` },
-            ] }
-        : { badge: 'Belum dikirim pemohon', tone: 'bg-amber-50 text-amber-800 border-amber-200',
-            meta: [{ icon: CalendarDays, text: `Disetujui Ketua ${formatDate(s.approved_at)}` }] };
+      return { badge: 'Pemohon belum kirim ke Pusat', tone: 'bg-amber-50 text-amber-800 border-amber-200',
+        meta: [{ icon: CalendarDays, text: `Disetujui Ketua ${formatDate(s.approved_at)}` }] };
     }
     if (s.status === 'Berkas Diterima') {
       return { badge: 'Di sekretariat · siap dikirim', tone: 'bg-indigo-50 text-indigo-700 border-indigo-200',
@@ -209,23 +193,19 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
 
   // Posisi pengajuan di 4 tahap fisik (0..3) untuk progres kecil di kartu
   const physicalStage = (s) => {
-    if (s.status === 'Pengiriman Berkas') return 0;
-    if (s.status === 'Berkas Diterima') return 1;
-    if (s.status === 'Dikirim ke Pusat') return 2;
-    return 3;
+    const i = sections.findIndex((sec) => sec.statuses.includes(s.status));
+    return i < 0 ? sections.length - 1 : i;
   };
 
   const actionFor = (s) => {
     if (user?.role !== 'Admin') return { label: 'Lihat', icon: Eye, primary: false };
-    if (s.status === 'Pengiriman Berkas' && s.physical_status === 'Dikirim') return { label: 'Konfirmasi diterima', icon: CheckCircle, primary: true };
-    if (s.status === 'Berkas Diterima') return { label: 'Catat kirim ke Pusat', icon: Send, primary: true };
     return { label: 'Lihat riwayat', icon: Clock, primary: false };
   };
 
-  const modalRole = user?.role === 'Admin' && ['Pengiriman Berkas', 'Berkas Diterima'].includes(detail?.submission?.status) ? 'Admin' : 'Pengamat';
+  const modalRole = user?.role === 'Admin' && ['Pengiriman Berkas', 'Dikirim ke Pusat'].includes(detail?.submission?.status) ? 'Admin' : 'Pengamat';
 
   const kpis = [
-    { label: 'Perlu tindakan Admin', value: needAction, note: `${ktaToReview} verifikasi KTA${readyCentral ? ` · ${readyCentral} kirim ke Pusat` : ''}`, icon: AlertTriangle },
+    { label: 'Perlu tindakan Admin', value: needAction, note: `${ktaToReview} verifikasi KTA`, icon: AlertTriangle },
     { label: 'Tahap Input KTA', value: waitingKta.length, note: overdueKta ? `${overdueKta} lewat 30 hari` : 'Semua dalam batas wajar', icon: HelpCircle },
     { label: 'Anggota aktif', value: totalActive, note: 'KTA diverifikasi Admin', icon: BadgeCheck },
   ];
@@ -280,8 +260,8 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
           <p className="text-xs text-slate-400">Klik tahap untuk membuka daftarnya</p>
         </div>
         <div className="-mx-5 sm:mx-0 px-5 sm:px-0 overflow-x-auto pb-1">
-          <div className="min-w-[760px] grid grid-cols-9">
-            {TILES.map((step, i) => {
+          <div className={`min-w-[760px] grid ${hasLegacy ? 'grid-cols-9' : 'grid-cols-8'}`}>
+            {tiles.map((step, i) => {
               const n = stageCounts[step.key] || 0;
               const Icon = step.icon;
               const physical = i >= PHYSICAL_FROM;
@@ -290,10 +270,10 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
                 <button
                   key={step.key}
                   onClick={() => onOpenScreening?.(step.key)}
-                  className={`group relative flex flex-col items-center text-center px-1 pt-3 pb-3 ${physical ? 'bg-sky-50/70' : ''} ${i === PHYSICAL_FROM ? 'rounded-l-2xl' : ''} ${i === TILES.length - 1 ? 'rounded-r-2xl' : ''}`}
+                  className={`group relative flex flex-col items-center text-center px-1 pt-3 pb-3 ${physical ? 'bg-sky-50/70' : ''} ${i === PHYSICAL_FROM ? 'rounded-l-2xl' : ''} ${i === tiles.length - 1 ? 'rounded-r-2xl' : ''}`}
                   title={`Buka daftar: ${STATUS_LABEL[step.key] || step.label}`}
                 >
-                  {i < TILES.length - 1 && (
+                  {i < tiles.length - 1 && (
                     <span className={`absolute top-[34px] left-1/2 w-full h-0.5 ${has ? 'bg-[#0da2e7]/60' : 'bg-slate-200'}`} />
                   )}
                   <span className={`relative z-10 w-11 h-11 rounded-full flex items-center justify-center transition group-hover:scale-110 ${
@@ -311,9 +291,9 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
               );
             })}
           </div>
-          <div className="min-w-[760px] grid grid-cols-9 mt-2 text-[10px] uppercase tracking-wider font-semibold">
+          <div className={`min-w-[760px] grid ${hasLegacy ? 'grid-cols-9' : 'grid-cols-8'} mt-2 text-[10px] uppercase tracking-wider font-semibold`}>
             <span className="col-span-5 text-slate-400 text-center border-t border-dashed border-slate-200 pt-1.5">Verifikasi & tanda tangan</span>
-            <span className="col-span-4 text-[#0884c4] text-center border-t border-dashed border-sky-300 pt-1.5">Berkas fisik & IKAPI Pusat</span>
+            <span className={`${hasLegacy ? 'col-span-4' : 'col-span-3'} text-[#0884c4] text-center border-t border-dashed border-sky-300 pt-1.5`}>Berkas fisik & IKAPI Pusat</span>
           </div>
         </div>
       </div>
@@ -330,14 +310,14 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
             </div>
             <div className="relative w-full sm:w-64">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari penerbit / resi / KTA"
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari penerbit / pemohon / KTA"
                 className="w-full text-sm pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-[#0da2e7]" />
             </div>
           </div>
 
           {/* Tahap fisik sebagai kartu pilihan */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {SECTIONS.map((sec, i) => {
+          <div className={`grid grid-cols-2 ${hasLegacy ? 'lg:grid-cols-4' : 'sm:grid-cols-3'} gap-3`}>
+            {sections.map((sec, i) => {
               const Icon = sec.icon;
               const active = section === sec.key;
               const n = sectionCount(sec);
@@ -348,7 +328,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
                     <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${sec.tone.icon}`}>
                       <Icon className="w-[18px] h-[18px]" />
                     </span>
-                    {i < SECTIONS.length - 1 && <ChevronRight className="hidden lg:block w-4 h-4 text-slate-300" />}
+                    {i < sections.length - 1 && <ChevronRight className="hidden lg:block w-4 h-4 text-slate-300" />}
                   </div>
                   <p className="mt-3 text-3xl font-light text-slate-900 leading-none">{n}</p>
                   <p className={`mt-1.5 text-sm font-semibold ${active ? sec.tone.text : 'text-slate-700'}`}>{sec.short}</p>
@@ -393,8 +373,8 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
                     </div>
 
                     {/* Progres 4 tahap fisik */}
-                    <div className="flex items-center gap-1.5" title={SECTIONS[stage].label}>
-                      {SECTIONS.map((sec, i) => (
+                    <div className="flex items-center gap-1.5" title={sections[stage].label}>
+                      {sections.map((sec, i) => (
                         <span key={sec.key} className={`h-1.5 flex-1 rounded-full ${i <= stage ? sec.tone.bar : 'bg-slate-200'}`} />
                       ))}
                     </div>
@@ -480,8 +460,6 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
           payment={detail.payment}
           timeline={detail.timeline}
           role={modalRole}
-          onReceivePhysical={handleReceive}
-          onSendCentral={handleSendCentral}
         />
       )}
     </div>

@@ -3,11 +3,21 @@
 // tidak hilang saat modal ditutup/dibatalkan dan tidak perlu membuka ulang dari awal.
 // Kunci: `doc-<id>` (berkas persyaratan), `payment` (bukti transfer), `letter-<key>` (dokumen surat).
 
-const storeKey = (submissionId) => {
-  let userId = 'anon';
-  try { userId = JSON.parse(localStorage.getItem('ikapi_user') || '{}')?.id ?? 'anon'; } catch { /* abaikan */ }
-  return `ikapi_viewed:${userId}:${submissionId}`;
+// ID pengguna diambil dari payload token login (ikapi_token) agar progres terpisah per akun
+// walau beberapa akun bergantian login di browser yang sama.
+const currentUserId = () => {
+  try {
+    const token = localStorage.getItem('ikapi_token');
+    if (!token) return 'anon';
+    const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(part.padEnd(part.length + ((4 - (part.length % 4)) % 4), '=')));
+    return payload?.id ?? 'anon';
+  } catch {
+    return 'anon';
+  }
 };
+
+const storeKey = (submissionId) => `ikapi_viewed:${currentUserId()}:${submissionId}`;
 
 export function loadViewed(submissionId) {
   if (!submissionId) return new Set();

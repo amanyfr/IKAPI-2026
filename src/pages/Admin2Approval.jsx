@@ -265,6 +265,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
           signature={mySignature.signature}
           saving={mySignature.saving}
           onSave={mySignature.save}
+          loading={!mySignature.loaded}
         />
       )}
 

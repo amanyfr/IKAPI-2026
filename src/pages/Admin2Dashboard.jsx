@@ -113,7 +113,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
           <h1 className="text-2xl sm:text-3xl font-light tracking-tight text-slate-900 truncate">
             Selamat datang, <span className="text-indigo-700">{displayName}</span>
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">{atAdmin1} pengajuan masih di Admin & Sekretaris · {total} pengajuan total</p>
+          <p className="text-xs text-slate-500 mt-0.5">{loading ? 'Memuat ringkasan pengajuan…' : `${atAdmin1} pengajuan masih di Admin & Sekretaris · ${total} pengajuan total`}</p>
         </div>
         <HeaderStats
           loading={loading}

@@ -28,8 +28,6 @@ const HEREG_TRACK_OPTIONS = [
 ];
 
 const DEFAULT_TEMPLATES = {
-  surat_kop_alamat: 'Sekretariat: Jl. Ibu Inggit Garnasih No. 148, Regol, Kota Bandung 40252',
-  surat_kop_kontak: 'Telp: (022) 5202684 | Email: sekretariat@ikapi-jabar.or.id | Web: https://ikapi-jabar.or.id',
   surat_tujuan: 'Pengurus Pusat IKAPI\nc.q. Bidang Keanggotaan & Organisasi\nJl. Kalipasir No. 32, Cikini, Menteng\nJakarta Pusat 10330',
   surat_pembuka_baru: 'Sehubungan dengan permohonan pendaftaran Anggota Baru IKAPI yang diajukan ke Pengurus Daerah Jawa Barat, bersama ini kami sampaikan bahwa penerbit pemohon telah memenuhi seluruh persyaratan keabsahan hukum, verifikasi kompetensi perbukuan/editor BNSP, serta penyelesaian administrasi organisasi:',
   surat_pembuka_hereg: 'Sehubungan dengan permohonan Heregistrasi (Pembaruan Keanggotaan) yang diajukan oleh penerbit di wilayah Pengurus Daerah IKAPI Jawa Barat, kami telah melakukan verifikasi faktual terhadap berkas administrasi dan pelunasan kewajiban iuran. Berdasarkan hal tersebut, kami menerangkan data penerbit sebagai berikut:',
@@ -55,6 +53,8 @@ export default function SystemSettings() {
     ketua_signature_img: '',
     sekretaris_signature_img: '',
     stempel_img: '',
+    kop_header_img: '',
+    kop_footer_img: '',
     ...DEFAULT_TEMPLATES,
     ...INVOICE_DEFAULTS
   });
@@ -486,32 +486,24 @@ export default function SystemSettings() {
             </button>
           </div>
 
+          {/* Kop surat = gambar utuh (kepala & kaki) yang dipakai di semua surat, invoice & dokumen pengurus */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">
-                Baris Alamat Kop Surat Sekretariat
-              </label>
-              <input
-                type="text"
-                name="surat_kop_alamat"
-                value={settings.surat_kop_alamat || ''}
-                onChange={handleChange}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">
-                Baris Kontak Kop Surat (Telp / Email / Web)
-              </label>
-              <input
-                type="text"
-                name="surat_kop_kontak"
-                value={settings.surat_kop_kontak || ''}
-                onChange={handleChange}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
-              />
-            </div>
+            <SignatureUploadBox
+              title="Gambar Kepala Surat (Kop)"
+              subtitle="Dipakai di surat, invoice & dokumen pengurus"
+              imageData={settings.kop_header_img}
+              defaultSrc="/kop-surat-header.png"
+              onUpload={(e) => handleImageUpload('kop_header_img', e)}
+              onClear={() => handleClearImage('kop_header_img')}
+            />
+            <SignatureUploadBox
+              title="Gambar Kaki Surat"
+              subtitle="QRIS, kanal resmi & rekening di bagian bawah"
+              imageData={settings.kop_footer_img}
+              defaultSrc="/kop-surat-footer.png"
+              onUpload={(e) => handleImageUpload('kop_footer_img', e)}
+              onClear={() => handleClearImage('kop_footer_img')}
+            />
           </div>
 
           <div>
@@ -676,7 +668,7 @@ export default function SystemSettings() {
   );
 }
 
-function SignatureUploadBox({ title, subtitle, imageData, onUpload, onClear }) {
+function SignatureUploadBox({ title, subtitle, imageData, onUpload, onClear, defaultSrc }) {
   return (
     <div className="border border-slate-200 rounded-xl p-4 bg-[#f8fbfe] flex flex-col justify-between space-y-3">
       <div>
@@ -691,6 +683,11 @@ function SignatureUploadBox({ title, subtitle, imageData, onUpload, onClear }) {
             alt={title}
             className="max-h-24 max-w-full object-contain"
           />
+        ) : defaultSrc ? (
+          <div className="text-center w-full">
+            <img src={defaultSrc} alt={title} className="max-h-20 max-w-full object-contain mx-auto opacity-80" />
+            <span className="block text-[10px] text-slate-400 mt-1">Gambar bawaan (belum diganti)</span>
+          </div>
         ) : (
           <div className="text-center text-slate-400 text-[11px]">
             <Image className="w-6 h-6 mx-auto mb-1 opacity-40 text-[#0da2e7]" />

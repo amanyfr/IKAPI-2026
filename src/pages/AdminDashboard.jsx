@@ -9,7 +9,7 @@ import {
 import {
   ArrowUpRight, ArrowRight, Users, UserPlus, UserCheck, RefreshCw, Lightbulb, Wallet,
   FileSignature, Search, Sparkles, CheckCircle2, CircleDashed, KeyRound,
-  ShieldCheck, CreditCard, Truck, Activity
+  ShieldCheck, CreditCard, BadgeCheck, Activity
 } from 'lucide-react';
 
 const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota'];
@@ -27,16 +27,20 @@ const TREND_SERIES = [
   { key: 'pengajuan', label: 'Pengajuan masuk', color: '#0da2e7', tipClass: 'text-sky-300',   dateOf: submittedDate,                 filter: (x) => x.kind === 'submission' },
 ];
 
-// Kelengkapan pengaturan sesuai PRD: biaya, rekening, template surat, gambar TTD & stempel
-const settingsChecklist = (s) => [
+// Kelengkapan pengaturan sesuai PRD: biaya, rekening, template surat, gambar TTD & stempel.
+// TTD dianggap siap bila ada gambar di Pengaturan ATAU pengurus sudah menyimpan TTD pribadinya.
+const settingsChecklist = (s, users = []) => {
+  const hasPersonalSig = (role) => users.some((u) => u.role === role && u.has_signature);
+  return [
   { label: 'Rekening pembayaran', ok: Boolean(s.bank_name && s.bank_account && s.bank_holder) },
   { label: 'Biaya pendaftaran',   ok: Boolean(s.fee_uang_pangkal && s.fee_administrasi && s.fee_iuran_bulanan && s.fee_heregistrasi_iuran) },
   { label: 'Nama Ketua & Sekretaris', ok: Boolean(s.ketua_nama && s.sekretaris_nama) },
-  { label: 'Gambar TTD Ketua',    ok: Boolean(s.ketua_signature_img) },
-  { label: 'Gambar TTD Sekretaris', ok: Boolean(s.sekretaris_signature_img) },
-  { label: 'Stempel resmi',       ok: Boolean(s.stempel_img) },
+  { label: 'TTD Ketua',           ok: Boolean(s.ketua_signature_img) || hasPersonalSig('Ketua') },
+  { label: 'TTD Sekretaris',      ok: Boolean(s.sekretaris_signature_img) || hasPersonalSig('Sekretaris') },
+  { label: 'Stempel resmi',       ok: true, note: s.stempel_img ? 'Unggahan' : 'Bawaan' },
   { label: 'Template surat',      ok: true, note: s.surat_pembuka_baru ? 'Kustom' : 'Standar' },
-];
+  ];
+};
 
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` });
 
@@ -84,7 +88,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   const newAccounts = users.filter((u) => (parseDate(u.created_at)?.getTime() || 0) >= monthAgo).length;
   const notOnboarded = users.filter((u) => u.role === 'Anggota' && !u.onboarded_at).length;
 
-  const checklist = settingsChecklist(settings);
+  const checklist = settingsChecklist(settings, users);
   const settingsDone = checklist.filter((c) => c.ok).length;
   const settingsMissing = checklist.length - settingsDone;
 
@@ -93,15 +97,14 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
     range, TREND_SERIES
   ), [users, submissions, range]);
 
-  // Tugas Admin: screening dokumen (Tahap 1), verifikasi bayar (Tahap 2), konfirmasi berkas fisik
-  // (setelah pemohon menandai sudah dikirim), dan mengirim paket ke IKAPI Pusat
+  // Tugas Admin: screening dokumen (Tahap 1), verifikasi bayar (Tahap 2), dan verifikasi No. KTA
+  // yang diisi pemohon setelah mengirim sendiri berkas fisik ke IKAPI Pusat
   const TASKS = [
     { key: 'screening', label: 'Screening berkas', action: 'Screening berkas', dot: 'bg-[#0da2e7]', chip: 'bg-sky-100 text-sky-800', icon: ShieldCheck, test: (x) => x.status === 'Menunggu Verifikasi' && !revisionRoundIn(x) },
     // Pemohon sudah mengirim dokumen perbaikan: diperiksa ulang, ditandai "Revisi ke-N"
     { key: 'revisi', label: 'Revisi', action: 'Periksa revisi', dot: 'bg-amber-500', chip: 'bg-amber-100 text-amber-900', icon: RefreshCw, test: (x) => revisionRoundIn(x) > 0 },
     { key: 'bayar', label: 'Verifikasi bayar', action: 'Cek bukti pembayaran', dot: 'bg-amber-400', chip: 'bg-amber-100 text-amber-800', icon: CreditCard, test: (x) => x.status === 'Menunggu Pembayaran' && x.payment_status === 'Menunggu' && Boolean(x.payment_proof) },
-    { key: 'fisik', label: 'Berkas fisik', action: 'Konfirmasi berkas fisik', dot: 'bg-orange-500', chip: 'bg-orange-100 text-orange-800', icon: Truck, test: (x) => x.status === 'Pengiriman Berkas' && x.physical_status === 'Dikirim' },
-    { key: 'pusat', label: 'Kirim ke Pusat', action: 'Kirim berkas ke Pusat', dot: 'bg-violet-500', chip: 'bg-violet-100 text-violet-800', icon: Truck, test: (x) => x.status === 'Berkas Diterima' },
+    { key: 'kta', label: 'Verifikasi KTA', action: 'Cek No. KTA dari pemohon', dot: 'bg-violet-500', chip: 'bg-violet-100 text-violet-800', icon: BadgeCheck, test: (x) => x.status === 'Dikirim ke Pusat' && x.kta_review_status === 'Menunggu' },
   ];
   // Pengajuan berjalan yang sedang menunggu pihak lain (pemohon, Sekretaris, Ketua, Pusat):
   // hanya tampil di filter "Semua" agar Admin melihat posisi semua pengajuan
@@ -110,8 +113,8 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
     'Menunggu Pembayaran': { label: 'Menunggu pembayaran', dot: 'bg-slate-400', chip: 'bg-slate-100 text-slate-700' },
     'Menunggu TTD Sekretaris': { label: 'Menunggu TTD Sekretaris', dot: 'bg-indigo-400', chip: 'bg-indigo-50 text-indigo-800' },
     'Menunggu Approval': { label: 'Menunggu persetujuan Ketua', dot: 'bg-indigo-400', chip: 'bg-indigo-50 text-indigo-800' },
-    'Pengiriman Berkas': { label: 'Menunggu berkas fisik', dot: 'bg-orange-300', chip: 'bg-orange-50 text-orange-800' },
-    'Dikirim ke Pusat': { label: 'Diproses di Pusat', dot: 'bg-violet-400', chip: 'bg-violet-50 text-violet-800' },
+    'Pengiriman Berkas': { label: 'Pemohon kirim berkas ke Pusat', dot: 'bg-orange-300', chip: 'bg-orange-50 text-orange-800' },
+    'Dikirim ke Pusat': { label: 'Menunggu No. KTA dari pemohon', dot: 'bg-violet-400', chip: 'bg-violet-50 text-violet-800' },
   };
   const taskOf = (x) => TASKS.find((t) => t.test(x));
   const cardOf = (x) => { const t = taskOf(x); return t ? { ...t, label: t.action, isTask: true } : (WAITING[x.status] ? { key: 'tunggu', ...WAITING[x.status] } : null); };
@@ -151,7 +154,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
   const openTask = (x) => {
     if (onOpenDetail) return onOpenDetail(x.id);
     const t = taskOf(x)?.key;
-    if (t === 'fisik' || t === 'pusat') onOpenMonitoring?.();
+    if (t === 'kta') onOpenMonitoring?.();
     else onOpenScreening?.(x.status);
   };
 
@@ -211,8 +214,8 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
                       label={t.label}
                       tone={t}
                       revisionRound={round}
-                      note={t.key === 'fisik' ? `Dikirim lewat ${x.physical_courier || '-'}` : null}
-                      noteTone="text-orange-700"
+                      note={t.key === 'kta' && x.kta_number_submitted ? `No. KTA: ${x.kta_number_submitted}` : null}
+                      noteTone="text-violet-700"
                       onClick={() => openTask(x)}
                     />
                   );

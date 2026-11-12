@@ -20,6 +20,7 @@ export default function Admin2Portal() {
   const navBtn = (tab, icon, label, shortLabel = label) => (
     <button
       aria-label={label}
+      aria-current={activeTab === tab ? 'page' : undefined}
       title={label}
       onClick={() => (tab === 'approval' ? openApproval() : setActiveTab(tab))}
       className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition ${
@@ -108,7 +109,7 @@ export default function Admin2Portal() {
             scrollToMonitoring={approvalFilters.scroll}
           />
         )}
-        {/* Sesuai PRD, input No. KTA adalah tugas Sekretaris — Ketua hanya melihat direktori */}
+        {/* Sesuai PRD, No. KTA diisi pemohon & diverifikasi Sekretaris — Ketua hanya melihat direktori */}
         {activeTab === 'members'   && <MembersManagement canEditKta={false} />}
       </main>
 

@@ -34,6 +34,8 @@ if (!/^[A-Za-z0-9_]+$/.test(DB_CONFIG.database)) {
   throw new Error(`Nama database tidak valid: ${DB_CONFIG.database}`);
 }
 
+const DB_TIMEZONE = process.env.DB_TIMEZONE || '+07:00';
+
 const pool = mysql.createPool({
   ...DB_CONFIG,
   waitForConnections: true,
@@ -44,7 +46,17 @@ const pool = mysql.createPool({
   dateStrings: true,
   // SUM()/DECIMAL dikembalikan sebagai number, bukan string.
   decimalNumbers: true,
-  multipleStatements: true
+  multipleStatements: true,
+  // Zona waktu tetap WIB agar NOW()/CURRENT_TIMESTAMP tidak bergantung pada zona server MySQL.
+  timezone: DB_TIMEZONE
+});
+
+// Set zona waktu sesi tiap koneksi baru (query di koneksi yang sama berjalan berurutan,
+// jadi SET ini selesai sebelum query aplikasi pertama).
+pool.pool.on('connection', (conn) => {
+  conn.query('SET time_zone = ?', [DB_TIMEZONE], (err) => {
+    if (err) console.error('Gagal set time_zone MySQL:', err.message);
+  });
 });
 
 // Helper database. API sama seperti versi SQLite: run / get / all / exec.

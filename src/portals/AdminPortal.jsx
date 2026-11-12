@@ -30,6 +30,9 @@ export default function AdminPortal() {
 
   const navBtn = (tab, icon, label, shortLabel = label) => (
     <button
+      aria-label={label}
+      aria-current={activeTab === tab ? 'page' : undefined}
+      title={label}
       onClick={() => (tab === 'users' ? openUsers() : setActiveTab(tab))}
       className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition ${activeTab === tab
           ? 'bg-blue-800 text-white shadow-sm shadow-blue-800/30'
@@ -37,8 +40,8 @@ export default function AdminPortal() {
         }`}
     >
       {icon}
-      <span className="sm:hidden">{shortLabel}</span>
-      <span className="hidden sm:inline">{label}</span>
+      <span className="lg:hidden">{shortLabel}</span>
+      <span className="hidden lg:inline">{label}</span>
     </button>
   );
 

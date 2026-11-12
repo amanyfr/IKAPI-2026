@@ -135,7 +135,7 @@ export function QueueFilterBar({ title, filters, active, onChange, sortOrder, on
                   ? 'bg-slate-900 text-white'
                   : 'bg-slate-200/80 text-slate-600'}`}
                 >
-                  {f.value}
+                  {loading ? '…' : f.value}
                 </span>
               </button>
             );

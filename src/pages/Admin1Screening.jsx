@@ -19,7 +19,6 @@ import {
   Download,
   Users,
   PenTool,
-  KeyRound,
   BadgeCheck,
   XCircle,
   X
@@ -215,33 +214,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     fetchSubmissions();
   };
 
-  // Admin: berkas fisik sudah sampai di sekretariat -> pemohon resmi menjadi anggota
-  const handleReceivePhysical = async (submissionId, notes) => {
-    const res = await fetch(`/api/submissions/${submissionId}/physical-received`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` },
-      body: JSON.stringify({ notes })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-    notify(data.message);
-    openVerificationModal(submissionId);
-    fetchSubmissions();
-  };
-
-  const handleSendCentral = async (submissionId, payload) => {
-    const res = await fetch(`/api/submissions/${submissionId}/sent-to-central`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-    notify(data.message);
-    openVerificationModal(submissionId);
-    fetchSubmissions();
-  };
-
   // Sekretaris action (request_revision / pass_to_admin2 / update_kta)
   const handleAdmin1Action = async (submissionId, action, notes, extra = {}) => {
     const res = await fetch(`/api/submissions/${submissionId}/admin1-action`, {
@@ -308,12 +280,11 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
   // Keterangan singkat apa yang sedang ditunggu pada setiap pengajuan
   const waitingText = (sub) => {
     if (sub.status === 'Menunggu Pembayaran') return sub.payment_status === 'Perlu Revisi' ? 'Bukti transfer dikembalikan' : 'Menunggu pembayaran pemohon';
-    if (sub.status === 'Pengiriman Berkas') return sub.physical_status === 'Dikirim' ? `Berkas dikirim (${sub.physical_courier || '-'})` : 'Berkas fisik belum dikirim';
-    if (sub.status === 'Berkas Diterima') return 'Siap dikirim ke IKAPI Pusat';
+    if (sub.status === 'Pengiriman Berkas') return 'Pemohon mengirim berkas fisik ke IKAPI Pusat';
     if (sub.status === 'Dikirim ke Pusat') {
       if (sub.kta_review_status === 'Menunggu') return 'Data KTA masuk · perlu diverifikasi';
       if (sub.kta_review_status === 'Ditolak') return 'KTA ditolak · menunggu perbaikan pemohon';
-      return `Menunggu pemohon isi data KTA${sub.central_courier ? ` (${sub.central_courier})` : ''}`;
+      return 'Menunggu pemohon isi data KTA';
     }
     if (sub.status === 'Perlu Revisi') {
       const fresh = Number(sub.fresh_revision_count) || 0;
@@ -330,8 +301,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     if (isAdmin && sub.status === 'Menunggu Verifikasi') return Number(sub.revision_round) > 0 ? `Screening revisi ke-${sub.revision_round}` : 'Screening dokumen';
     if (isAdmin && sub.status === 'Perlu Revisi' && Number(sub.fresh_revision_count) > 0) return 'Screening revisi';
     if (isAdmin && sub.status === 'Menunggu Pembayaran' && sub.payment_status === 'Menunggu' && sub.payment_proof) return 'Verifikasi bayar';
-    if (isAdmin && sub.status === 'Pengiriman Berkas' && sub.physical_status === 'Dikirim') return 'Konfirmasi berkas';
-    if (isAdmin && sub.status === 'Berkas Diterima') return 'Kirim ke Pusat';
     return null;
   };
 
@@ -351,18 +320,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           >
             <PenTool className="w-3.5 h-3.5" />
             <span>Tanda tangani</span>
-          </button>
-        )}
-
-        {/* Berkas sudah di IKAPI Pusat: Sekretaris mencatat No. KTA */}
-        {isSekretaris && sub.status === 'Dikirim ke Pusat' && onNavigateToMembers && (
-          <button
-            onClick={() => onNavigateToMembers({ status: 'Menunggu KTA' })}
-            className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold shadow transition flex items-center gap-1"
-            title="Catat Nomor KTA dari IKAPI Pusat"
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span>Input No. KTA</span>
           </button>
         )}
 
@@ -420,11 +377,11 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           </div>
           <div>
             <h2 className="text-2xl font-light tracking-tight text-slate-900">
-              {isAdmin ? 'Screening Dokumen, Pembayaran & Berkas Fisik' : 'Pengajuan & Tanda Tangan Sekretaris'}
+              {isAdmin ? 'Screening Dokumen, Pembayaran & KTA' : 'Pengajuan & Tanda Tangan Sekretaris'}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
               {isAdmin
-                ? 'Tahap 1: periksa setiap dokumen. Tahap 2: verifikasi bukti transfer. Setelah TTD Sekretaris & Ketua, konfirmasi berkas fisik yang diterima.'
+                ? 'Tahap 1: periksa setiap dokumen. Tahap 2: verifikasi bukti transfer. Setelah TTD Sekretaris & Ketua, pemohon mengirim berkas ke IKAPI Pusat lalu mengisi No. KTA untuk diverifikasi.'
                 : 'Pengajuan yang dokumen & pembayarannya sudah disetujui Admin tinggal ditandatangani. Semua dokumen & bukti transfer bisa dilihat.'}
             </p>
           </div>
@@ -460,6 +417,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           signature={mySignature.signature}
           saving={mySignature.saving}
           onSave={mySignature.save}
+          loading={!mySignature.loaded}
         />
       )}
 
@@ -487,7 +445,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
               className="w-full text-xs py-2 px-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
             >
               <option value="Semua">Semua Status</option>
-              {['Draf', 'Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris', 'Menunggu Approval', 'Pengiriman Berkas', 'Berkas Diterima', 'Dikirim ke Pusat', 'Aktif', 'Ditolak'].map((st) => (
+              {['Draf', 'Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris', 'Menunggu Approval', 'Pengiriman Berkas', 'Dikirim ke Pusat', 'Aktif', 'Ditolak'].map((st) => (
                 <option key={st} value={st}>{STATUS_LABEL[st]}</option>
               ))}
             </select>
@@ -716,8 +674,6 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           onAdmin1Action={handleAdmin1Action}
           onSignSecretary={() => startSignScreened(selectedSubDetail.submission, selectedSubDetail.settings, true)}
           onRejectSecretary={isSekretaris ? handleRejectSecretary : undefined}
-          onReceivePhysical={handleReceivePhysical}
-          onSendCentral={handleSendCentral}
         />
       )}
 

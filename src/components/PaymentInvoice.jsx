@@ -204,7 +204,7 @@ export default function PaymentInvoice({ submission, payment, settings }) {
         </div>
 
         <p className="text-[11px] text-slate-400 italic mt-8 border-t border-slate-100 pt-3">{s.invoice_notes}</p>
-        <KopSuratFooter className="mt-8" />
+        <KopSuratFooter className="mt-8" settings={settings} />
       </div>
     </div>
   );

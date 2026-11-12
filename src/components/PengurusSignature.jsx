@@ -236,20 +236,23 @@ export function PengurusSignatureBlock({ submission, settings, docKey, signing =
   );
 }
 
-// Kop surat resmi IKAPI Jawa Barat 2026 (gambar dari "Kop Surat IKAPI 2026 Rev01")
-export function KopSurat() {
+// Kop surat resmi IKAPI Jawa Barat 2026 (gambar dari "Kop Surat IKAPI 2026 Rev01").
+// Bisa diganti lewat Pengaturan Sistem (kop_header_img); kosong = gambar bawaan.
+export const DEFAULT_KOP = { header: '/kop-surat-header.png', footer: '/kop-surat-footer.png' };
+
+export function KopSurat({ settings } = {}) {
   return (
     <div className="mb-6">
-      <img src="/kop-surat-header.png" alt="Kop Surat PD IKAPI Jawa Barat" className="w-full h-auto block select-none" draggable={false} />
+      <img src={settings?.kop_header_img || DEFAULT_KOP.header} alt="Kop Surat PD IKAPI Jawa Barat" className="w-full h-auto block select-none" draggable={false} />
     </div>
   );
 }
 
 // Kaki surat resmi: QRIS, kanal resmi & rekening (bagian bawah kop 2026)
-export function KopSuratFooter({ className = 'mt-10' }) {
+export function KopSuratFooter({ className = 'mt-10', settings } = {}) {
   return (
     <div className={className}>
-      <img src="/kop-surat-footer.png" alt="Kaki Surat PD IKAPI Jawa Barat" className="w-full h-auto block select-none" draggable={false} />
+      <img src={settings?.kop_footer_img || DEFAULT_KOP.footer} alt="Kaki Surat PD IKAPI Jawa Barat" className="w-full h-auto block select-none" draggable={false} />
     </div>
   );
 }

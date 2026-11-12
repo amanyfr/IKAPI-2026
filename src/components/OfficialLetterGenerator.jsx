@@ -154,7 +154,7 @@ export default function OfficialLetterGenerator({ submission, settings, signing 
         <PengurusSignatureBlock submission={submission} settings={settings} docKey="surat" signing={signing} />
 
         {/* Kaki surat resmi */}
-        <KopSuratFooter className="mt-auto pt-6" />
+        <KopSuratFooter className="mt-auto pt-6" settings={settings} />
       </div>
     </div>
   );

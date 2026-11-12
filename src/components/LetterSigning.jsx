@@ -34,13 +34,16 @@ const authHeaders = () => ({
 export function useMySignature(enabled = true) {
   const [signature, setSignature] = useState(null);
   const [saving, setSaving] = useState(false);
+  // false selama TTD tersimpan masih dimuat, agar kartu tidak sempat menampilkan "Buat Tanda Tangan"
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
     fetch('/api/auth/signature', { headers: authHeaders() })
       .then((res) => res.json())
       .then((data) => setSignature(data.signature || null))
-      .catch((err) => console.error('Failed to load signature:', err));
+      .catch((err) => console.error('Failed to load signature:', err))
+      .finally(() => setLoaded(true));
   }, [enabled]);
 
   // Mengembalikan true bila berhasil disimpan
@@ -64,7 +67,7 @@ export function useMySignature(enabled = true) {
     }
   };
 
-  return { signature, saving, save };
+  return { signature, saving, save, loaded };
 }
 
 function SignatureEditorModal({ title, signature, saving, onSave, onClose }) {
@@ -88,7 +91,7 @@ function SignatureEditorModal({ title, signature, saving, onSave, onClose }) {
 }
 
 // Kartu "Tanda tangan saya" + editor untuk membuat / mengganti TTD tersimpan
-export function MySignatureCard({ roleLabel, signature, saving, onSave }) {
+export function MySignatureCard({ roleLabel, signature, saving, onSave, loading = false }) {
   const [isEditing, setIsEditing] = useState(false);
 
   const handleSave = async (image) => {
@@ -105,7 +108,9 @@ export function MySignatureCard({ roleLabel, signature, saving, onSave }) {
           <div className="min-w-0">
             <h3 className="text-lg text-slate-800">Tanda tangan saya <span className="text-sm text-slate-400">· {roleLabel}</span></h3>
             <p className="text-xs text-slate-500">
-              {signature
+              {loading
+                ? 'Memuat tanda tangan tersimpan…'
+                : signature
                 ? 'Tersimpan dan siap dibubuhkan berulang kali pada surat pengantar.'
                 : 'Buat tanda tangan sekali, lalu bubuhkan pada setiap surat pengantar.'}
             </p>
@@ -117,6 +122,9 @@ export function MySignatureCard({ roleLabel, signature, saving, onSave }) {
               <img src={signature} alt="Tanda tangan tersimpan" className="max-h-full max-w-full object-contain" />
             </div>
           )}
+          {loading ? (
+            <div className="h-9 w-36 rounded-xl bg-slate-100 animate-pulse" aria-label="Memuat tanda tangan" />
+          ) : (
           <button
             onClick={() => setIsEditing(true)}
             className={`px-4 py-2 text-xs font-semibold rounded-xl transition whitespace-nowrap ${
@@ -125,6 +133,7 @@ export function MySignatureCard({ roleLabel, signature, saving, onSave }) {
           >
             {signature ? 'Ganti TTD' : 'Buat Tanda Tangan'}
           </button>
+          )}
         </div>
       </div>
 

@@ -280,6 +280,8 @@ function publicUser(user, member = null) {
     hereg_mig_proof: user.hereg_mig_proof || null,
     hereg_mig_proof_name: user.hereg_mig_proof_name || null,
     onboarded_at: user.onboarded_at || null,
+    // Hanya penanda ada/tidaknya TTD tersimpan (gambarnya tidak ikut dikirim)
+    has_signature: Boolean(user.signature_img),
     created_at: user.created_at,
     member: member || null
   };
@@ -717,6 +719,15 @@ const FORMAT_RULES = {
   npwp: [/^[\d.\-]+$/, 'hanya boleh berisi angka, titik, dan strip'],
   isbn: [/^[\dXx-]+$/, 'hanya boleh berisi angka dan strip'],
 };
+// Catatan revisi / alasan penolakan harus bermakna (bukan "-" atau "." saja).
+// Sama dengan src/utils/noteRules.js di frontend.
+const NOTE_MIN_LENGTH = 5;
+const isMeaningfulNote = (text) => {
+  const t = String(text || '').trim();
+  return t.length >= NOTE_MIN_LENGTH && /\p{L}/u.test(t);
+};
+const NOTE_HINT = `Tulis alasan yang jelas (minimal ${NOTE_MIN_LENGTH} karakter dan mengandung huruf).`;
+
 function formatError(values, spec) {
   for (const [key, [rule, label]] of Object.entries(spec)) {
     const v = values?.[key];
@@ -1920,8 +1931,8 @@ app.put('/api/documents/:docId/screen', authenticate, authorize('Admin'), async 
     if (!doc.opened_at) {
       await query.run('UPDATE documents SET opened_at = NOW(), opened_by_name = ? WHERE id = ?', [req.user.name, docId]);
     }
-    if (status === 'Perlu Revisi' && !String(revisionNotes || '').trim()) {
-      return res.status(400).json({ error: 'Tulis komentar alasan dokumen tidak sesuai agar pemohon tahu apa yang harus diperbaiki.' });
+    if (status === 'Perlu Revisi' && !isMeaningfulNote(revisionNotes)) {
+      return res.status(400).json({ error: `Komentar alasan dokumen tidak sesuai belum jelas. ${NOTE_HINT}` });
     }
 
     // Sorotan bagian dokumen: dibatasi & dinormalisasi agar aman disimpan
@@ -2024,8 +2035,8 @@ app.put('/api/submissions/:id/payment/verify', authenticate, authorize('Admin'),
     if (!pay.proof_opened_at) {
       return res.status(400).json({ error: 'Buka bukti transfer terlebih dahulu sebelum memverifikasi.' });
     }
-    if (status === 'Perlu Revisi' && !String(notes || '').trim()) {
-      return res.status(400).json({ error: 'Tulis komentar alasan bukti transfer tidak sesuai.' });
+    if (status === 'Perlu Revisi' && !isMeaningfulNote(notes)) {
+      return res.status(400).json({ error: `Komentar alasan bukti transfer tidak sesuai belum jelas. ${NOTE_HINT}` });
     }
 
     await query.run(
@@ -2293,8 +2304,8 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
     if (action === 'reject') {
       // Keputusan akhir: Sekretaris di tahapnya (setelah Admin), Ketua di tahap approval
       const stageOf = { Sekretaris: 'Menunggu TTD Sekretaris', Ketua: 'Menunggu Approval' };
-      if (!reason || !String(reason).trim()) {
-        return res.status(400).json({ error: 'Alasan penolakan wajib disertakan.' });
+      if (!isMeaningfulNote(reason)) {
+        return res.status(400).json({ error: `Alasan penolakan wajib disertakan. ${NOTE_HINT}` });
       }
       if (sub.status !== stageOf[req.user.role]) {
         return res.status(400).json({ error: 'Pengajuan ini tidak sedang menunggu keputusan Anda.' });
@@ -2431,8 +2442,8 @@ app.post('/api/admin/hereg-requests/:userId/review', authenticate, authorize('Ad
     if (!['approve', 'reject'].includes(decision)) {
       return res.status(400).json({ error: 'Keputusan tidak valid.' });
     }
-    if (decision === 'reject' && !note) {
-      return res.status(400).json({ error: 'Alasan penolakan wajib diisi.' });
+    if (decision === 'reject' && !isMeaningfulNote(note)) {
+      return res.status(400).json({ error: `Alasan penolakan wajib diisi. ${NOTE_HINT}` });
     }
     const u = await query.get('SELECT * FROM users WHERE id = ? AND role = ?', [req.params.userId, 'Anggota']);
     if (!u || u.member_type !== 'Lama') return res.status(404).json({ error: 'Akun anggota lama tidak ditemukan.' });
@@ -2699,7 +2710,7 @@ app.post('/api/submissions/:id/kta-review', authenticate, authorize('Admin'), as
       return res.status(400).json({ error: 'Tidak ada data KTA yang menunggu verifikasi pada pengajuan ini.' });
     }
     if (decision === 'reject') {
-      if (!note) return res.status(400).json({ error: 'Tulis alasan penolakan agar pemohon tahu apa yang harus diperbaiki.' });
+      if (!isMeaningfulNote(note)) return res.status(400).json({ error: `Tulis alasan penolakan agar pemohon tahu apa yang harus diperbaiki. ${NOTE_HINT}` });
       await query.run(
         `UPDATE submissions SET kta_review_status = 'Ditolak', kta_review_note = ?, kta_reviewed_at = NOW(),
            kta_reviewed_by = ?, updated_at = NOW() WHERE id = ?`,
@@ -2785,7 +2796,7 @@ app.post('/api/submissions/:id/sent-to-central', authenticate, authorize('Admin'
     );
     const detail = [String(courier).trim(), trackingNo ? `resi ${String(trackingNo).trim()}` : null].filter(Boolean).join(' · ');
     await logEvent(subId, req.user, `Berkas dikirim ke IKAPI Pusat (${detail}), menunggu Nomor KTA`, notes || null);
-    res.json({ message: 'Pengiriman ke IKAPI Pusat tercatat. Sekretaris menginput Nomor KTA setelah terbit dari Pusat.', status: 'Dikirim ke Pusat' });
+    res.json({ message: 'Pengiriman ke IKAPI Pusat tercatat. Pemohon mengisi Nomor KTA setelah terbit dari Pusat, lalu Sekretaris memverifikasi.', status: 'Dikirim ke Pusat' });
   } catch (err) {
     console.error('Sent to central error:', err);
     res.status(500).json({ error: 'Gagal mencatat pengiriman ke Pusat.' });
@@ -2947,60 +2958,10 @@ app.put('/api/members/me/profile', authenticate, authorize('Anggota'), async (re
   }
 });
 
-app.put('/api/members/:id/kta', authenticate, authorize('Sekretaris'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const kta = String(req.body.kta_number || '').trim().toUpperCase();
-    if (!kta) {
-      return res.status(400).json({ error: 'Nomor KTA wajib diisi.' });
-    }
-    const member = await query.get('SELECT id, membership_status FROM members WHERE id = ?', [id]);
-    if (!member) return res.status(404).json({ error: 'Data anggota tidak ditemukan.' });
-
-    const dup = await query.get('SELECT publisher_name FROM members WHERE kta_number = ? AND id <> ?', [kta, member.id]);
-    if (dup) {
-      return res.status(400).json({ error: `Nomor KTA ${kta} sudah dipakai ${dup.publisher_name}.` });
-    }
-
-    const sub = await query.get(
-      'SELECT id, status FROM submissions WHERE member_id = ? ORDER BY id DESC LIMIT 1',
-      [member.id]
-    );
-
-    if (sub?.status === 'Dikirim ke Pusat') {
-      await query.run(
-        `UPDATE members SET kta_number = ?, membership_status = 'Aktif', updated_at = NOW() WHERE id = ?`,
-        [kta, member.id]
-      );
-      await query.run(
-        `UPDATE submissions SET status = 'Aktif', activated_at = NOW(), updated_at = NOW() WHERE id = ?`,
-        [sub.id]
-      );
-      await logEvent(sub.id, req.user, `Nomor KTA dari IKAPI Pusat diinput: ${kta}. Pemohon resmi menjadi anggota aktif`);
-      return res.json({ message: `Nomor KTA ${kta} tersimpan. Anggota kini aktif.`, activated: true });
-    }
-
-    // Koreksi KTA untuk anggota yang sudah aktif / data lama
-    const isExisting = sub ? sub.status === 'Aktif' : member.membership_status !== 'Calon';
-    if (!isExisting) {
-      return res.status(400).json({
-        error: sub
-          ? `Nomor KTA baru bisa diinput setelah berkas dikirim ke IKAPI Pusat (status pengajuan saat ini: ${sub.status}).`
-          : 'Calon anggota ini belum memiliki pengajuan.'
-      });
-    }
-    await query.run(
-      `UPDATE members SET kta_number = ?,
-         membership_status = CASE WHEN membership_status = 'Calon' THEN 'Aktif' ELSE membership_status END,
-         updated_at = NOW() WHERE id = ?`,
-      [kta, member.id]
-    );
-    if (sub) await logEvent(sub.id, req.user, `Nomor KTA diperbarui: ${kta}`);
-    res.json({ message: `Nomor KTA berhasil disimpan: ${kta}`, activated: false });
-  } catch (err) {
-    console.error('Update KTA error:', err);
-    res.status(500).json({ error: 'Gagal menyimpan nomor KTA.' });
-  }
+// No. KTA hanya diisi pemohon (/kta-confirm) lalu divalidasi Admin (/kta-review).
+// Admin & Sekretaris tidak lagi menginput No. KTA langsung.
+app.put('/api/members/:id/kta', authenticate, (req, res) => {
+  res.status(410).json({ error: 'Nomor KTA diisi oleh pemohon sendiri, lalu divalidasi Admin. Input langsung oleh Admin/Sekretaris sudah tidak tersedia.' });
 });
 
 // Ubah status keanggotaan (mis. menonaktifkan anggota yang tidak memperpanjang)

@@ -12,7 +12,7 @@ const typeLabel = (submission) =>
 const formatRupiah = (n) => `Rp ${Number(n || 0).toLocaleString('id-ID')}`;
 
 // Unduh PDF & cetak diambil langsung dari kertas yang tampil di layar (kop, logo, TTD sama persis)
-function DocShell({ icon: Icon, title, number, signing, fileName, children }) {
+function DocShell({ icon: Icon, title, number, signing, fileName, settings, children }) {
   const paperRef = useRef(null);
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -39,7 +39,7 @@ function DocShell({ icon: Icon, title, number, signing, fileName, children }) {
       </div>
       <div ref={paperRef} data-paper className="p-8 sm:p-12 max-w-3xl mx-auto font-serif text-slate-900 leading-relaxed bg-white flex flex-col" style={{ minHeight: '1123px' }}>
         {children}
-        <KopSuratFooter className="mt-auto pt-10" />
+        <KopSuratFooter className="mt-auto pt-10" settings={settings} />
       </div>
     </div>
   );
@@ -91,7 +91,7 @@ export function BeritaAcaraVerifikasi({ submission, settings, documents = [], pa
 
 
   return (
-    <DocShell icon={ClipboardCheck} title="Berita Acara Verifikasi" number={number} signing={signing} fileName={`Berita_Acara_Verifikasi_${fileSafe(submission.publisher_name)}.pdf`}>
+    <DocShell settings={settings} icon={ClipboardCheck} title="Berita Acara Verifikasi" number={number} signing={signing} fileName={`Berita_Acara_Verifikasi_${fileSafe(submission.publisher_name)}.pdf`}>
       <KopSurat settings={settings} />
       <DocTitle title="Berita Acara Verifikasi Berkas & Pembayaran" number={number} />
 
@@ -158,7 +158,7 @@ export function SuratKeputusan({ submission, settings, signing = null }) {
 
 
   return (
-    <DocShell icon={Gavel} title="Surat Keputusan Pengurus Daerah" number={number} signing={signing} fileName={`Surat_Keputusan_${fileSafe(submission.publisher_name)}.pdf`}>
+    <DocShell settings={settings} icon={Gavel} title="Surat Keputusan Pengurus Daerah" number={number} signing={signing} fileName={`Surat_Keputusan_${fileSafe(submission.publisher_name)}.pdf`}>
       <KopSurat settings={settings} />
       <DocTitle title="Surat Keputusan Pengurus Daerah IKAPI Jawa Barat" number={number} />
       <p className="text-center text-xs sm:text-sm font-bold -mt-3 mb-6">TENTANG<br />{about}</p>

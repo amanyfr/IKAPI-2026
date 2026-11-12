@@ -14,7 +14,7 @@ const ROLE_BADGE = {
 
 const ROLE_DESC = {
   Admin:      'Kelola akun & pengaturan sistem',
-  Sekretaris: 'Screening berkas, verifikasi pembayaran, input No. KTA',
+  Sekretaris: 'Screening berkas, verifikasi pembayaran & No. KTA dari pemohon',
   Ketua:      'Approval pengajuan & tanda tangan surat',
   Anggota:    'Penerbit pemohon keanggotaan',
 };

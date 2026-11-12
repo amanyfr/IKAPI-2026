@@ -206,7 +206,7 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
             </button>
             <button onClick={onOpenMembers}
               className="w-full flex items-center justify-between gap-3 text-left bg-sky-100/90 text-slate-800 rounded-2xl px-4 py-3 shadow-md hover:-translate-y-0.5 transition cursor-pointer">
-              <span className="text-sm font-medium">Input No. KTA</span>
+              <span className="text-sm font-medium">Menunggu No. KTA pemohon</span>
               <span className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center">{needKta}</span>
             </button>
           </div>

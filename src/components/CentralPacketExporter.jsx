@@ -93,7 +93,7 @@ function PhysicalChecklistSheet({ submission, documents, settings }) {
             <p className="mt-12">( ____________________ )</p>
           </div>
         </div>
-        <KopSuratFooter className="mt-10" />
+        <KopSuratFooter className="mt-10" settings={settings} />
       </div>
     </div>
   );
