@@ -12,6 +12,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import db, { query, initDb, nowSql } from './db.js';
 import { runSeed, formatSuratNumber, toRoman } from './seed.js';
 import { sendMail, MAIL_ENABLED, APP_URL } from './mailer.js';
+import { cdnEnabled, cdnUpload, cdnDownload, cdnDelete } from './cdn.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -68,25 +69,52 @@ function makeStoredName(originalName) {
   return `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${base}${ext}`;
 }
 
-// Simpan file hasil multer ke tabel `files`; kembalikan path '/uploads/<nama>' untuk kolom file_path.
+// Simpan file hasil multer; kembalikan path '/uploads/<nama>' untuk kolom file_path.
+// CDN aktif (CDN_API_KEY diisi): isi file ke CDN, tabel `files` hanya menyimpan metadata + cdn_id.
+// CDN tidak aktif: isi file disimpan di kolom files.data (MySQL) seperti sebelumnya.
 async function storeUpload(file) {
   const storedName = makeStoredName(file.originalname);
-  await query.run(
-    'INSERT INTO files (stored_name, original_name, mime_type, file_size, data) VALUES (?, ?, ?, ?, ?)',
-    [storedName, file.originalname, file.mimetype, file.size, file.buffer]
-  );
+  if (cdnEnabled()) {
+    const cdnId = await cdnUpload(file.buffer, storedName, file.mimetype);
+    await query.run(
+      'INSERT INTO files (stored_name, original_name, mime_type, file_size, cdn_id, data) VALUES (?, ?, ?, ?, ?, NULL)',
+      [storedName, file.originalname, file.mimetype, file.size, cdnId]
+    );
+  } else {
+    await query.run(
+      'INSERT INTO files (stored_name, original_name, mime_type, file_size, data) VALUES (?, ?, ?, ?, ?)',
+      [storedName, file.originalname, file.mimetype, file.size, file.buffer]
+    );
+  }
   return `/uploads/${storedName}`;
 }
 
-// Hapus isi file lama yang sudah tidak dipakai (mis. dokumen diganti)
+// Hapus file lama yang sudah tidak dipakai (mis. dokumen diganti), termasuk salinannya di CDN
 async function deleteStoredFile(filePath) {
   if (!filePath) return;
-  await query.run('DELETE FROM files WHERE stored_name = ?', [path.basename(filePath)]);
+  const name = path.basename(filePath);
+  const row = await query.get('SELECT cdn_id FROM files WHERE stored_name = ?', [name]);
+  if (row?.cdn_id) {
+    try {
+      await cdnDelete(row.cdn_id);
+    } catch (err) {
+      console.error(`[cdn] Gagal menghapus ${name} (${row.cdn_id}) di CDN:`, err.message);
+    }
+  }
+  await query.run('DELETE FROM files WHERE stored_name = ?', [name]);
 }
 
+// Isi file diambil dari MySQL bila masih ada, selain itu dari CDN
 async function readStoredFile(filePath) {
   if (!filePath) return null;
-  return query.get('SELECT original_name, mime_type, file_size, data FROM files WHERE stored_name = ?', [path.basename(filePath)]);
+  const row = await query.get(
+    'SELECT original_name, mime_type, file_size, cdn_id, data FROM files WHERE stored_name = ?',
+    [path.basename(filePath)]
+  );
+  if (!row) return null;
+  if (!row.data && row.cdn_id) row.data = await cdnDownload(row.cdn_id);
+  if (!row.data) return null;
+  return row;
 }
 
 // Pindahkan file lama dari folder uploads/ ke database (sekali jalan, aman diulang).
@@ -3266,6 +3294,13 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
         return res.status(400).json({ error: 'Nilai biaya harus berupa angka 0 atau lebih.' });
       }
     }
+    // Estimasi waktu tahapan (teks bebas, tampil ke pemohon)
+    for (const key of Object.keys(settings).filter((k) => k.startsWith('eta_'))) {
+      const text = String(settings[key] ?? '').trim();
+      if (!text) return res.status(400).json({ error: 'Estimasi waktu tahapan tidak boleh kosong.' });
+      if (text.length > 60) return res.status(400).json({ error: 'Estimasi waktu tahapan maksimal 60 karakter.' });
+      settings[key] = text;
+    }
 
     for (const [key, value] of Object.entries(settings)) {
       await query.run(
@@ -3478,7 +3513,13 @@ app.get('/uploads/:filename', async (req, res) => {
       return res.status(403).json({ error: 'Akses ditolak.' });
     }
 
-    const stored = await readStoredFile(filename);
+    let stored;
+    try {
+      stored = await readStoredFile(filename);
+    } catch (err) {
+      console.error('[cdn] Gagal mengambil file:', filename, err.message);
+      return res.status(502).json({ error: 'File gagal diambil dari CDN. Coba lagi sebentar lagi.' });
+    }
     if (!stored) return res.status(404).json({ error: 'File tidak ditemukan.' });
 
     res.setHeader('X-Content-Type-Options', 'nosniff');

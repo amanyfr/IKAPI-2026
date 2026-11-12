@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useStageEta } from '../utils/stageEta';
 import { Clock, XCircle, RefreshCw, Edit3, IdCard, CheckCircle2 } from 'lucide-react';
 
 /**
@@ -11,6 +12,7 @@ import { Clock, XCircle, RefreshCw, Edit3, IdCard, CheckCircle2 } from 'lucide-r
 export default function HeregVerificationCard({ onEditProfile, onEdit }) {
   const { user, updateUser } = useAuth();
   const [checking, setChecking] = useState(false);
+  const eta = useStageEta();
   const rejected = user?.hereg_status === 'Ditolak';
 
   const refresh = async (manual = false) => {
@@ -119,7 +121,7 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
               </span>
               <div className="min-w-0 text-sm">
                 <p className="text-xs text-slate-500">Estimasi waktu verifikasi Admin</p>
-                <p className="font-semibold text-slate-900">Maks. 2×24 jam kerja</p>
+                <p className="font-semibold text-slate-900">{eta.eta_hereg_verifikasi}</p>
               </div>
             </div>
           )}

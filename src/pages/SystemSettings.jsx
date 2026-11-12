@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Settings, Save, Building, CreditCard, Award, FileText,
-  CheckCircle, Upload, Trash2, Image, RotateCcw, PenTool, Receipt, Phone
+  CheckCircle, Upload, Trash2, Image, RotateCcw, PenTool, Receipt, Phone, Clock
 } from 'lucide-react';
 import { INVOICE_DEFAULTS } from '../components/PaymentInvoice';
 import { waLink } from '../utils/whatsapp';
 import { notify } from '../components/AppDialog';
 import { FILTERS, NUMERIC, PHONE } from '../utils/inputFilters';
+import { ETA_FIELDS, ETA_DEFAULTS, shortEta, refreshStageEta } from '../utils/stageEta';
 
 // Pengaturan yang tidak boleh berisi huruf beserta penyaringnya
 const FIELD_FILTERS = {
@@ -56,7 +57,8 @@ export default function SystemSettings() {
     kop_header_img: '',
     kop_footer_img: '',
     ...DEFAULT_TEMPLATES,
-    ...INVOICE_DEFAULTS
+    ...INVOICE_DEFAULTS,
+    ...ETA_DEFAULTS
   });
 
   const [loading, setLoading] = useState(true);
@@ -132,6 +134,8 @@ export default function SystemSettings() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       savedRef.current = { ...savedRef.current, ...changed };
+      // Estimasi waktu tahapan langsung ikut berubah di tampilan
+      if (Object.keys(changed).some((k) => k.startsWith('eta_'))) refreshStageEta();
 
       setSuccessMsg('Seluruh pengaturan sistem, template surat, dan tanda tangan resmi berhasil disimpan.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -645,6 +649,41 @@ export default function SystemSettings() {
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
               />
             </div>
+          </div>
+        </div>
+
+        {/* 7. ESTIMASI WAKTU TAHAPAN */}
+        <div className="card-surface p-6 space-y-4">
+          <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
+            <Clock className="w-5 h-5 text-[#0da2e7]" />
+            <div>
+              <h3 className="text-lg text-slate-800">7. Estimasi Waktu Tahapan</h3>
+              <p className="text-[11px] text-slate-500">
+                Tampil ke pemohon di kartu verifikasi anggota lama & Tahapan Status Pengajuan. Contoh: Maks. 2×24 jam kerja, ± 2–5 hari kerja.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {ETA_FIELDS.map((f) => (
+              <div key={f.key}>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">{f.label}</label>
+                <input
+                  type="text"
+                  name={f.key}
+                  maxLength={60}
+                  value={settings[f.key] || ''}
+                  onChange={handleChange}
+                  placeholder={f.def}
+                  className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
+                />
+                {f.step && (
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Label singkat di stepper: <span className="text-[#0884c4] font-medium">{shortEta(settings[f.key] || f.def)}</span>
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
         </div>
 

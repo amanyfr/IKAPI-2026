@@ -1,4 +1,5 @@
 import React from 'react';
+import { useStageEta, ETA_BY_STEP, shortEta } from '../utils/stageEta';
 import {
   FileEdit,
   CreditCard,
@@ -16,15 +17,15 @@ import {
 
 // Alur: dokumen dulu (Tahap 1), baru pembayaran (Tahap 2), lalu TTD pengurus, berkas fisik,
 // pemohon mengirim berkas langsung ke IKAPI Pusat, lalu mengisi No. KTA dari Pusat
-// estimate: perkiraan lama proses tiap tahap (hari kerja), ditampilkan ke pemohon
+// Perkiraan lama proses tiap tahap diatur Admin di Pengaturan Sistem (lihat utils/stageEta)
 export const STEPS = [
-  { key: 'Draf',                    label: 'Isi Formulir',       hint: 'Formulir & unggah dokumen', icon: FileEdit,    estimate: 'Sesuai kesiapan pemohon', short: 'Fleksibel' },
-  { key: 'Menunggu Verifikasi',     label: 'Screening Dokumen',  hint: 'Tahap 1 · diperiksa Admin', icon: Search,       estimate: 'Maks. 2×24 jam kerja', short: '≤ 2×24 jam' },
-  { key: 'Menunggu Pembayaran',     label: 'Pembayaran',         hint: 'Tahap 2 · transfer & verifikasi', icon: CreditCard, estimate: 'Verifikasi maks. 1×24 jam kerja', short: '≤ 1×24 jam' },
-  { key: 'Menunggu TTD Sekretaris', label: 'TTD Sekretaris',     hint: 'Ditandatangani Sekretaris', icon: PenLine,      estimate: 'Maks. 2×24 jam kerja', short: '≤ 2×24 jam' },
-  { key: 'Menunggu Approval',       label: 'TTD Ketua',          hint: 'Persetujuan Ketua', icon: Award,                estimate: 'Maks. 2×24 jam kerja', short: '≤ 2×24 jam' },
-  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Kirim berkas ke IKAPI Pusat', icon: Truck,      estimate: '± 2–5 hari kerja (ekspedisi)', short: '2–5 hari' },
-  { key: 'Dikirim ke Pusat',        label: 'Input KTA',          hint: 'Isi No. KTA · dicek Admin', icon: HelpCircle,   estimate: 'Cek KTA maks. 2×24 jam kerja', short: '≤ 2×24 jam' },
+  { key: 'Draf',                    label: 'Isi Formulir',       hint: 'Formulir & unggah dokumen', icon: FileEdit },
+  { key: 'Menunggu Verifikasi',     label: 'Screening Dokumen',  hint: 'Tahap 1 · diperiksa Admin', icon: Search },
+  { key: 'Menunggu Pembayaran',     label: 'Pembayaran',         hint: 'Tahap 2 · transfer & verifikasi', icon: CreditCard },
+  { key: 'Menunggu TTD Sekretaris', label: 'TTD Sekretaris',     hint: 'Ditandatangani Sekretaris', icon: PenLine },
+  { key: 'Menunggu Approval',       label: 'TTD Ketua',          hint: 'Persetujuan Ketua', icon: Award },
+  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Kirim berkas ke IKAPI Pusat', icon: Truck },
+  { key: 'Dikirim ke Pusat',        label: 'Input KTA',          hint: 'Isi No. KTA · dicek Admin', icon: HelpCircle },
   { key: 'Aktif',                   label: 'Anggota Aktif',      hint: 'KTA diverifikasi Admin', icon: BadgeCheck },
 ];
 
@@ -75,18 +76,21 @@ const CURRENT_HINT = {
   'Dikirim ke Pusat': 'Isi No. KTA, diverifikasi Admin',
 };
 
-// Pemberitahuan perkiraan waktu tahap yang sedang berjalan (ditampilkan ke pemohon)
+// Pemberitahuan tahap yang sedang berjalan (ditampilkan ke pemohon): [kalimat, tahap sumber estimasi]
 export const STAGE_NOTICE = {
-  'Menunggu Verifikasi': 'Dokumen Anda sedang diperiksa Admin, maksimal 2×24 jam kerja.',
-  'Perlu Revisi': 'Setelah dokumen perbaikan diunggah, screening ulang maksimal 2×24 jam kerja.',
-  'Menunggu Pembayaran': 'Setelah bukti transfer diunggah, verifikasi pembayaran maksimal 1×24 jam kerja.',
-  'Menunggu TTD Sekretaris': 'Pengajuan sedang ditandatangani Sekretaris, maksimal 2×24 jam kerja.',
-  'Menunggu Approval': 'Pengajuan sedang menunggu persetujuan Ketua, maksimal 2×24 jam kerja.',
-  'Pengiriman Berkas': 'Pengiriman berkas fisik melalui ekspedisi biasanya 2–5 hari kerja.',
-  'Dikirim ke Pusat': 'Setelah No. KTA diisi, Admin memeriksanya maksimal 2×24 jam kerja.',
+  'Menunggu Verifikasi': ['Dokumen Anda sedang diperiksa Admin', 'Menunggu Verifikasi'],
+  'Perlu Revisi': ['Setelah dokumen perbaikan diunggah, screening ulang', 'Menunggu Verifikasi'],
+  'Menunggu Pembayaran': ['Setelah bukti transfer diunggah, verifikasi pembayaran', 'Menunggu Pembayaran'],
+  'Menunggu TTD Sekretaris': ['Pengajuan sedang ditandatangani Sekretaris', 'Menunggu TTD Sekretaris'],
+  'Menunggu Approval': ['Pengajuan sedang menunggu persetujuan Ketua', 'Menunggu Approval'],
+  'Pengiriman Berkas': ['Pengiriman berkas fisik melalui ekspedisi', 'Pengiriman Berkas'],
+  'Dikirim ke Pusat': ['Setelah No. KTA diisi, Admin memeriksanya', 'Dikirim ke Pusat'],
 };
 
 export default function StatusStepper({ currentStatus, rejectionReason, rejectedAtStatus, paymentRejected = false, hasDocRejection = false, cardClassName = 'card-surface', showEstimateNotice = false }) {
+  const eta = useStageEta();
+  const stepEta = (step) => (ETA_BY_STEP[step.key] ? eta[ETA_BY_STEP[step.key]] : step.key === 'Draf' ? 'Sesuai kesiapan pemohon' : '');
+  const notice = STAGE_NOTICE[currentStatus];
   const isRejected = currentStatus === 'Ditolak';
   const isNeedRevision = currentStatus === 'Perlu Revisi' || hasDocRejection || (currentStatus === 'Menunggu Pembayaran' && paymentRejected);
   const isActive = currentStatus === 'Aktif';
@@ -152,13 +156,13 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
   };
 
   // Estimasi hanya untuk tahap yang sedang berjalan / belum dilalui
-  const showEstimate = (step, state) => Boolean(step.estimate) && !['done', 'rejected', 'stopped'].includes(state);
+  const showEstimate = (step, state) => Boolean(stepEta(step)) && !['done', 'rejected', 'stopped'].includes(state);
   // compact: label pendek satu baris (layar lebar), teks lengkap tetap muncul sebagai tooltip
   const estimateChip = (step, state, extra = '', compact = false) => showEstimate(step, state) && (
-    <span title={`Perkiraan: ${step.estimate}`} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium leading-4 ${
+    <span title={`Perkiraan: ${stepEta(step)}`} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium leading-4 ${
       state === 'todo' ? 'bg-slate-50 text-slate-400' : state === 'revision' || state === 'waiting' ? 'bg-amber-50 text-amber-700' : 'bg-[#eaf6fe] text-[#0884c4]'
     } ${extra}`}>
-      <Clock className="w-3 h-3 flex-shrink-0" /> {compact ? (step.short || step.estimate) : step.estimate}
+      <Clock className="w-3 h-3 flex-shrink-0" /> {compact ? (step.key === 'Draf' ? 'Fleksibel' : shortEta(stepEta(step))) : stepEta(step)}
     </span>
   );
 
@@ -206,12 +210,12 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
         </div>
       )}
 
-      {showEstimateNotice && !isRejected && !isActive && STAGE_NOTICE[currentStatus] && (
+      {showEstimateNotice && !isRejected && !isActive && notice && (
         <div className={`mx-5 sm:mx-7 mt-4 flex items-start gap-2 px-3.5 py-2.5 rounded-xl text-xs font-medium border ${
           isNeedRevision || currentStatus === 'Dikirim ke Pusat' ? 'bg-amber-50/60 border-amber-200 text-amber-800' : 'bg-[#f2f9fe] border-[#cdeafc] text-[#0b6a9c]'
         }`}>
           <Clock className="w-4 h-4 flex-shrink-0 mt-px" />
-          <span><strong className="font-semibold">Perkiraan waktu:</strong> {STAGE_NOTICE[currentStatus]} Anda akan mendapat notifikasi saat tahap ini selesai.</span>
+          <span><strong className="font-semibold">Perkiraan waktu:</strong> {notice[0]}: {eta[ETA_BY_STEP[notice[1]]]}. Anda akan mendapat notifikasi saat tahap ini selesai.</span>
         </div>
       )}
 

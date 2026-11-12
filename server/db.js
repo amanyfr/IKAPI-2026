@@ -289,15 +289,16 @@ export const SCHEMA_SQL = `
     CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-  -- Isi file unggahan (dokumen & bukti transfer) disimpan di database, bukan di folder uploads/.
-  -- documents.file_path / payments.proof_file tetap berisi '/uploads/<stored_name>' sebagai kunci.
+  -- Metadata file unggahan (dokumen & bukti transfer). Isi file ada di CDN (cdn_id) bila CDN_API_KEY diisi,
+  -- selain itu di kolom data. documents.file_path / payments.proof_file berisi '/uploads/<stored_name>' sebagai kunci.
   CREATE TABLE IF NOT EXISTS files (
     id INT AUTO_INCREMENT PRIMARY KEY,
     stored_name VARCHAR(255) NOT NULL UNIQUE,
     original_name VARCHAR(255),
     mime_type VARCHAR(100) NOT NULL,
     file_size INT NOT NULL,
-    data LONGBLOB NOT NULL,
+    cdn_id VARCHAR(64) NULL,
+    data LONGBLOB NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 `;
@@ -336,6 +337,15 @@ async function syncStatusCheck() {
 }
 
 async function upgradeSchema() {
+  // Isi file boleh kosong di MySQL bila sudah tersimpan di CDN (files.cdn_id)
+  await addColumnIfMissing('files', 'cdn_id', 'VARCHAR(64) NULL AFTER file_size');
+  const fileData = await query.get(
+    `SELECT IS_NULLABLE AS nullable FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'files' AND COLUMN_NAME = 'data'`,
+    [DB_CONFIG.database]
+  );
+  if (fileData?.nullable === 'NO') await query.exec('ALTER TABLE files MODIFY data LONGBLOB NULL');
+
   const settingsValue = await columnInfo('settings', 'value');
   if (settingsValue && settingsValue.type === 'text') {
     await query.exec('ALTER TABLE settings MODIFY value MEDIUMTEXT NOT NULL');
