@@ -18,13 +18,13 @@ import {
 // pemohon mengirim berkas langsung ke IKAPI Pusat, lalu mengisi No. KTA dari Pusat
 // estimate: perkiraan lama proses tiap tahap (hari kerja), ditampilkan ke pemohon
 export const STEPS = [
-  { key: 'Draf',                    label: 'Isi Formulir',       hint: 'Formulir & unggah dokumen', icon: FileEdit,    estimate: 'Sesuai kesiapan pemohon' },
-  { key: 'Menunggu Verifikasi',     label: 'Screening Dokumen',  hint: 'Tahap 1 · diperiksa Admin', icon: Search,       estimate: 'Maks. 2×24 jam kerja' },
-  { key: 'Menunggu Pembayaran',     label: 'Pembayaran',         hint: 'Tahap 2 · transfer & verifikasi', icon: CreditCard, estimate: 'Verifikasi maks. 1×24 jam kerja' },
-  { key: 'Menunggu TTD Sekretaris', label: 'TTD Sekretaris',     hint: 'Ditandatangani Sekretaris', icon: PenLine,      estimate: 'Maks. 2×24 jam kerja' },
-  { key: 'Menunggu Approval',       label: 'TTD Ketua',          hint: 'Persetujuan Ketua', icon: Award,                estimate: 'Maks. 2×24 jam kerja' },
-  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Kirim berkas ke IKAPI Pusat', icon: Truck,      estimate: '± 2–5 hari kerja (ekspedisi)' },
-  { key: 'Dikirim ke Pusat',        label: 'Input KTA',          hint: 'Isi No. KTA · dicek Admin', icon: HelpCircle,   estimate: 'Cek KTA maks. 2×24 jam kerja' },
+  { key: 'Draf',                    label: 'Isi Formulir',       hint: 'Formulir & unggah dokumen', icon: FileEdit,    estimate: 'Sesuai kesiapan pemohon', short: 'Fleksibel' },
+  { key: 'Menunggu Verifikasi',     label: 'Screening Dokumen',  hint: 'Tahap 1 · diperiksa Admin', icon: Search,       estimate: 'Maks. 2×24 jam kerja', short: '≤ 2×24 jam' },
+  { key: 'Menunggu Pembayaran',     label: 'Pembayaran',         hint: 'Tahap 2 · transfer & verifikasi', icon: CreditCard, estimate: 'Verifikasi maks. 1×24 jam kerja', short: '≤ 1×24 jam' },
+  { key: 'Menunggu TTD Sekretaris', label: 'TTD Sekretaris',     hint: 'Ditandatangani Sekretaris', icon: PenLine,      estimate: 'Maks. 2×24 jam kerja', short: '≤ 2×24 jam' },
+  { key: 'Menunggu Approval',       label: 'TTD Ketua',          hint: 'Persetujuan Ketua', icon: Award,                estimate: 'Maks. 2×24 jam kerja', short: '≤ 2×24 jam' },
+  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Kirim berkas ke IKAPI Pusat', icon: Truck,      estimate: '± 2–5 hari kerja (ekspedisi)', short: '2–5 hari' },
+  { key: 'Dikirim ke Pusat',        label: 'Input KTA',          hint: 'Isi No. KTA · dicek Admin', icon: HelpCircle,   estimate: 'Cek KTA maks. 2×24 jam kerja', short: '≤ 2×24 jam' },
   { key: 'Aktif',                   label: 'Anggota Aktif',      hint: 'KTA diverifikasi Admin', icon: BadgeCheck },
 ];
 
@@ -75,7 +75,18 @@ const CURRENT_HINT = {
   'Dikirim ke Pusat': 'Isi No. KTA, diverifikasi Admin',
 };
 
-export default function StatusStepper({ currentStatus, rejectionReason, rejectedAtStatus, paymentRejected = false, hasDocRejection = false, cardClassName = 'card-surface' }) {
+// Pemberitahuan perkiraan waktu tahap yang sedang berjalan (ditampilkan ke pemohon)
+export const STAGE_NOTICE = {
+  'Menunggu Verifikasi': 'Dokumen Anda sedang diperiksa Admin, maksimal 2×24 jam kerja.',
+  'Perlu Revisi': 'Setelah dokumen perbaikan diunggah, screening ulang maksimal 2×24 jam kerja.',
+  'Menunggu Pembayaran': 'Setelah bukti transfer diunggah, verifikasi pembayaran maksimal 1×24 jam kerja.',
+  'Menunggu TTD Sekretaris': 'Pengajuan sedang ditandatangani Sekretaris, maksimal 2×24 jam kerja.',
+  'Menunggu Approval': 'Pengajuan sedang menunggu persetujuan Ketua, maksimal 2×24 jam kerja.',
+  'Pengiriman Berkas': 'Pengiriman berkas fisik melalui ekspedisi biasanya 2–5 hari kerja.',
+  'Dikirim ke Pusat': 'Setelah No. KTA diisi, Admin memeriksanya maksimal 2×24 jam kerja.',
+};
+
+export default function StatusStepper({ currentStatus, rejectionReason, rejectedAtStatus, paymentRejected = false, hasDocRejection = false, cardClassName = 'card-surface', showEstimateNotice = false }) {
   const isRejected = currentStatus === 'Ditolak';
   const isNeedRevision = currentStatus === 'Perlu Revisi' || hasDocRejection || (currentStatus === 'Menunggu Pembayaran' && paymentRejected);
   const isActive = currentStatus === 'Aktif';
@@ -142,11 +153,12 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
 
   // Estimasi hanya untuk tahap yang sedang berjalan / belum dilalui
   const showEstimate = (step, state) => Boolean(step.estimate) && !['done', 'rejected', 'stopped'].includes(state);
-  const estimateChip = (step, state, extra = '') => showEstimate(step, state) && (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium ${
+  // compact: label pendek satu baris (layar lebar), teks lengkap tetap muncul sebagai tooltip
+  const estimateChip = (step, state, extra = '', compact = false) => showEstimate(step, state) && (
+    <span title={`Perkiraan: ${step.estimate}`} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium leading-4 ${
       state === 'todo' ? 'bg-slate-50 text-slate-400' : state === 'revision' || state === 'waiting' ? 'bg-amber-50 text-amber-700' : 'bg-[#eaf6fe] text-[#0884c4]'
     } ${extra}`}>
-      <Clock className="w-3 h-3" /> {step.estimate}
+      <Clock className="w-3 h-3 flex-shrink-0" /> {compact ? (step.short || step.estimate) : step.estimate}
     </span>
   );
 
@@ -194,6 +206,15 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
         </div>
       )}
 
+      {showEstimateNotice && !isRejected && !isActive && STAGE_NOTICE[currentStatus] && (
+        <div className={`mx-5 sm:mx-7 mt-4 flex items-start gap-2 px-3.5 py-2.5 rounded-xl text-xs font-medium border ${
+          isNeedRevision || currentStatus === 'Dikirim ke Pusat' ? 'bg-amber-50/60 border-amber-200 text-amber-800' : 'bg-[#f2f9fe] border-[#cdeafc] text-[#0b6a9c]'
+        }`}>
+          <Clock className="w-4 h-4 flex-shrink-0 mt-px" />
+          <span><strong className="font-semibold">Perkiraan waktu:</strong> {STAGE_NOTICE[currentStatus]} Anda akan mendapat notifikasi saat tahap ini selesai.</span>
+        </div>
+      )}
+
       {/* Layar lebar: horizontal, garis tepat dari titik ke titik */}
       <ol className="hidden md:grid grid-cols-8 px-3 lg:px-5 pt-7 pb-6">
         {STEPS.map((step, idx) => {
@@ -210,10 +231,11 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
               )}
               {renderDot(step, state)}
               <span className={`mt-3 text-[13px] font-semibold leading-snug ${labelClass[state]}`}>{step.label}</span>
-              <span className={`mt-1 text-[11px] leading-snug max-w-[9rem] ${state === 'todo' || state === 'stopped' ? 'text-slate-300' : state === 'rejected' ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
+              <span className={`mt-1 mb-2 text-[11px] leading-snug max-w-[9rem] ${state === 'todo' || state === 'stopped' ? 'text-slate-300' : state === 'rejected' ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
                 {stepHint(step, state)}
               </span>
-              {estimateChip(step, state, 'mt-1.5 max-w-[9rem] text-center leading-tight')}
+              {/* mt-auto: chip estimasi sejajar di baris bawah walau panjang petunjuk berbeda */}
+              {estimateChip(step, state, 'mt-auto', true)}
             </li>
           );
         })}

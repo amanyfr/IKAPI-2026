@@ -823,6 +823,17 @@ const STATUS_EMAIL_TEXT = {
   'Ditolak': 'Mohon maaf, pengajuan Anda ditolak.'
 };
 
+// Perkiraan lama proses tiap tahap (sama dengan estimasi di stepper pemohon)
+const STATUS_ESTIMATE = {
+  'Menunggu Verifikasi': 'Screening dokumen maksimal 2×24 jam kerja.',
+  'Perlu Revisi': 'Setelah dokumen perbaikan diunggah, screening ulang maksimal 2×24 jam kerja.',
+  'Menunggu Pembayaran': 'Verifikasi bukti transfer maksimal 1×24 jam kerja setelah diunggah.',
+  'Menunggu TTD Sekretaris': 'Tanda tangan Sekretaris maksimal 2×24 jam kerja.',
+  'Menunggu Approval': 'Persetujuan dan tanda tangan Ketua maksimal 2×24 jam kerja.',
+  'Pengiriman Berkas': 'Pengiriman berkas fisik melalui ekspedisi sekitar 2–5 hari kerja.',
+  'Dikirim ke Pusat': 'Pengecekan Nomor KTA oleh Admin maksimal 2×24 jam kerja setelah diisi.'
+};
+
 // ── Masa aktif keanggotaan (sama dengan perhitungan dashboard anggota) ──
 // Tombol perpanjang dibuka mulai H-7 sebelum masa aktif berakhir (atau sesudahnya).
 const RENEW_WINDOW_DAYS = 7;
@@ -991,7 +1002,9 @@ async function notifyStatusChange(submissionId) {
   }
 
   // Notifikasi dalam aplikasi: pemohon untuk setiap status, pengurus saat giliran mereka bertindak
-  await addNotification(sub.user_id, `Status pengajuan: ${sub.status}`, [STATUS_EMAIL_TEXT[sub.status], ...extra].filter(Boolean).join('\n'), sub.id);
+  // Perkiraan waktu hanya untuk notifikasi dalam aplikasi (email tidak dipakai)
+  const estimate = STATUS_ESTIMATE[sub.status] ? `Perkiraan waktu: ${STATUS_ESTIMATE[sub.status]}` : null;
+  await addNotification(sub.user_id, `Status pengajuan: ${sub.status}`, [STATUS_EMAIL_TEXT[sub.status], ...extra, estimate].filter(Boolean).join('\n'), sub.id);
   const label = `${sub.submission_type === 'Heregistrasi' ? 'Heregistrasi' : 'Anggota baru'} ${publisher} (#${sub.id})`;
   const staffTask = {
     'Menunggu Verifikasi': ['Admin', sub.last_notified_status === 'Perlu Revisi' ? 'Revisi dokumen masuk' : 'Pengajuan baru masuk', `${label} menunggu screening dokumen.`],

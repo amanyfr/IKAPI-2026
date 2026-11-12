@@ -608,6 +608,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         paymentRejected={paymentRejected}
         hasDocRejection={hasRejectedDocs}
         cardClassName="card-surface"
+        showEstimateNotice
       />
 
       {/* ══ PEMBERITAHUAN REVISI DOKUMEN ══ */}
