@@ -50,11 +50,11 @@ const REQUIRED_DOCS = {
   },
   Heregistrasi: {
     Biasa: [
-      'Kartu Anggota Ikapi yang sudah habis masa berlakunya',
+      'Kartu Anggota Ikapi yang akan habis masa berlakunya',
       'Isian Formulir Heregistrasi',
     ],
     'Luar Biasa': [
-      'Kartu Anggota Ikapi yang sudah habis masa berlakunya',
+      'Kartu Anggota Ikapi yang akan habis masa berlakunya',
       'Isian Formulir Heregistrasi',
     ],
   },
@@ -124,6 +124,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   const [ktaForm,        setKtaForm]        = useState({ ktaNumber: '', issuedAt: '', notes: '', file: null });
   const [sendingKta,     setSendingKta]     = useState(false);
   const [lastUpdated,    setLastUpdated]    = useState(null);
+  const [renewReq,       setRenewReq]       = useState(null); // perpanjangan: tampilkan persyaratan dulu
   const [markDoc,        setMarkDoc]        = useState(null); // dokumen yang dilihat beserta sorotan revisi Admin
 
 
@@ -386,30 +387,21 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
     );
   }
 
-  /* ══════════════════════════════════════════════════════════
-     EMPTY STATE — Pilihan Jenis & Kategori (Full Width & Blue Accent)
-     ══════════════════════════════════════════════════════════ */
-  /* ══════════════════════════════════════════════════════════
-     BELUM ADA PENGAJUAN — langsung tampil persyaratan sesuai jawaban profil
-     (jenis & kategori dipilih di pertanyaan awal; bisa diubah lewat "Ubah jawaban")
-     ══════════════════════════════════════════════════════════ */
-  if (submissions.length === 0) {
-    // Anggota lama: isi KTA + data keanggotaan dulu, terkunci sampai Admin memvalidasi
-    if (defaultType === 'Heregistrasi' && user?.hereg_status !== 'Disetujui') {
-      return <HeregApplyPage onEditProfile={onEditProfile} />;
-    }
-    // Jalur "masih aktif" (dipilih Admin): tanpa formulir & bayar, cukup lengkapi data keanggotaan
-    if (defaultType === 'Heregistrasi' && user?.hereg_track === 'Masih Aktif') {
-      return <HeregMigrationForm onEditProfile={onEditProfile} />;
-    }
-    const pickType = defaultType;
-    const pickCategory = defaultCategory;
+  /* Halaman persyaratan: dipakai sebelum pengajuan pertama dan saat anggota aktif memperpanjang */
+  const renderRequirements = (pickType, pickCategory, renew = null) => {
     const reqDocs = REQUIRED_DOCS[pickType]?.[pickCategory] || [];
     const fees = feesFromSettings(appSettings, pickType);
     const isLB = pickCategory === 'Luar Biasa';
     const typeText = pickType === 'Heregistrasi' ? 'anggota lama' : 'anggota baru';
     const subText = pickType === 'Heregistrasi' ? 'registrasi perpanjangan KTA' : 'pendaftaran anggota baru';
-    const backText = (
+    const backText = renew ? (
+      <p className="text-xs sm:text-sm text-slate-500">
+        Masa aktif keanggotaan Anda akan berakhir, jadi pengajuan ini adalah registrasi perpanjangan KTA.{' '}
+        <button type="button" onClick={() => setRenewReq(null)} className="text-[#0884c4] hover:underline font-semibold">
+          Kembali ke dashboard
+        </button>
+      </p>
+    ) : (
       <p className="text-xs sm:text-sm text-slate-500">
         Anda terdaftar sebagai <strong className="font-medium text-slate-700">{typeText}</strong> kategori{' '}
         <strong className="font-medium text-slate-700">{isLB ? 'Anggota Luar Biasa' : 'Anggota Biasa'}</strong>, jadi pengajuan Anda adalah {subText}.{' '}
@@ -477,7 +469,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
           <div className="border-t border-slate-100 px-5 sm:px-7 py-4 sm:py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="sm:max-w-xl">{backText}</div>
             <button
-              onClick={() => onNewSubmission({ submissionType: pickType, category: pickCategory })}
+              onClick={() => (renew ? onNewSubmission?.({ renewFrom: renew }) : onNewSubmission({ submissionType: pickType, category: pickCategory }))}
               className="group inline-flex items-center justify-center gap-2 w-full sm:w-auto h-12 px-6 rounded-xl bg-[#0884c4] hover:bg-[#076fa5] active:bg-[#065d8a] text-white text-sm font-semibold shadow-sm transition-colors whitespace-nowrap"
             >
               <span>Isi formulir pengajuan</span>
@@ -487,6 +479,25 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
         </div>
       </div>
     );
+  };
+
+  /* ══════════════════════════════════════════════════════════
+     EMPTY STATE — Pilihan Jenis & Kategori (Full Width & Blue Accent)
+     ══════════════════════════════════════════════════════════ */
+  /* ══════════════════════════════════════════════════════════
+     BELUM ADA PENGAJUAN — langsung tampil persyaratan sesuai jawaban profil
+     (jenis & kategori dipilih di pertanyaan awal; bisa diubah lewat "Ubah jawaban")
+     ══════════════════════════════════════════════════════════ */
+  if (submissions.length === 0) {
+    // Anggota lama: isi KTA + data keanggotaan dulu, terkunci sampai Admin memvalidasi
+    if (defaultType === 'Heregistrasi' && user?.hereg_status !== 'Disetujui') {
+      return <HeregApplyPage onEditProfile={onEditProfile} />;
+    }
+    // Jalur "masih aktif" (dipilih Admin): tanpa formulir & bayar, cukup lengkapi data keanggotaan
+    if (defaultType === 'Heregistrasi' && user?.hereg_track === 'Masih Aktif') {
+      return <HeregMigrationForm onEditProfile={onEditProfile} />;
+    }
+    return renderRequirements(defaultType, defaultCategory);
   }
 
   /* ─── Data Pengajuan Aktif ─── */
@@ -494,6 +505,10 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   const docs     = detailData?.documents  || [];
   const payment  = detailData?.payment;
   const settings = { ...appSettings, ...detailData?.settings };
+  // Perpanjangan dari kartu Masa Aktif: persyaratan dulu, lalu formulir
+  if (renewReq) {
+    return renderRequirements('Heregistrasi', renewReq.member_category || renewReq.category || defaultCategory, renewReq);
+  }
   // Anggota lama yang masa aktifnya masih berlaku: tercatat dari data manual, tanpa paket dokumen resmi
   const migratedSub = (() => {
     try {
@@ -556,7 +571,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
           onOpenInvoice={() => setShowInvoice(true)}
           onEditProfile={() => setShowProfileEdit(true)}
           renewFee={feesFromSettings(settings, 'Heregistrasi')}
-          onRenew={() => onNewSubmission?.({ renewFrom: sub })}
+          noticeDays={Number(settings?.renew_notice_days) || 7}
+          onRenew={() => { setRenewReq(sub); window.scrollTo({ top: 0 }); }}
         />
       ) : (
       <>

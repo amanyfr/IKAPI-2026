@@ -409,15 +409,14 @@ export default function HeregMigrationForm({ onEditProfile }) {
   const [renewing, setRenewing] = useState(false);
   const waiting = ['Menunggu', 'Disetujui'].includes(user?.hereg_mig_status);
 
-  // Biaya & jalur perpanjangan sesuai Pengaturan Sistem
+  // Biaya perpanjangan sesuai Pengaturan Sistem
   useEffect(() => {
     fetch('/api/settings', { headers: authHeader() })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => data?.settings && setSettings(data.settings))
       .catch(() => {});
   }, []);
-  const enabledTracks = String(settings?.hereg_tracks || '').split(',').map((t) => t.trim()).filter(Boolean);
-  const renewOn = Boolean(settings) && (enabledTracks.length === 0 || enabledTracks.includes('Perpanjangan'));
+  const renewOn = Boolean(settings);
 
   const renew = async () => {
     setRenewing(true);

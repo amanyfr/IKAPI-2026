@@ -6,10 +6,9 @@ import {
 } from 'lucide-react';
 import { fileUrl } from '../utils/fileUrl';
 import { useAuth } from '../context/AuthContext';
-import RenewConfirm from './RenewConfirm';
 
-// Tombol perpanjang dibuka mulai H-7 sebelum masa aktif berakhir (sama dengan server)
-export const RENEW_WINDOW_DAYS = 7;
+// Default hari pemberitahuan perpanjangan (Admin bisa ubah di Pengaturan Sistem)
+export const RENEW_NOTICE_DEFAULT = 7;
 
 /**
  * Dashboard anggota aktif: kartu anggota digital, masa aktif keanggotaan,
@@ -138,6 +137,7 @@ function ActionButton({ icon: Icon, title, subtitle, onClick, primary }) {
 export default function ActiveMemberDashboard({
   sub, durasiBulan = 24, hasInvoice, onOpenPacket, onOpenInvoice, onEditProfile,
   pending = false, banner = null, editLabel = 'Perbarui data', onRenew, renewFee,
+  noticeDays = RENEW_NOTICE_DEFAULT,
 }) {
   const { user } = useAuth();
   // Sapaan memakai nama akun; nama penerbit tetap tampil di kartu anggota
@@ -149,11 +149,13 @@ export default function ActiveMemberDashboard({
   const activeSince = toDate(sub.activated_at) || period?.start;
   const leftPct = period ? 100 - period.elapsedPct : 0;
   const [copied, setCopied] = useState(false);
-  const [renewAsk, setRenewAsk] = useState(false);
-  // Tombol Perpanjang selalu tersedia untuk anggota aktif (selalu lewat konfirmasi dulu)
+  // Tombol Perpanjang ada di kartu Masa Aktif; baru bisa diklik setelah pemberitahuan
+  // perpanjangan terkirim (H-noticeDays, sama dengan server). Selalu lewat konfirmasi dulu.
   const canRenew = Boolean(onRenew) && !pending;
-  // Pengingat H-7: tampil sampai masa aktif berakhir; hilang juga setelah perpanjangan diajukan
-  const showReminder = canRenew && period && period.left > 0 && period.left <= RENEW_WINDOW_DAYS;
+  const noticeSent = Boolean(period) && period.left <= noticeDays;
+  const renewOpen = canRenew && noticeSent;
+  // Pengingat: tampil sejak pemberitahuan sampai masa aktif berakhir; hilang setelah perpanjangan diajukan
+  const showReminder = renewOpen && period.left > 0;
   // Tercatat dari data manual: tidak ada surat/paket dokumen resmi dari aplikasi
   const migrated = (() => {
     try {
@@ -175,7 +177,7 @@ export default function ActiveMemberDashboard({
     <div className="space-y-6 motion-safe:animate-stepper-in">
       {banner}
 
-      {/* Pengingat H-7 sampai hari terakhir masa aktif */}
+      {/* Pengingat sejak pemberitahuan sampai hari terakhir masa aktif */}
       {showReminder && (
         <section className="rounded-[24px] border p-4 sm:p-5 flex flex-col md:flex-row md:items-center gap-4 border-amber-200 bg-amber-50/80">
           <div className="flex items-start gap-3.5 min-w-0 flex-1">
@@ -187,20 +189,11 @@ export default function ActiveMemberDashboard({
                 {`Masa aktif berakhir ${period.left === 1 ? 'besok' : `dalam ${period.left} hari`}`}
               </p>
               <p className="text-[13px] text-slate-600 mt-0.5">
-                Berlaku sampai {fmt(period.end)}. Perpanjang keanggotaan dengan mengisi formulir registrasi & membayar iuran supaya status anggota tetap aktif.
+                Berlaku sampai {fmt(period.end)}. Klik tombol Perpanjang di kartu Masa Aktif Keanggotaan supaya status anggota tetap aktif.
               </p>
             </div>
           </div>
-          <button type="button" onClick={() => setRenewAsk(true)}
-            className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold transition-colors md:flex-shrink-0">
-            <RefreshCw className="w-4 h-4" /> Perpanjang
-          </button>
         </section>
-      )}
-      {renewAsk && renewFee && (
-        <RenewConfirm fee={renewFee} note={null}
-          onCancel={() => setRenewAsk(false)}
-          onConfirm={() => { setRenewAsk(false); onRenew(); }} />
       )}
 
       {/* ══ HERO: sambutan + kartu anggota digital ══ */}
@@ -266,12 +259,6 @@ export default function ActiveMemberDashboard({
               {onEditProfile && (
                 <button type="button" onClick={onEditProfile} className="soft-pill">
                   <Edit3 className="w-4 h-4" /> {editLabel}
-                </button>
-              )}
-              {canRenew && (
-                <button type="button" onClick={() => setRenewAsk(true)}
-                  className="soft-pill !border-orange-200 !bg-orange-50 !text-orange-700 hover:!bg-orange-100">
-                  <RefreshCw className="w-4 h-4" /> Perpanjang
                 </button>
               )}
             </div>
@@ -367,13 +354,30 @@ export default function ActiveMemberDashboard({
                     <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-px" />
                     {period.tone === 'expired'
                       ? 'Masa aktif keanggotaan sudah habis. Klik Perpanjang untuk mengajukan perpanjangan.'
-                      : 'Masa aktif hampir habis. Perpanjang sekarang agar keanggotaan tidak terputus.'}
+                      : noticeSent
+                        ? 'Masa aktif hampir habis. Perpanjang sekarang agar keanggotaan tidak terputus.'
+                        : `Masa aktif hampir habis. Tombol Perpanjang aktif setelah pemberitahuan perpanjangan (H-${noticeDays}).`}
                   </p>
                 ) : (
                   <p className="mt-4 flex items-start gap-2 text-xs rounded-xl border border-sky-100 bg-sky-50/70 text-sky-800 px-3 py-2.5">
                     <Sparkles className="w-4 h-4 flex-shrink-0 mt-px" />
-                    Pengingat perpanjangan muncul 7 hari sebelum masa aktif berakhir. Perpanjangan juga bisa diajukan kapan saja lewat tombol Perpanjang.
+                    Pemberitahuan perpanjangan dikirim {noticeDays} hari sebelum masa aktif berakhir. Setelah itu tombol Perpanjang bisa diklik.
                   </p>
+                )}
+
+                {canRenew && (
+                  <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-2.5">
+                    <button type="button" onClick={() => onRenew()} disabled={!renewOpen}
+                      title={renewOpen ? undefined : `Aktif setelah pemberitahuan perpanjangan (H-${noticeDays})`}
+                      className="inline-flex items-center justify-center gap-2 h-10 px-5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed">
+                      <RefreshCw className="w-4 h-4" /> Perpanjang
+                    </button>
+                    {!renewOpen && (
+                      <span className="text-[11px] text-slate-500">
+                        Bisa diklik mulai {fmt(new Date(period.end.getTime() - noticeDays * DAY))} (H-{noticeDays}), setelah pemberitahuan perpanjangan.
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

@@ -53,7 +53,7 @@ const SPECIALIZATIONS = [
 function getRequiredDocsList(submissionType, category) {
   if (submissionType === 'Heregistrasi') {
     return [
-      { type: 'kta_lama', title: 'Kartu Anggota Ikapi yang Sudah Habis Masa Berlakunya' },
+      { type: 'kta_lama', title: 'Kartu Anggota Ikapi yang Akan Habis Masa Berlakunya' },
       { type: 'formulir_heregistrasi', title: 'Isian Formulir Heregistrasi' },
     ];
   }

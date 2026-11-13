@@ -13,20 +13,6 @@ const daysLeft = (v) => {
   return Math.ceil((new Date(`${String(v).slice(0, 10)}T00:00:00`) - today) / 86400000);
 };
 
-// Jalur anggota lama yang dipilih Admin saat menyetujui data KTA
-const TRACKS = [
-  {
-    key: 'Perpanjangan',
-    title: 'Perpanjangan',
-    desc: 'KTA habis/hampir habis. Pemohon isi formulir & bayar iuran.',
-  },
-  {
-    key: 'Masih Aktif',
-    title: 'Masih aktif',
-    desc: 'KTA masih berlaku. Langsung jadi Anggota Aktif.',
-  },
-];
-
 function Modal({ children, onClose, saving }) {
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4 overflow-y-auto" onClick={() => !saving && onClose()}>
@@ -181,8 +167,8 @@ function EditMigForm({ userId, initial, onCancel, onSaved }) {
 
 /**
  * Antrean Admin untuk anggota lama:
- * 1. Verifikasi Nomor KTA lama + pilih jalur (perpanjangan / masih aktif).
- * 2. Validasi masa aktif untuk jalur "masih aktif" (data keanggotaan diisi manual oleh pemohon).
+ * 1. Verifikasi data KTA lama: setujui (langsung Anggota Aktif) atau tolak.
+ * 2. Validasi masa aktif akun lama yang dulu mengisi data keanggotaan terpisah.
  */
 export default function HeregRequestsPanel() {
   const [items, setItems] = useState([]);
@@ -191,30 +177,22 @@ export default function HeregRequestsPanel() {
   const [review, setReview] = useState(null);
   const [migReview, setMigReview] = useState(null);
   const [mode, setMode] = useState(null); // null | 'reject' | 'renew'
-  const [track, setTrack] = useState('Perpanjangan');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
-  // Jalur yang dibuka Admin di Pengaturan Sistem (default keduanya)
-  const [enabled, setEnabled] = useState(TRACKS.map((t) => t.key));
-  const tracks = TRACKS.filter((t) => enabled.includes(t.key));
-  const renewOn = enabled.includes('Perpanjangan');
 
   // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
   const loadedOnce = useRef(false);
   const load = async () => {
     if (!loadedOnce.current) setLoading(true);
     try {
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, r2] = await Promise.all([
         fetch('/api/admin/hereg-requests', { headers: authHeader() }),
         fetch('/api/admin/hereg-migrations', { headers: authHeader() }),
-        fetch('/api/settings', { headers: authHeader() }),
       ]);
-      const [d1, d2, d3] = await Promise.all([r1.json().catch(() => []), r2.json().catch(() => []), r3.json().catch(() => ({}))]);
+      const [d1, d2] = await Promise.all([r1.json().catch(() => []), r2.json().catch(() => [])]);
       if (r1.ok) setItems(Array.isArray(d1) ? d1 : []);
       if (r2.ok) setMigs(Array.isArray(d2) ? d2 : []);
-      const on = String(d3?.settings?.hereg_tracks || '').split(',').map((t) => t.trim()).filter((t) => TRACKS.some((x) => x.key === t));
-      if (r3.ok) setEnabled(on.length ? on : TRACKS.map((t) => t.key));
     } catch (err) {
       console.error('Gagal memuat antrean anggota lama:', err);
     } finally {
@@ -225,15 +203,7 @@ export default function HeregRequestsPanel() {
 
   useEffect(() => { load(); }, []);
 
-  const open = (item) => {
-    setReview(item); setMode(null); setNote(''); setEditing(false);
-    // Form gabungan: saran jalur dari masa berlaku KTA; pengajuan lama: dari data anggota yang cocok
-    const vu = item.hereg_mig_data?.validUntil;
-    const guess = item.hereg_mig_data?.ktaNumber
-      ? (daysLeft(vu) > 0 ? 'Masih Aktif' : 'Perpanjangan')
-      : item.kta_matches?.some((m) => m.membership_status === 'Aktif') ? 'Masih Aktif' : 'Perpanjangan';
-    setTrack(enabled.includes(guess) ? guess : enabled[0]);
-  };
+  const open = (item) => { setReview(item); setMode(null); setNote(''); setEditing(false); };
   const openMig = (item) => { setMigReview(item); setMode(null); setNote(''); setEditing(false); };
   const close = () => { setReview(null); setMigReview(null); setEditing(false); };
 
@@ -284,7 +254,7 @@ export default function HeregRequestsPanel() {
       return;
     }
     post(`/api/admin/hereg-requests/${review.id}/review`, {
-      decision, track: decision === 'approve' ? track : undefined, note: decision === 'reject' ? note.trim() : undefined,
+      decision, note: decision === 'reject' ? note.trim() : undefined,
     });
   };
 
@@ -303,8 +273,6 @@ export default function HeregRequestsPanel() {
   const migLeft = daysLeft(md.validUntil);
   const rd = review?.hereg_mig_data?.ktaNumber ? review.hereg_mig_data : null;
   const rdLeft = rd ? daysLeft(rd.validUntil) : null;
-  // KTA habis tidak bisa diaktifkan langsung (server juga menolak)
-  const trackOff = (key) => key === 'Masih Aktif' && rd && !(rdLeft > 0);
 
   return (
     <div className="card-surface p-4 sm:p-5">
@@ -316,8 +284,7 @@ export default function HeregRequestsPanel() {
               Verifikasi anggota lama {total > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">{total}</span>}
             </h3>
             <p className="text-[11px] text-slate-500">
-              {tracks.length > 1 ? 'Cocokkan KTA lama lalu tentukan jalurnya: perpanjangan, atau masih aktif (data manual).'
-                : `Cocokkan KTA lama. Jalur yang dibuka: ${tracks[0]?.title.toLowerCase()}.`}
+              Cocokkan data KTA lama, lalu setujui atau tolak.
             </p>
           </div>
         </div>
@@ -381,11 +348,11 @@ export default function HeregRequestsPanel() {
         </>
       )}
 
-      {/* ── Modal 1: verifikasi KTA lama + pilih jalur ── */}
+      {/* ── Modal 1: verifikasi KTA lama (setujui / tolak) ── */}
       {review && (
         <Modal onClose={close} saving={saving}>
           <ModalHead eyebrow="Verifikasi anggota lama" title={review.name}
-            subtitle="Pastikan pemohon benar pernah terdaftar, lalu tentukan jalurnya." onClose={close} saving={saving} />
+            subtitle="Pastikan pemohon benar pernah terdaftar, lalu setujui atau tolak." onClose={close} saving={saving} />
 
           {rd && (
             <div className="px-5 pt-4">
@@ -440,31 +407,7 @@ export default function HeregRequestsPanel() {
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-300 focus:border-red-400" />
               <p className="text-[10px] text-slate-500 mt-1">Alasan ini dikirim ke pemohon untuk diperbaiki.</p>
             </div>
-          ) : (
-            <fieldset className="px-5 pt-3 pb-4 border-t border-slate-100">
-              <legend className="sr-only">Jalur bila disetujui</legend>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                {tracks.length > 1 ? 'Jalur bila disetujui' : 'Jalur yang dibuka'}
-              </p>
-              <div className={tracks.length > 1 ? 'grid grid-cols-1 sm:grid-cols-2 gap-2' : ''}>
-                {tracks.map((t) => (
-                  <label key={t.key} className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition ${
-                    trackOff(t.key) ? 'border-slate-200 opacity-50 cursor-not-allowed'
-                      : track === t.key ? 'border-[#0884c4] bg-sky-50/70 ring-1 ring-[#0884c4]/30 cursor-pointer' : 'border-slate-200 hover:bg-slate-50 cursor-pointer'
-                  }`}>
-                    <input type="radio" name="hereg-track" value={t.key} checked={track === t.key} disabled={trackOff(t.key)} onChange={() => setTrack(t.key)}
-                      className={`mt-0.5 accent-[#0884c4] ${tracks.length > 1 ? '' : 'hidden'}`} />
-                    <span>
-                      <span className="block text-xs font-semibold text-slate-800">{t.title}</span>
-                      <span className="block text-[11px] text-slate-500 leading-snug">
-                        {trackOff(t.key) ? 'Tidak tersedia: KTA sudah lewat.' : !rd && t.key === 'Masih Aktif' ? 'KTA masih berlaku. Pemohon isi data, lalu Admin validasi.' : t.desc}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          )}
+          ) : null}
 
           <div className="flex justify-end gap-2 px-5 py-3 bg-slate-50 border-t border-slate-100">
             {mode === 'reject' ? (
@@ -479,8 +422,8 @@ export default function HeregRequestsPanel() {
                 <button type="button" onClick={() => setMode('reject')} disabled={saving} className="px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 bg-white hover:bg-red-50 flex items-center gap-1">
                   <XCircle className="w-3.5 h-3.5" /> Tolak
                 </button>
-                <button type="button" onClick={() => submit('approve')} disabled={saving || trackOff(track)} className="px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 flex items-center gap-1">
-                  <CheckCircle className="w-3.5 h-3.5" /> {saving ? 'Menyimpan...' : track === 'Masih Aktif' ? (rd ? 'Setujui · aktifkan' : 'Setujui · masih aktif') : 'Setujui · perpanjangan'}
+                <button type="button" onClick={() => submit('approve')} disabled={saving} className="px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" /> {saving ? 'Menyimpan...' : 'Setujui'}
                 </button>
               </>
             )}
@@ -550,7 +493,7 @@ export default function HeregRequestsPanel() {
                 <button type="button" onClick={() => setMode('reject')} disabled={saving} className="px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 bg-white hover:bg-red-50 flex items-center gap-1">
                   <XCircle className="w-3.5 h-3.5" /> Tolak
                 </button>
-                {renewOn && (
+                {(
                   <button type="button" onClick={() => setMode('renew')} disabled={saving} className="px-3 py-2 rounded-lg text-xs font-semibold border border-amber-200 text-amber-700 bg-white hover:bg-amber-50 flex items-center gap-1">
                     <RotateCcw className="w-3.5 h-3.5" /> Sarankan perpanjang
                   </button>

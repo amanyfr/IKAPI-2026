@@ -452,12 +452,28 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 });
 
 // Current User Me
+// Anggota lama yang dulu disetujui lewat jalur "Perpanjangan" (alur lama) belum punya keanggotaan:
+// aktifkan dari data KTA yang sudah divalidasi supaya langsung masuk dashboard anggota aktif.
+async function healApprovedOldMember(user) {
+  if (user?.role !== 'Anggota' || user.member_type !== 'Lama' || user.hereg_status !== 'Disetujui') return user;
+  const d = parseJsonSafe(user.hereg_mig_data);
+  if (!d?.ktaNumber || !validDate(d.validUntil)) return user;
+  if (await query.get('SELECT id FROM submissions WHERE user_id = ? LIMIT 1', [user.id])) return user;
+  const reviewer = user.hereg_reviewed_by || 'Admin';
+  const done = await activateOldMember({ u: user, d, validUntil: d.validUntil, note: user.hereg_note, reviewer, actor: { name: reviewer, role: 'Admin' } });
+  if (done.error) { console.error('Aktivasi anggota lama gagal:', user.id, done.error); return user; }
+  await query.run("UPDATE users SET hereg_track = 'Masih Aktif' WHERE id = ?", [user.id]);
+  remindExpiringMemberships();
+  return query.get('SELECT * FROM users WHERE id = ?', [user.id]);
+}
+
 app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
-    const user = await query.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    let user = await query.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
     if (!user) {
       return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
     }
+    try { user = await healApprovedOldMember(user); } catch (e) { console.error('Heal anggota lama:', e); }
     const member = await query.get('SELECT * FROM members WHERE user_id = ?', [user.id]);
     // Sesi lama (dibuat sebelum ada cookie) ikut mendapat cookie untuk membuka file
     setSessionCookie(res, readToken(req));
@@ -793,16 +809,17 @@ const SETTINGS_FORMAT = {
 };
 const PHONE_FORMAT = { phone: ['phone', 'Nomor telepon'] };
 
-// Jalur anggota lama yang dibuka Admin (minimal satu)
-const HEREG_TRACKS = ['Perpanjangan', 'Masih Aktif'];
-const parseTracks = (v) => {
-  const list = String(v ?? '').split(',').map((t) => t.trim()).filter((t) => HEREG_TRACKS.includes(t));
-  return [...new Set(list)];
+// Pemberitahuan perpanjangan dikirim H-N sebelum masa aktif berakhir (N diatur Admin).
+// Tombol Perpanjang anggota baru bisa diklik setelah pemberitahuan ini terkirim.
+const RENEW_NOTICE_DEFAULT = 7;
+const RENEW_NOTICE_MAX = 365;
+const parseNoticeDays = (v) => {
+  const n = Number(String(v ?? '').trim());
+  return Number.isInteger(n) && n >= 1 && n <= RENEW_NOTICE_MAX ? n : null;
 };
-async function enabledTracks() {
-  const row = await query.get("SELECT value FROM settings WHERE settings.key = 'hereg_tracks'");
-  const list = row ? parseTracks(row.value) : [];
-  return list.length ? list : HEREG_TRACKS;
+async function renewNoticeDays() {
+  const row = await query.get("SELECT value FROM settings WHERE settings.key = 'renew_notice_days'");
+  return parseNoticeDays(row?.value) || RENEW_NOTICE_DEFAULT;
 }
 
 const FEE_KEYS = ['fee_uang_pangkal', 'fee_iuran_bulanan', 'fee_iuran_durasi_bulan', 'fee_administrasi', 'fee_heregistrasi_iuran'];
@@ -876,8 +893,7 @@ const STATUS_ESTIMATE = {
 };
 
 // ── Masa aktif keanggotaan (sama dengan perhitungan dashboard anggota) ──
-// Tombol perpanjang dibuka mulai H-7 sebelum masa aktif berakhir (atau sesudahnya).
-const RENEW_WINDOW_DAYS = 7;
+// Tombol perpanjang dibuka mulai H-N (pengaturan renew_notice_days) sebelum masa aktif berakhir (atau sesudahnya).
 const DAY_MS = 24 * 60 * 60 * 1000;
 const parseSqlDate = (v) => {
   if (!v) return null;
@@ -911,7 +927,7 @@ async function latestActiveMembership(userId) {
   return { sub, period: await membershipPeriodOf(sub) };
 }
 
-// Pengingat masa aktif: dikirim sekali mulai H-7, berlaku sampai masa aktif berakhir.
+// Pengingat masa aktif: dikirim sekali mulai H-N (diatur Admin), berlaku sampai masa aktif berakhir.
 // Pengingat dihapus saat masa aktif sudah lewat atau saat anggota mengajukan perpanjangan.
 const REMIND_SOON = 'Masa aktif keanggotaan segera berakhir';
 const REMIND_EXPIRED = 'Masa aktif keanggotaan telah berakhir'; // judul lama, ikut dibersihkan
@@ -924,16 +940,17 @@ async function remindExpiringMemberships() {
     const subs = await query.all(
       `SELECT s.id, s.user_id, s.kta_issued_at, s.kta_valid_until, s.activated_at FROM submissions s
        WHERE s.status = 'Aktif' AND s.id = (SELECT MAX(s2.id) FROM submissions s2 WHERE s2.user_id = s.user_id)`);
+    const noticeDays = await renewNoticeDays();
     for (const sub of subs) {
       const period = await membershipPeriodOf(sub);
-      if (!period || period.left > RENEW_WINDOW_DAYS) continue;
+      if (!period || period.left > noticeDays) continue;
       // Batas waktu lewat: pengingat perpanjangan dihapus
       if (period.left <= 0) { await clearRenewReminders(sub.user_id); continue; }
       const sent = await query.get('SELECT id FROM notifications WHERE user_id = ? AND submission_id = ? AND title = ? LIMIT 1',
         [sub.user_id, sub.id, REMIND_SOON]);
       if (sent) continue;
       const tgl = period.end.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-      const body = `Masa aktif keanggotaan Anda berakhir pada ${tgl} (${period.left} hari lagi). Klik Perpanjang di dashboard untuk mengajukan perpanjangan.`;
+      const body = `Masa aktif keanggotaan Anda berakhir pada ${tgl} (${period.left} hari lagi). Klik Perpanjang di kartu Masa Aktif Keanggotaan pada dashboard untuk mengajukan perpanjangan.`;
       await addNotification(sub.user_id, REMIND_SOON, body, sub.id);
     }
   } catch (err) {
@@ -1641,12 +1658,17 @@ app.post('/api/submissions', authenticate, async (req, res) => {
     if (createFormatErr) return res.status(400).json({ error: createFormatErr });
 
     if (req.user.role === 'Anggota') {
-      // Satu akun anggota hanya untuk satu pengajuan, kecuali perpanjangan oleh anggota aktif (kapan saja)
+      // Satu akun anggota hanya untuk satu pengajuan, kecuali perpanjangan oleh anggota aktif
+      // (dibuka setelah pemberitahuan perpanjangan H-N terkirim)
       const existing = await query.get('SELECT id, status FROM submissions WHERE user_id = ? ORDER BY id DESC LIMIT 1', [req.user.id]);
       if (existing) {
         const active = existing.status === 'Aktif' ? await latestActiveMembership(req.user.id) : null;
         if (!active?.period) {
           return res.status(400).json({ error: `Akun ini sudah memiliki pengajuan (#${existing.id}) yang sedang berjalan.` });
+        }
+        const noticeDays = await renewNoticeDays();
+        if (active.period.left > noticeDays) {
+          return res.status(400).json({ error: `Perpanjangan dibuka setelah pemberitahuan perpanjangan dikirim (${noticeDays} hari sebelum masa aktif berakhir).` });
         }
         if (submissionType !== 'Heregistrasi') {
           return res.status(400).json({ error: 'Pengajuan perpanjangan harus berjenis Registrasi (perpanjangan).' });
@@ -1728,7 +1750,7 @@ app.post('/api/submissions', authenticate, async (req, res) => {
     const requiredDocs = [];
     if (submissionType === 'Heregistrasi') {
       requiredDocs.push(
-        { type: 'kta_lama', title: 'Kartu Anggota Ikapi yang Sudah Habis Masa Berlakunya' },
+        { type: 'kta_lama', title: 'Kartu Anggota Ikapi yang Akan Habis Masa Berlakunya' },
         { type: 'formulir_heregistrasi', title: 'Isian Formulir Heregistrasi' }
       );
     } else if (category === 'Biasa') {
@@ -2606,28 +2628,22 @@ app.post('/api/admin/hereg-requests/:userId/review', authenticate, authorize('Ad
     if (hasSub || (u.hereg_status && u.hereg_status !== 'Menunggu')) {
       return res.status(400).json({ error: 'Akun ini tidak sedang menunggu verifikasi anggota lama.' });
     }
-    // Admin menentukan jalur: perpanjangan penuh, atau anggota yang masa aktifnya masih berlaku
-    const tracks = await enabledTracks();
-    let track = null;
-    if (decision === 'approve') {
-      track = tracks.length === 1 ? tracks[0] : (req.body.track === 'Masih Aktif' ? 'Masih Aktif' : 'Perpanjangan');
-      if (!tracks.includes(track)) return res.status(400).json({ error: `Jalur ${track} sedang dinonaktifkan.` });
-    }
+    // Admin cukup setujui / tolak. Disetujui = langsung Anggota Aktif dari data KTA yang dikirim;
+    // perpanjangan diajukan anggota sendiri dari dashboard setelah pemberitahuan H-N.
     const reviewer = req.user.name || req.user.email;
-    // Form gabungan: data keanggotaan sudah dikirim bersama KTA, jadi jalur "masih aktif" langsung diaktifkan
     const d = parseJsonSafe(u.hereg_mig_data);
-    if (decision === 'approve' && track === 'Masih Aktif' && d?.ktaNumber) {
+    const track = decision === 'approve' ? (d?.ktaNumber ? 'Masih Aktif' : 'Perpanjangan') : null;
+    if (decision === 'approve' && d?.ktaNumber) {
       const validUntil = DATE_RE.test(String(req.body.validUntil || '')) ? req.body.validUntil : d.validUntil;
-      if (!validDate(validUntil) || new Date(`${validUntil}T23:59:59`) < new Date()) {
-        return res.status(400).json({ error: 'Masa berlaku KTA sudah lewat. Pilih jalur perpanjangan.' });
-      }
+      if (!validDate(validUntil)) return res.status(400).json({ error: 'Tanggal berlaku KTA pemohon tidak valid.' });
       const done = await activateOldMember({ u, d, validUntil, note, reviewer, actor: req.user });
       if (done.error) return res.status(400).json({ error: done.error });
       await query.run(
         `UPDATE users SET hereg_status = 'Disetujui', hereg_note = ?, hereg_track = 'Masih Aktif',
            hereg_reviewed_by = ?, hereg_reviewed_at = NOW() WHERE id = ?`,
         [note || null, reviewer, u.id]);
-      return res.json({ message: `KTA ${done.kta} tervalidasi. Pemohon kini Anggota Aktif.`, status: 'Disetujui', track, submissionId: done.submissionId });
+      remindExpiringMemberships(); // masa aktif yang sudah dekat langsung dapat pemberitahuan perpanjangan
+      return res.json({ message: `KTA ${done.kta} disetujui. Pemohon kini Anggota Aktif.`, status: 'Disetujui', track, submissionId: done.submissionId });
     }
     const status = decision === 'approve' ? 'Disetujui' : 'Ditolak';
     await query.run(
@@ -2784,8 +2800,9 @@ async function activateOldMember({ u, d, validUntil, note, reviewer, actor }) {
     [note || null, reviewer, u.id]);
   await logEvent(subRes.lastID, actor,
     `Anggota lama (data manual) divalidasi Admin. KTA ${kta} aktif s.d. ${validUntil}`, note || null);
+  const lapsed = new Date(`${validUntil}T23:59:59`) < new Date();
   await addNotification(u.id, 'Keanggotaan aktif',
-    `Masa aktif KTA ${kta} tervalidasi (berlaku s.d. ${validUntil}). Dashboard anggota Anda sudah aktif.`, subRes.lastID);
+    `Masa aktif KTA ${kta} tervalidasi (berlaku s.d. ${validUntil}). Dashboard anggota Anda sudah aktif.${lapsed ? ' Masa aktif sudah berakhir: klik Perpanjang di kartu Masa Aktif Keanggotaan untuk mengajukan perpanjangan.' : ''}`, subRes.lastID);
   return { kta, submissionId: subRes.lastID };
 }
 
@@ -2887,9 +2904,6 @@ app.post('/api/auth/hereg-renew', authenticate, authorize('Anggota'), async (req
     if (u.member_type !== 'Lama' || u.hereg_status !== 'Disetujui' || u.hereg_track !== 'Masih Aktif') {
       return res.status(403).json({ error: 'Akun ini tidak berada di jalur anggota masih aktif.' });
     }
-    if (!(await enabledTracks()).includes('Perpanjangan')) {
-      return res.status(400).json({ error: 'Perpanjangan sedang tidak dibuka. Hubungi Admin.' });
-    }
     const hasSub = await query.get('SELECT id FROM submissions WHERE user_id = ? LIMIT 1', [u.id]);
     if (hasSub) return res.status(400).json({ error: 'Keanggotaan akun ini sudah tercatat.' });
     // Sebelum tervalidasi, perpanjang hanya bila Admin menyarankannya
@@ -2950,9 +2964,6 @@ app.post('/api/admin/hereg-migrations/:userId/review', authenticate, authorize('
       return res.json({ message: 'Data ditolak. Pemohon diminta memperbaiki.' });
     }
     if (decision === 'renew') {
-      if (!(await enabledTracks()).includes('Perpanjangan')) {
-        return res.status(400).json({ error: 'Jalur perpanjangan sedang dinonaktifkan.' });
-      }
       // Hanya saran: pemohon tetap di dashboard dan memutuskan sendiri kapan memperpanjang (berbayar)
       await query.run(
         `UPDATE users SET hereg_mig_status = 'Perlu Perpanjang', hereg_mig_note = ?,
@@ -3284,10 +3295,11 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
     }
     const settingsFormatErr = formatError(settings, SETTINGS_FORMAT);
     if (settingsFormatErr) return res.status(400).json({ error: settingsFormatErr });
-    if ('hereg_tracks' in settings) {
-      const list = parseTracks(settings.hereg_tracks);
-      if (!list.length) return res.status(400).json({ error: 'Pilih minimal satu jalur anggota lama.' });
-      settings.hereg_tracks = list.join(',');
+    delete settings.hereg_tracks; // jalur anggota lama tidak lagi dipakai
+    if ('renew_notice_days' in settings) {
+      const n = parseNoticeDays(settings.renew_notice_days);
+      if (!n) return res.status(400).json({ error: `Pemberitahuan perpanjangan harus 1–${RENEW_NOTICE_MAX} hari sebelum masa aktif berakhir.` });
+      settings.renew_notice_days = String(n);
     }
     for (const key of FEE_KEYS) {
       if (key in settings && !(Number.isFinite(Number(settings[key])) && Number(settings[key]) >= 0)) {
@@ -3312,6 +3324,8 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
 
     // Harga baru langsung berlaku untuk tagihan yang belum dibayar
     const updatedBills = await syncUnpaidBills();
+    // Batas hari pemberitahuan berubah: kirim pemberitahuan yang kini sudah jatuh tempo
+    if ('renew_notice_days' in settings) remindExpiringMemberships();
 
     res.json({ message: 'Pengaturan sistem berhasil disimpan.', updatedBills });
   } catch (err) {
