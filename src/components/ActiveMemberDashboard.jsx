@@ -250,18 +250,13 @@ export default function ActiveMemberDashboard({
               )}
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {!migrated && (
+            {!migrated && (
+              <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={onOpenPacket} className="soft-pill-primary">
                   <FileText className="w-4 h-4" /> Dokumen resmi
                 </button>
-              )}
-              {onEditProfile && (
-                <button type="button" onClick={onEditProfile} className="soft-pill">
-                  <Edit3 className="w-4 h-4" /> {editLabel}
-                </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* Kartu anggota digital */}
@@ -424,7 +419,8 @@ export default function ActiveMemberDashboard({
             <h3 className="text-lg text-slate-800">Data Penerbit</h3>
           </div>
           {onEditProfile && (
-            <button type="button" onClick={onEditProfile} className="text-xs text-[#0884c4] hover:underline font-semibold inline-flex items-center gap-1">
+            <button type="button" onClick={onEditProfile}
+              className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3.5 py-1.5 text-xs font-semibold text-[#0884c4] shadow-sm transition hover:bg-[#0884c4] hover:text-white hover:border-[#0884c4] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
               <Edit3 className="w-3.5 h-3.5" /> {editLabel}
             </button>
           )}

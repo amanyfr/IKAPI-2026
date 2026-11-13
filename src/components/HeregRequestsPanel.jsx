@@ -16,7 +16,7 @@ const daysLeft = (v) => {
 function Modal({ children, onClose, saving }) {
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4 overflow-y-auto" onClick={() => !saving && onClose()}>
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden my-auto" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden my-auto" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>
