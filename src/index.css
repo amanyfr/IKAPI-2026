@@ -342,3 +342,9 @@
 @media (prefers-reduced-motion: reduce) {
   .auth-grid, .auth-blob, .auth-card, .auth-pane, .auth-logo { animation: none !important; }
 }
+
+/* Edge/IE menambah tombol "lihat sandi" & "hapus" bawaan di input; aplikasi sudah punya tombol mata sendiri */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
