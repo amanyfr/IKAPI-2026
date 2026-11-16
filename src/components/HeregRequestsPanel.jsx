@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { notify } from './AppDialog';
 import { fileUrl } from '../utils/fileUrl';
+import Portal from './Portal';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` });
 const fmtDate = (v) => (v ? new Date(String(v).length <= 10 ? `${v}T00:00:00` : v).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-');
@@ -15,11 +16,13 @@ const daysLeft = (v) => {
 
 function Modal({ children, onClose, saving }) {
   return (
+    <Portal>
     <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4 overflow-y-auto" onClick={() => !saving && onClose()}>
       <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden my-auto" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>
+    </Portal>
   );
 }
 

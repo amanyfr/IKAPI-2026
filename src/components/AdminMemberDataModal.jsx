@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X, AlertCircle, Building2, Save, IdCard } from 'lucide-react';
+import Portal from './Portal';
 
 const authHeaders = () => ({
   'Content-Type': 'application/json',
@@ -68,6 +69,7 @@ export default function AdminMemberDataModal({ user, onClose, onSaved }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[60] overflow-y-auto modal-overlay flex items-center justify-center p-4">
       <form onSubmit={save} className="modal-surface w-full max-w-2xl p-5 sm:p-6 space-y-4">
         <div className="flex items-start justify-between gap-3">
@@ -130,5 +132,6 @@ export default function AdminMemberDataModal({ user, onClose, onSaved }) {
         </div>
       </form>
     </div>
+    </Portal>
   );
 }

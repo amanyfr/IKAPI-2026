@@ -26,6 +26,7 @@ import {
 import { fileUrl } from '../utils/fileUrl';
 import HeregRequestsPanel from '../components/HeregRequestsPanel';
 import { notify } from '../components/AppDialog';
+import Portal from '../components/Portal';
 
 export default function Admin1Screening({ onNavigateToMembers, initialStatus = 'Semua', initialSearch = '', openSubmissionId = null, onDetailClosed }) {
   // Dibuka dari kartu Dashboard: hanya tampilkan detail satu pengajuan, tanpa halaman daftar
@@ -683,6 +684,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
 
       {/* MODAL 3: VERIFIKASI DATA KTA */}
       {ktaReview && (
+        <Portal>
         <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" onClick={() => !ktaSaving && setKtaReview(null)}>
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
@@ -761,6 +763,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
     </div>

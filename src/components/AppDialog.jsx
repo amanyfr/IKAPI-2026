@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react';
+import Portal from './Portal';
 
 // Pop-up pemberitahuan milik aplikasi (pengganti alert() bawaan browser).
 // Pakai: notify('Pesan') atau notify('Pesan', { tone: 'error', title: 'Judul' }).
@@ -61,6 +62,7 @@ export function AppDialogHost() {
   const Icon = tone.icon;
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[200] modal-overlay flex items-center justify-center p-4" onClick={close}>
       <div
         role="alertdialog"
@@ -94,5 +96,6 @@ export function AppDialogHost() {
         </button>
       </div>
     </div>
+    </Portal>
   );
 }

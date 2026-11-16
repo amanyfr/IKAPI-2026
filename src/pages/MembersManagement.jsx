@@ -4,6 +4,7 @@ import {
   X, ChevronRight
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
+import Portal from '../components/Portal';
 
 const token = () => localStorage.getItem('ikapi_token');
 
@@ -301,6 +302,7 @@ export default function MembersManagement({ canEditKta = true, initialStatus = '
 
       {/* ── Member Detail Modal ── */}
       {selectedMember && (
+        <Portal>
         <div className="fixed inset-0 z-50 overflow-y-auto modal-overlay flex items-center justify-center p-4">
           <div className="modal-surface max-w-2xl w-full p-0 overflow-hidden">
 
@@ -401,6 +403,7 @@ export default function MembersManagement({ canEditKta = true, initialStatus = '
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
     </div>

@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Users, UserPlus, Search, Pencil, X, AlertCircle, RefreshCw, CalendarClock, Building2 } from 'lucide-react';
 import { FILTERS, PHONE } from '../utils/inputFilters';
 import AdminMemberDataModal from '../components/AdminMemberDataModal';
+import Portal from '../components/Portal';
 
 const ROLES = ['Admin', 'Sekretaris', 'Ketua', 'Anggota'];
 
@@ -309,6 +310,7 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
 
       {/* Modal tambah / ubah akun */}
       {editing && (
+        <Portal>
         <div className="fixed inset-0 z-50 overflow-y-auto modal-overlay flex items-center justify-center p-4">
           <form onSubmit={handleSave} className="modal-surface w-full max-w-lg p-5 sm:p-6 space-y-4">
             <div className="flex items-start justify-between gap-3">
@@ -434,6 +436,7 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
             </div>
           </form>
         </div>
+        </Portal>
       )}
 
       {memberData && (

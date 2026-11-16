@@ -11,6 +11,7 @@ import {
   Clock, ShieldCheck, AlertCircle, ChevronDown, ChevronUp, Info
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
+import Portal from '../components/Portal';
 
 const STAGE_PROGRESS = {
   'Draf':                    { step: 1, total: 8, label: 'Tahap 1/8 · Pengisian Formulir', color: 'bg-slate-400' },
@@ -719,6 +720,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
           MODAL 2: PENOLAKAN PENGAJUAN BESERTA ALASAN PENOLAKAN
          ===================================================================== */}
       {rejectingSub && (
+        <Portal>
         <div className="fixed inset-0 z-50 overflow-y-auto modal-overlay flex items-center justify-center p-4">
           <div className="modal-surface max-w-md w-full p-6 space-y-4">
             <div className="flex items-center space-x-3 text-red-600">
@@ -765,6 +767,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
       {/* =====================================================================
