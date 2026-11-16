@@ -495,7 +495,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                     >
                       {formData.category === 'Luar Biasa' ? 'Kembali ke Anggota Biasa' : 'Daftar sebagai Anggota Luar Biasa'}
                     </button>
-                    {' '}— dokumen persyaratan di tab terakhir menyesuaikan.
+                    {'. '}Dokumen persyaratan di tab terakhir menyesuaikan.
                   </p>
                 </div>
 
@@ -1133,7 +1133,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                             </span>
                           </div>
                         ) : flagged ? (
-                          <div className="text-xs text-amber-700 font-semibold mt-0.5">Belum diunggah — wajib sebelum pengajuan dikirim</div>
+                          <div className="text-xs text-amber-700 font-semibold mt-0.5">Belum diunggah. Wajib sebelum pengajuan dikirim.</div>
                         ) : (
                           <div className="text-xs text-slate-400 mt-0.5">Format PDF / JPG / PNG · maks. 10 MB</div>
                         )}

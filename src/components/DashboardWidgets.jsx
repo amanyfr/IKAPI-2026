@@ -298,7 +298,7 @@ export function HeaderStats({ items, loading }) {
             <span className="min-w-0">
               <span className="flex items-baseline gap-1 leading-none text-slate-900 tabular-nums whitespace-nowrap">
                 {prefix && <span className="text-xs font-medium text-slate-400">{prefix}</span>}
-                <span className="text-2xl font-semibold tracking-tight">{loading ? '–' : value}</span>
+                <span className="text-2xl font-semibold tracking-tight">{loading ? '-' : value}</span>
                 {suffix && <span className="text-xs font-medium text-slate-400">{suffix}</span>}
               </span>
               <span className="block mt-1 text-[11px] leading-snug text-slate-500 sm:whitespace-nowrap">{label}</span>

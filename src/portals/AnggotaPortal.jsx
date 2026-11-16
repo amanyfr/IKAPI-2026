@@ -169,9 +169,8 @@ export default function AnggotaPortal() {
 
       {/* Footer */}
       <footer className="relative bar-surface border-t py-4 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-center gap-2">
           <span>© 2026 IKAPI Pengurus Daerah Jawa Barat</span>
-          <span className="text-slate-500">Portal Anggota — Pendaftaran & Registrasi</span>
         </div>
       </footer>
     </div>

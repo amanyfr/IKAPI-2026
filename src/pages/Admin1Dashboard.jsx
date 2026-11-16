@@ -6,8 +6,7 @@ import {
   parseDate, submittedDate, timeAgo, initials, pct, greetingName,
   buildTrend, TrendChart, TrendLegend, PositionBubbles, RangeToggle, SideCardList, HeaderStats } from '../components/DashboardWidgets';
 import {
-  ArrowUpRight, ArrowRight, ShieldCheck, Users, Download, KeyRound, Search, Sparkles,
-  FileStack, Send, BadgeCheck, RefreshCw, ChevronDown, Lightbulb
+  ArrowUpRight, ArrowRight, ShieldCheck, Users, Download, KeyRound, Search, FileStack, Send, BadgeCheck, RefreshCw, ChevronDown, Lightbulb
 } from 'lucide-react';
 import { notify } from '../components/AppDialog';
 import QueueCard, { QueueFooter, QueueFilterBar } from '../components/QueueCard';
@@ -247,7 +246,7 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
         </div>
 
         <div className="card-surface p-4 sm:p-5 lg:col-span-3 flex flex-col">
-          <p className="text-base text-slate-800">Halo, {firstName} 👋</p>
+          <p className="text-base text-slate-800">Halo, {firstName}</p>
           <div className="grid grid-cols-2 gap-2 mt-3">
             {[
               { label: 'Tanda tangan', icon: ShieldCheck, tone: 'bg-sky-100 text-[#0884c4]',       onClick: () => onOpenScreening({ status: 'Menunggu TTD Sekretaris' }) },
@@ -270,7 +269,7 @@ export default function Admin1Dashboard({ onOpenScreening, onOpenMembers, onOpen
               placeholder="Cari penerbit atau kota..."
               className="w-full pl-9 pr-10 py-2.5 text-xs rounded-full bg-slate-50 border border-white/90 placeholder:text-slate-400 focus:ring-2 focus:ring-[#0da2e7]/30 outline-none" />
             <button type="submit" aria-label="Cari" className="absolute right-3 bottom-2 p-1 text-[#0da2e7] hover:text-[#0884c4]">
-              <Sparkles className="w-4 h-4" />
+              <ArrowRight className="w-4 h-4" />
             </button>
           </form>
         </div>

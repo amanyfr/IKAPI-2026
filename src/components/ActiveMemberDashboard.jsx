@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   ShieldCheck, CalendarDays, CalendarClock, Clock, FileText, Receipt, Edit3, Copy, Check,
   Building2, User, MapPin, Phone, Mail, Globe, Hash, BadgeCheck, AlertTriangle, BookOpen,
-  Award, ChevronRight, Sparkles, RefreshCw,
+  Award, ChevronRight, BellRing, RefreshCw,
 } from 'lucide-react';
 import { fileUrl } from '../utils/fileUrl';
 import { useAuth } from '../context/AuthContext';
@@ -355,7 +355,7 @@ export default function ActiveMemberDashboard({
                   </p>
                 ) : (
                   <p className="mt-4 flex items-start gap-2 text-xs rounded-xl border border-sky-100 bg-sky-50/70 text-sky-800 px-3 py-2.5">
-                    <Sparkles className="w-4 h-4 flex-shrink-0 mt-px" />
+                    <BellRing className="w-4 h-4 flex-shrink-0 mt-px" />
                     Pemberitahuan perpanjangan dikirim {noticeDays} hari sebelum masa aktif berakhir. Setelah itu tombol Perpanjang bisa diklik.
                   </p>
                 )}

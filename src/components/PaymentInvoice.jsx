@@ -137,7 +137,7 @@ export default function PaymentInvoice({ submission, payment, settings }) {
             <p className="text-[11px] text-slate-500 mb-2">Penerbit pemohon keanggotaan IKAPI Jawa Barat</p>
             <InfoRows
               rows={[
-                ['Pimpinan', [submission.leader_name, submission.leader_title].filter(Boolean).join(' — ')],
+                ['Pimpinan', [submission.leader_name, submission.leader_title].filter(Boolean).join(', ')],
                 ['Alamat', billingAddress(submission)],
                 ['Telepon', submission.publisher_phone || submission.leader_phone],
                 ['Email', submission.publisher_email],

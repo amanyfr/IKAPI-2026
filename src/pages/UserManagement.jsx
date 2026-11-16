@@ -337,7 +337,7 @@ export default function UserManagement({ initialRole = 'Semua', initialSearch = 
               <div className="sm:col-span-2">
                 <label className="text-sm font-semibold text-slate-700 block mb-1.5">Peran</label>
                 <select value={form.role} disabled={isSelf} onChange={(e) => setForm({ ...form, role: e.target.value })} className={field}>
-                  {ROLES.map((r) => <option key={r} value={r}>{r} — {ROLE_DESC[r]}</option>)}
+                  {ROLES.map((r) => <option key={r} value={r}>{r}: {ROLE_DESC[r]}</option>)}
                 </select>
                 {isSelf && <p className="text-[11px] text-slate-400 mt-1">Peran akun Anda sendiri tidak bisa diubah.</p>}
               </div>

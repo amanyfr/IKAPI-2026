@@ -8,6 +8,7 @@ import { waLink } from '../utils/whatsapp';
 import { notify } from '../components/AppDialog';
 import { FILTERS, NUMERIC, PHONE } from '../utils/inputFilters';
 import { ETA_FIELDS, ETA_DEFAULTS, shortEta, refreshStageEta } from '../utils/stageEta';
+import SmtpSettings from '../components/SmtpSettings';
 
 // Pengaturan yang tidak boleh berisi huruf beserta penyaringnya
 const FIELD_FILTERS = {
@@ -346,7 +347,7 @@ export default function SystemSettings() {
               />
               <span className="text-xs text-slate-500">hari</span>
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">Anggota menerima pemberitahuan H-{Number(settings.renew_notice_days) || 7}. Tombol Perpanjang di kartu Masa Aktif Keanggotaan baru bisa diklik setelah pemberitahuan ini. Rentang 1–365.</p>
+            <p className="text-[11px] text-slate-500 mt-1">Anggota menerima pemberitahuan H-{Number(settings.renew_notice_days) || 7}. Tombol Perpanjang di kartu Masa Aktif Keanggotaan baru bisa diklik setelah pemberitahuan ini. Rentang 1 sampai 365.</p>
           </div>
         </div>
 
@@ -636,7 +637,7 @@ export default function SystemSettings() {
             <div>
               <h3 className="text-lg text-slate-800">7. Estimasi Waktu Tahapan</h3>
               <p className="text-[11px] text-slate-500">
-                Tampil ke pemohon di kartu verifikasi anggota lama & Tahapan Status Pengajuan. Contoh: Maks. 2×24 jam kerja, ± 2–5 hari kerja.
+                Tampil ke pemohon di kartu verifikasi anggota lama & Tahapan Status Pengajuan. Contoh: Maks. 2×24 jam kerja, ± 2-5 hari kerja.
               </p>
             </div>
           </div>
@@ -677,6 +678,8 @@ export default function SystemSettings() {
         </div>
 
       </form>
+
+      <SmtpSettings />
     </div>
   );
 }

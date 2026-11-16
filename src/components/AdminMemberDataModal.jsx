@@ -92,7 +92,7 @@ export default function AdminMemberDataModal({ user, onClose, onSaved }) {
             <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
               <IdCard className="w-4 h-4 text-[#0884c4]" />
               <span className="text-xs text-slate-500">No. KTA</span>
-              <span className="font-mono text-sm font-bold text-slate-800">{kta || '—'}</span>
+              <span className="font-mono text-sm font-bold text-slate-800">{kta || '-'}</span>
               <label className="ml-auto flex items-center gap-2 text-xs text-slate-600">
                 Kategori
                 <select value={form.category || 'Biasa'} onChange={set('category')} className="text-xs px-2 py-1.5 border border-slate-200 rounded-lg bg-white">

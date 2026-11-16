@@ -309,19 +309,6 @@
   background: radial-gradient(circle, #93c5fd, transparent 70%); animation: auth-drift-2 22s ease-in-out infinite; }
 .auth-blob-3 { width: 320px; height: 320px; bottom: 6%; left: 8%;
   background: radial-gradient(circle, #bae6fd, transparent 70%); animation: auth-drift-3 26s ease-in-out infinite; }
-/* Lembaran buku kecil yang melayang */
-.auth-float {
-  position: absolute;
-  border-radius: 14px;
-  border: 1.5px solid rgb(13 162 231 / 0.22);
-  background:
-    linear-gradient(rgb(13 162 231 / 0.35), rgb(13 162 231 / 0.35)) 22% 30% / 56% 2px no-repeat,
-    linear-gradient(rgb(13 162 231 / 0.2), rgb(13 162 231 / 0.2)) 22% 45% / 42% 2px no-repeat,
-    linear-gradient(rgb(13 162 231 / 0.2), rgb(13 162 231 / 0.2)) 22% 60% / 50% 2px no-repeat,
-    rgb(255 255 255 / 0.7);
-  box-shadow: 0 10px 24px -14px rgb(8 132 196 / 0.4);
-  animation: auth-float 9s ease-in-out infinite;
-}
 /* Panel kiri kartu masuk: senada dengan header portal */
 .auth-aside {
   position: relative;
@@ -348,11 +335,10 @@
 @keyframes auth-drift-2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-80px,-70px) scale(1.08); } }
 @keyframes auth-drift-3 { 0%,100% { transform: translate(0,0); } 33% { transform: translate(-60px,40px); } 66% { transform: translate(40px,-50px); } }
 @keyframes auth-grid-pan { from { background-position: 0 0; } to { background-position: 220px 220px; } }
-@keyframes auth-float { 0%,100% { transform: translateY(0) rotate(var(--r,0deg)); } 50% { transform: translateY(-18px) rotate(calc(var(--r,0deg) + 4deg)); } }
 @keyframes auth-card-in { from { opacity: 0; transform: translateY(24px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes auth-pane-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes auth-logo-spin { from { opacity: 0; transform: rotate(-90deg) scale(0.6); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-grid, .auth-blob, .auth-float, .auth-card, .auth-pane, .auth-logo { animation: none !important; }
+  .auth-grid, .auth-blob, .auth-card, .auth-pane, .auth-logo { animation: none !important; }
 }

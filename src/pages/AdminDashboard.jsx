@@ -8,7 +8,7 @@ import {
   buildTrend, SideCardList, TrendChart, TrendLegend, RangeToggle, HeaderStats } from '../components/DashboardWidgets';
 import {
   ArrowUpRight, ArrowRight, Users, UserPlus, UserCheck, RefreshCw, Lightbulb, Wallet,
-  FileSignature, Search, Sparkles, CheckCircle2, CircleDashed, KeyRound,
+  FileSignature, Search, CheckCircle2, CircleDashed, KeyRound,
   ShieldCheck, CreditCard, BadgeCheck, Activity
 } from 'lucide-react';
 
@@ -301,7 +301,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
         </div>
 
         <div className="card-surface p-4 sm:p-5 lg:col-span-3 flex flex-col min-h-0">
-          <p className="text-base text-slate-800 [@media(max-height:780px)]:hidden">Halo, {firstName} 👋</p>
+          <p className="text-base text-slate-800 [@media(max-height:780px)]:hidden">Halo, {firstName}</p>
           <div className="grid grid-cols-2 gap-2 mt-3 [@media(max-height:780px)]:mt-0">
             {[
               { label: 'Tambah akun', icon: UserPlus,      tone: 'bg-blue-100 text-blue-800',       onClick: () => onOpenUsers({ create: true }) },
@@ -324,7 +324,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
               placeholder="Cari nama atau email akun..."
               className="w-full pl-9 pr-10 py-2.5 text-xs rounded-full bg-slate-50 border border-slate-200/70 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-200 outline-none" />
             <button type="submit" aria-label="Cari" className="absolute right-3 bottom-2 p-1 text-blue-800">
-              <Sparkles className="w-4 h-4" />
+              <ArrowRight className="w-4 h-4" />
             </button>
           </form>
         </div>

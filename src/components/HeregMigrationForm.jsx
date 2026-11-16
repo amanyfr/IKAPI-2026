@@ -141,7 +141,7 @@ function MigrationForm({ onDone, onCancel, apply = false, onEditProfile }) {
             <h2 className="mt-1 text-xl sm:text-2xl font-semibold text-slate-900 tracking-tight">{apply ? 'Data KTA & keanggotaan' : 'Data keanggotaan'}</h2>
             <p className="text-sm text-slate-500 mt-1.5">
               {apply
-                ? 'Isi Nomor KTA, masa berlaku & data penerbit sesuai kartu anggota Anda. Admin memvalidasi sekali: KTA masih berlaku langsung aktif, KTA habis lanjut ke perpanjangan dengan data terisi otomatis.'
+                ? 'Isi Nomor KTA, masa berlaku & data penerbit sesuai kartu anggota Anda. Setelah Admin menyetujui, akun langsung aktif dan masuk ke dashboard.'
                 : 'Keanggotaan Anda sebelumnya didata manual. Isi data penerbit & masa berlaku KTA sesuai kartu anggota Anda, tanpa formulir pengajuan atau pembayaran. Admin memvalidasi bahwa keanggotaan Anda masih aktif.'}
             </p>
             {apply && onEditProfile && (
@@ -156,7 +156,7 @@ function MigrationForm({ onDone, onCancel, apply = false, onEditProfile }) {
             <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-xs font-semibold text-red-700 mb-0.5">Data keanggotaan ditolak Admin · alasan:</p>
-              <p className="text-sm text-red-800 whitespace-pre-line">{rejectNote || '—'}</p>
+              <p className="text-sm text-red-800 whitespace-pre-line">{rejectNote || '-'}</p>
             </div>
           </div>
         )}
@@ -179,7 +179,7 @@ function MigrationForm({ onDone, onCancel, apply = false, onEditProfile }) {
         {expired && (
           <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            {apply ? 'Tanggal berlaku sudah lewat. Setelah divalidasi Admin, Anda lanjut ke formulir perpanjangan.' : 'Tanggal berlaku sudah lewat. Admin kemungkinan akan mengalihkan Anda ke jalur perpanjangan.'}
+            {apply ? 'Tanggal berlaku sudah lewat. Setelah disetujui Admin, ajukan perpanjangan dari dashboard.' : 'Tanggal berlaku sudah lewat. Admin kemungkinan akan mengalihkan Anda ke jalur perpanjangan.'}
           </p>
         )}
         <div className="mt-4">
@@ -260,7 +260,7 @@ function MigrationForm({ onDone, onCancel, apply = false, onEditProfile }) {
       <div className="card-surface px-5 sm:px-6 py-4 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="flex items-center gap-2 text-xs text-slate-500">
           <CalendarClock className="w-4 h-4 text-[#0884c4] flex-shrink-0" />
-          {apply ? 'Data ini juga mengisi otomatis formulir perpanjangan bila diperlukan.' : 'Masa aktif di dashboard mengikuti tanggal berlaku yang divalidasi Admin.'}
+          {apply ? 'Data ini juga dipakai untuk mengisi formulir perpanjangan nanti.' : 'Masa aktif di dashboard mengikuti tanggal berlaku yang divalidasi Admin.'}
         </p>
         <div className="flex flex-col-reverse sm:flex-row gap-2.5">
           {onCancel && (

@@ -41,7 +41,7 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
   const steps = full ? [
     { label: 'Data KTA & penerbit dikirim', done: true },
     { label: 'Validasi Admin', done: false, current: true },
-    { label: 'Dashboard aktif / formulir perpanjangan', done: false },
+    { label: 'Dashboard aktif', done: false },
   ] : [
     { label: 'Data KTA lama dikirim', done: true },
     { label: 'Verifikasi Admin', done: false, current: true },
@@ -81,7 +81,7 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
             </span>
             <div className="min-w-0">
               <p className="text-xs text-slate-500">Nomor KTA lama yang dikirim</p>
-              <p className="text-base font-semibold text-slate-900 tabular-nums break-words">{user?.old_kta_number || '—'}</p>
+              <p className="text-base font-semibold text-slate-900 tabular-nums break-words">{user?.old_kta_number || '-'}</p>
             </div>
             <span className="ml-auto soft-chip whitespace-nowrap max-sm:!hidden">
               {user?.member_category === 'Luar Biasa' ? 'Anggota Luar Biasa' : 'Anggota Biasa'}
@@ -91,7 +91,7 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
           {rejected && (
             <div className="rounded-2xl bg-red-50 border border-red-200 p-4">
               <p className="text-xs font-semibold text-red-700 mb-1">Alasan penolakan</p>
-              <p className="text-sm text-red-800 whitespace-pre-line">{user?.hereg_note || '—'}</p>
+              <p className="text-sm text-red-800 whitespace-pre-line">{user?.hereg_note || '-'}</p>
             </div>
           )}
 

@@ -11,7 +11,7 @@ import * as XLSX from 'xlsx';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import db, { query, initDb, nowSql } from './db.js';
 import { runSeed, formatSuratNumber, toRoman } from './seed.js';
-import { sendMail, MAIL_ENABLED, APP_URL } from './mailer.js';
+import { sendMail, mailEnabled, reloadMailConfig, verifyMail, SMTP_KEYS, APP_URL } from './mailer.js';
 import { cdnEnabled, cdnUpload, cdnDownload, cdnDelete } from './cdn.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -351,8 +351,8 @@ app.post('/api/auth/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
     }
 
-    // Verifikasi email wajib bila SMTP aktif. Tanpa SMTP (pengembangan lokal) akun langsung terverifikasi.
-    const verify = MAIL_ENABLED ? newToken() : null;
+    // Email hanya untuk notifikasi pengurus; akun Anggota langsung terverifikasi tanpa tautan email.
+    const verify = null;
     const result = await query.run(
       `INSERT INTO users (name, email, password, role, phone, email_verified_at, email_verify_token)
        VALUES (?, ?, ?, 'Anggota', ?, ${verify ? 'NULL' : 'NOW()'}, ?)`,
@@ -427,7 +427,8 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Email atau password salah.' });
     }
 
-    if (MAIL_ENABLED && !user.email_verified_at) {
+    // Verifikasi email hanya berlaku untuk akun pengurus (Anggota tidak menerima email)
+    if (mailEnabled() && !user.email_verified_at && user.role !== 'Anggota') {
       return res.status(403).json({
         error: 'Email belum diverifikasi. Buka tautan verifikasi yang kami kirim ke email Anda, atau kirim ulang tautannya.',
         code: 'EMAIL_NOT_VERIFIED'
@@ -497,7 +498,6 @@ function newToken() {
   const token = crypto.randomBytes(32).toString('hex');
   return { token, hash: hashToken(token) };
 }
-const RESET_TOKEN_MINUTES = 60;
 
 async function sendVerificationEmail(user, token) {
   await sendMail({
@@ -537,8 +537,8 @@ app.post('/api/auth/resend-verification', authMailLimiter, async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email wajib diisi.' });
-    const user = await query.get('SELECT id, name, email, email_verified_at FROM users WHERE email = ?', [email]);
-    if (user && !user.email_verified_at && MAIL_ENABLED) {
+    const user = await query.get('SELECT id, name, email, role, email_verified_at FROM users WHERE email = ?', [email]);
+    if (user && !user.email_verified_at && mailEnabled() && user.role !== 'Anggota') {
       const verify = newToken();
       await query.run('UPDATE users SET email_verify_token = ? WHERE id = ?', [verify.hash, user.id]);
       await sendVerificationEmail(user, verify.token);
@@ -550,16 +550,45 @@ app.post('/api/auth/resend-verification', authMailLimiter, async (req, res) => {
   }
 });
 
+// Atur ulang kata sandi lewat kode 6 digit yang dikirim ke email (tanpa tautan).
+// Kode disimpan sebagai hash (terikat id akun), berlaku singkat, dan hangus setelah terlalu banyak salah.
+const RESET_CODE_MINUTES = 15;
+const RESET_CODE_MAX_ATTEMPTS = 5;
+const resetCodeHash = (userId, code) => hashToken(`${userId}:${String(code).trim()}`);
+
+// Periksa kode untuk email tertentu. Salah = jatah percobaan berkurang; habis = kode hangus.
+async function checkResetCode(email, code) {
+  const invalid = { ok: false, error: 'Kode salah atau sudah kedaluwarsa. Periksa lagi atau minta kode baru.' };
+  if (!email || !/^\d{6}$/.test(String(code || '').trim())) return invalid;
+  const user = await query.get(
+    `SELECT id, password_reset_token, password_reset_attempts FROM users
+      WHERE email = ? AND password_reset_token IS NOT NULL AND password_reset_expires > NOW()`,
+    [email]
+  );
+  if (!user) return invalid;
+  const expected = Buffer.from(user.password_reset_token, 'hex');
+  const given = Buffer.from(resetCodeHash(user.id, code), 'hex');
+  if (expected.length === given.length && crypto.timingSafeEqual(expected, given)) return { ok: true, userId: user.id };
+  const attempts = Number(user.password_reset_attempts || 0) + 1;
+  if (attempts >= RESET_CODE_MAX_ATTEMPTS) {
+    await query.run('UPDATE users SET password_reset_token = NULL, password_reset_expires = NULL, password_reset_attempts = 0 WHERE id = ?', [user.id]);
+    return { ok: false, error: 'Terlalu banyak kode salah. Kode sudah tidak berlaku, silakan minta kode baru.' };
+  }
+  await query.run('UPDATE users SET password_reset_attempts = ? WHERE id = ?', [attempts, user.id]);
+  return { ok: false, error: `Kode salah. Sisa percobaan: ${RESET_CODE_MAX_ATTEMPTS - attempts}.` };
+}
+
 app.post('/api/auth/forgot-password', authMailLimiter, async (req, res) => {
+  // Semua akun (termasuk Anggota) menerima kode atur ulang lewat email bila SMTP aktif.
   // Tanpa SMTP, permintaan diteruskan ke Admin lewat notifikasi; Admin mengatur sandi baru di Kelola Akun.
-  const message = MAIL_ENABLED
-    ? 'Jika email terdaftar, tautan untuk mengatur ulang kata sandi telah dikirim. Tautan berlaku 60 menit.'
+  const message = mailEnabled()
+    ? `Jika email terdaftar, kode 6 digit untuk mengatur ulang kata sandi telah dikirim. Kode berlaku ${RESET_CODE_MINUTES} menit.`
     : 'Jika email terdaftar, permintaan Anda sudah diteruskan ke Admin sekretariat. Admin akan mengatur kata sandi baru dan menghubungi Anda.';
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email wajib diisi.' });
-    const user = await query.get('SELECT id, name, email, phone FROM users WHERE email = ?', [email]);
-    if (user && !MAIL_ENABLED) {
+    const user = await query.get('SELECT id, name, email, phone, role FROM users WHERE email = ?', [email]);
+    if (user && !mailEnabled()) {
       const title = 'Permintaan reset kata sandi';
       const body = `${user.name} (${user.email}${user.phone ? `, ${user.phone}` : ''}) lupa kata sandi. Atur kata sandi baru di Kelola Akun, lalu sampaikan ke yang bersangkutan.`;
       // Satu permintaan yang belum dibaca per akun sudah cukup; cegah lonceng Admin dibanjiri
@@ -569,52 +598,61 @@ app.post('/api/auth/forgot-password', authMailLimiter, async (req, res) => {
       );
       if (!pending) await addNotification({ role: 'Admin' }, title, body);
     } else if (user) {
-      const reset = newToken();
+      const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
       await query.run(
-        `UPDATE users SET password_reset_token = ?, password_reset_expires = DATE_ADD(NOW(), INTERVAL ${RESET_TOKEN_MINUTES} MINUTE) WHERE id = ?`,
-        [reset.hash, user.id]
+        `UPDATE users SET password_reset_token = ?, password_reset_attempts = 0,
+           password_reset_expires = DATE_ADD(NOW(), INTERVAL ${RESET_CODE_MINUTES} MINUTE) WHERE id = ?`,
+        [resetCodeHash(user.id, code), user.id]
       );
       await sendMail({
         to: user.email,
-        subject: 'Atur ulang kata sandi akun IKAPI Jawa Barat',
-        title: 'Atur ulang kata sandi',
+        subject: 'Kode atur ulang kata sandi akun IKAPI Jawa Barat',
+        title: 'Kode atur ulang kata sandi',
+        code,
         lines: [
           `Halo ${user.name},`,
-          `Kami menerima permintaan untuk mengatur ulang kata sandi akun Anda. Tautan berlaku ${RESET_TOKEN_MINUTES} menit.`,
+          `Masukkan kode di atas pada halaman Lupa kata sandi untuk membuat kata sandi baru. Kode berlaku ${RESET_CODE_MINUTES} menit.`,
+          'Jangan berikan kode ini kepada siapa pun, termasuk pengurus IKAPI.',
           'Abaikan email ini jika Anda tidak memintanya; kata sandi Anda tidak berubah.'
-        ],
-        action: { label: 'Atur ulang kata sandi', url: `${APP_URL}/?reset=${reset.token}`, sensitive: true }
+        ]
       });
     }
-    res.json({ message, mailEnabled: MAIL_ENABLED });
+    res.json({ message, mailEnabled: mailEnabled() });
   } catch (err) {
     console.error('Forgot password error:', err);
     res.status(500).json({ error: 'Gagal memproses permintaan reset kata sandi.' });
   }
 });
 
+// Langkah 2: periksa kode sebelum form kata sandi baru ditampilkan
+app.post('/api/auth/verify-reset-code', loginLimiter, async (req, res) => {
+  try {
+    const result = await checkResetCode(req.body.email, req.body.code);
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ message: 'Kode valid. Silakan buat kata sandi baru.' });
+  } catch (err) {
+    console.error('Verify reset code error:', err);
+    res.status(500).json({ error: 'Gagal memeriksa kode.' });
+  }
+});
+
+// Langkah 3: kode diperiksa ulang, lalu kata sandi diganti
 app.post('/api/auth/reset-password', loginLimiter, async (req, res) => {
   try {
-    const { token, password } = req.body;
-    if (!token) return res.status(400).json({ error: 'Token reset tidak ada.' });
+    const { email, code, password } = req.body;
     if (!password || String(password).length < 6) {
       return res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
     }
-    const user = await query.get(
-      'SELECT id FROM users WHERE password_reset_token = ? AND password_reset_expires > NOW()',
-      [hashToken(token)]
-    );
-    if (!user) {
-      return res.status(400).json({ error: 'Tautan reset tidak valid atau sudah kedaluwarsa. Minta tautan baru.' });
-    }
+    const result = await checkResetCode(email, code);
+    if (!result.ok) return res.status(400).json({ error: result.error });
     const hashed = await bcryptjs.hash(password, await bcryptjs.genSalt(10));
-    // Membuka tautan dari email sekaligus membuktikan kepemilikan email
+    // Kode dari email sekaligus membuktikan kepemilikan email; sesi lama di perangkat lain ikut keluar
     await query.run(
-      `UPDATE users SET password = ?, password_reset_token = NULL, password_reset_expires = NULL,
+      `UPDATE users SET password = ?, password_reset_token = NULL, password_reset_expires = NULL, password_reset_attempts = 0,
          email_verified_at = COALESCE(email_verified_at, NOW()), email_verify_token = NULL,
          token_version = token_version + 1
        WHERE id = ?`,
-      [hashed, user.id]
+      [hashed, result.userId]
     );
     res.json({ message: 'Kata sandi berhasil diubah. Silakan masuk dengan kata sandi baru.' });
   } catch (err) {
@@ -888,7 +926,7 @@ const STATUS_ESTIMATE = {
   'Menunggu Pembayaran': 'Verifikasi bukti transfer maksimal 1×24 jam kerja setelah diunggah.',
   'Menunggu TTD Sekretaris': 'Tanda tangan Sekretaris maksimal 2×24 jam kerja.',
   'Menunggu Approval': 'Persetujuan dan tanda tangan Ketua maksimal 2×24 jam kerja.',
-  'Pengiriman Berkas': 'Pengiriman berkas fisik melalui ekspedisi sekitar 2–5 hari kerja.',
+  'Pengiriman Berkas': 'Pengiriman berkas fisik melalui ekspedisi sekitar 2-5 hari kerja.',
   'Dikirim ke Pusat': 'Pengecekan Nomor KTA oleh Admin maksimal 2×24 jam kerja setelah diisi.'
 };
 
@@ -959,16 +997,36 @@ async function remindExpiringMemberships() {
 }
 
 // Notifikasi dalam aplikasi (lonceng). `to` = id user, atau { role: 'Admin' } untuk semua akun peran itu.
-async function addNotification(to, title, body = null, submissionId = null) {
+// `{ email: true }` ikut mengirim isi yang sama ke email setiap akun penerima (dipakai untuk tugas pengurus).
+async function addNotification(to, title, body = null, submissionId = null, { email = false } = {}) {
   try {
-    const ids = typeof to === 'object'
-      ? (await query.all('SELECT id FROM users WHERE role = ?', [to.role])).map((r) => r.id)
-      : [to];
-    for (const id of ids) {
+    const users = typeof to === 'object'
+      ? await query.all('SELECT id, name, email FROM users WHERE role = ?', [to.role])
+      : [{ id: to, name: null, email: null }];
+    for (const u of users) {
       await query.run(
         'INSERT INTO notifications (user_id, title, body, submission_id) VALUES (?, ?, ?, ?)',
-        [id, title, body, submissionId]
+        [u.id, title, body, submissionId]
       );
+    }
+    // Email dikirim di latar agar respons ke pengguna tidak menunggu SMTP
+    if (email) {
+      (async () => {
+        for (const u of users) {
+          const acc = u.email ? u : await query.get('SELECT name, email FROM users WHERE id = ?', [u.id]);
+          await sendMail({
+            to: acc?.email,
+            subject: `[IKAPI Jabar] ${title}${submissionId ? ` #${submissionId}` : ''}`,
+            title,
+            lines: [
+              `Yth. ${acc?.name || 'Pengurus'},`,
+              ...String(body || '').split('\n'),
+              'Silakan masuk ke Sistem Keanggotaan IKAPI Jawa Barat untuk menindaklanjuti.'
+            ],
+            action: { label: 'Buka Sistem Keanggotaan', url: APP_URL }
+          });
+        }
+      })().catch((err) => console.error('Gagal kirim email notifikasi:', err.message));
     }
   } catch (err) {
     console.error('Gagal membuat notifikasi:', err.message);
@@ -1069,35 +1127,8 @@ async function notifyStatusChange(submissionId) {
     'Menunggu TTD Sekretaris': ['Sekretaris', 'Menunggu tanda tangan Sekretaris', `${label} sudah lunas dan menunggu TTD Anda.`],
     'Menunggu Approval': ['Ketua', 'Menunggu persetujuan Ketua', `${label} menunggu persetujuan dan TTD Anda.`]
   }[sub.status];
-  if (staffTask) await addNotification({ role: staffTask[0] }, staffTask[1], staffTask[2], sub.id);
-
-  await sendMail({
-    to: sub.applicant_email,
-    subject: `Status pengajuan IKAPI Jabar: ${sub.status}`,
-    title: `Status pengajuan: ${sub.status}`,
-    lines: [
-      `Halo ${sub.applicant_name},`,
-      `Pengajuan ${sub.submission_type === 'Heregistrasi' ? 'heregistrasi' : 'anggota baru'} ${publisher} (#${sub.id}) kini berstatus "${sub.status}".`,
-      STATUS_EMAIL_TEXT[sub.status],
-      ...extra
-    ],
-    action: { label: 'Lihat pengajuan', url: APP_URL }
-  });
-
-  if (sub.status === 'Menunggu Verifikasi' && (!sub.last_notified_status || sub.last_notified_status === 'Draf')) {
-    const admins = await query.all("SELECT email FROM users WHERE role = 'Admin'");
-    for (const admin of admins) {
-      await sendMail({
-        to: admin.email,
-        subject: `Pengajuan baru: ${publisher}`,
-        title: 'Pengajuan baru masuk',
-        lines: [
-          `Pengajuan ${sub.submission_type === 'Heregistrasi' ? 'heregistrasi' : 'anggota baru'} dari ${publisher} (#${sub.id}) menunggu screening dokumen.`
-        ],
-        action: { label: 'Buka sistem', url: APP_URL }
-      });
-    }
-  }
+  // Email hanya ke pengurus; pemohon cukup menerima notifikasi dalam aplikasi di atas.
+  if (staffTask) await addNotification({ role: staffTask[0] }, staffTask[1], staffTask[2], sub.id, { email: true });
 }
 
 // Riwayat alur berkas (terlihat oleh semua peran)
@@ -1790,7 +1821,7 @@ app.post('/api/submissions', authenticate, async (req, res) => {
     if (req.renewalOf) {
       await clearRenewReminders(req.user.id);
       await addNotification({ role: 'Admin' }, 'Anggota aktif mengajukan perpanjangan',
-        `${req.user.name} memulai perpanjangan keanggotaan (pengajuan #${submissionId}).`, submissionId);
+        `${req.user.name} memulai perpanjangan keanggotaan (pengajuan #${submissionId}).`, submissionId, { email: true });
     }
 
     res.json({
@@ -2153,7 +2184,9 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
     const payFormatErr = formatError(req.body, { senderAccountNumber: ['digits', 'Nomor rekening'] });
     if (payFormatErr) return res.status(400).json({ error: payFormatErr });
 
-    const sub = await query.get('SELECT user_id, status FROM submissions WHERE id = ?', [subId]);
+    const sub = await query.get(
+      `SELECT s.user_id, s.status, COALESCE(m.publisher_name, u.name) AS publisher
+       FROM submissions s JOIN users u ON u.id = s.user_id LEFT JOIN members m ON m.id = s.member_id WHERE s.id = ?`, [subId]);
     if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
     if (req.user.role === 'Anggota' && sub.user_id !== req.user.id) {
       return res.status(403).json({ error: 'Akses ditolak.' });
@@ -2178,7 +2211,7 @@ app.post('/api/submissions/:id/payment', authenticate, upload.single('proofFile'
 
     await query.run(`UPDATE submissions SET updated_at = NOW() WHERE id = ?`, [subId]);
     await logEvent(subId, req.user, 'Bukti transfer diunggah', [senderBank, senderAccountName].filter(Boolean).join(' · ') || null);
-    await addNotification({ role: 'Admin' }, 'Bukti transfer masuk', `Pengajuan #${subId} mengunggah bukti transfer. Verifikasi pembayaran.`, Number(subId));
+    await addNotification({ role: 'Admin' }, 'Bukti transfer masuk', `${sub.publisher} (pengajuan #${subId}) mengunggah bukti transfer. Verifikasi pembayarannya.`, Number(subId), { email: true });
 
     res.json({
       message: 'Bukti pembayaran berhasil diunggah. Menunggu verifikasi Admin.',
@@ -2842,7 +2875,7 @@ app.post('/api/auth/hereg-apply', authenticate, authorize('Anggota'), upload.sin
       [kta, JSON.stringify(data), proof, proofName, u.id]
     );
     await addNotification({ role: 'Admin' }, 'Verifikasi anggota lama',
-      `${u.name} ${resubmit ? 'mengirim ulang' : 'mengirim'} data anggota lama (KTA ${kta}, berlaku s.d. ${validUntil}). Validasi lalu tentukan jalurnya.`);
+      `${u.name} ${resubmit ? 'mengirim ulang' : 'mengirim'} data anggota lama (KTA ${kta}, berlaku s.d. ${validUntil}). Periksa lalu setujui atau tolak.`, null, { email: true });
     const fresh = await query.get('SELECT * FROM users WHERE id = ?', [u.id]);
     res.json({ message: 'Data terkirim. Admin akan memvalidasi KTA & data Anda.', user: publicUser(fresh) });
   } catch (err) {
@@ -2888,7 +2921,7 @@ app.post('/api/auth/hereg-migration', authenticate, authorize('Anggota'), upload
       [JSON.stringify(data), proof, proofName, u.id]
     );
     await addNotification({ role: 'Admin' }, 'Validasi anggota masih aktif',
-      `${u.name} ${resubmit ? 'mengirim ulang' : 'mengirim'} data keanggotaan (KTA ${kta}, berlaku s.d. ${validUntil}). Validasi masa aktifnya.`);
+      `${u.name} ${resubmit ? 'mengirim ulang' : 'mengirim'} data keanggotaan (KTA ${kta}, berlaku s.d. ${validUntil}). Validasi masa aktifnya.`, null, { email: true });
     const fresh = await query.get('SELECT * FROM users WHERE id = ?', [u.id]);
     res.json({ message: 'Data keanggotaan terkirim. Admin akan memvalidasi masa aktif Anda.', user: publicUser(fresh) });
   } catch (err) {
@@ -3278,7 +3311,9 @@ app.get('/api/public/contact', async (req, res) => {
 
 app.get('/api/settings', authenticate, async (req, res) => {
   try {
-    const settingsList = await query.all('SELECT settings.key, settings.value, settings.description FROM settings');
+    // Konfigurasi SMTP (termasuk kata sandi) hanya lewat /api/settings/smtp khusus Admin
+    const settingsList = (await query.all('SELECT settings.key, settings.value, settings.description FROM settings'))
+      .filter((s) => !SMTP_KEYS.includes(s.key));
     const settings = {};
     settingsList.forEach(s => { settings[s.key] = s.value; });
     res.json({ settings, list: settingsList });
@@ -3296,9 +3331,10 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
     const settingsFormatErr = formatError(settings, SETTINGS_FORMAT);
     if (settingsFormatErr) return res.status(400).json({ error: settingsFormatErr });
     delete settings.hereg_tracks; // jalur anggota lama tidak lagi dipakai
+    for (const key of SMTP_KEYS) delete settings[key]; // diatur lewat /api/settings/smtp
     if ('renew_notice_days' in settings) {
       const n = parseNoticeDays(settings.renew_notice_days);
-      if (!n) return res.status(400).json({ error: `Pemberitahuan perpanjangan harus 1–${RENEW_NOTICE_MAX} hari sebelum masa aktif berakhir.` });
+      if (!n) return res.status(400).json({ error: `Pemberitahuan perpanjangan harus 1 sampai ${RENEW_NOTICE_MAX} hari sebelum masa aktif berakhir.` });
       settings.renew_notice_days = String(n);
     }
     for (const key of FEE_KEYS) {
@@ -3332,6 +3368,85 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
     console.error('Save settings error:', err);
     res.status(500).json({ error: 'Gagal menyimpan pengaturan.' });
   }
+});
+
+// ==========================================
+// PENGATURAN EMAIL (SMTP), khusus Admin
+// ==========================================
+// Kata sandi SMTP tidak pernah dikirim ke browser; hanya ditandai sudah tersimpan atau belum.
+app.get('/api/settings/smtp', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const rows = await query.all(
+      `SELECT settings.key, settings.value FROM settings WHERE settings.key IN (${SMTP_KEYS.map(() => '?').join(', ')})`,
+      SMTP_KEYS
+    );
+    const s = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+    res.json({
+      smtp_host: s.smtp_host || '',
+      smtp_port: s.smtp_port || '587',
+      smtp_secure: s.smtp_secure === 'true',
+      smtp_user: s.smtp_user || '',
+      smtp_from: s.smtp_from || '',
+      hasPass: Boolean(s.smtp_pass),
+      enabled: mailEnabled()
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal memuat pengaturan email.' });
+  }
+});
+
+app.put('/api/settings/smtp', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const host = String(b.smtp_host ?? '').trim();
+    const port = Number(b.smtp_port || 587);
+    const user = String(b.smtp_user ?? '').trim();
+    const from = String(b.smtp_from ?? '').trim();
+    if (host.length > 255 || !/^[a-z0-9.-]*$/i.test(host)) return res.status(400).json({ error: 'Host SMTP tidak valid.' });
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return res.status(400).json({ error: 'Port SMTP harus angka 1 sampai 65535.' });
+    if (user.length > 255 || from.length > 255) return res.status(400).json({ error: 'Isian terlalu panjang.' });
+    const values = {
+      smtp_host: host,
+      smtp_port: String(port),
+      smtp_secure: b.smtp_secure ? 'true' : 'false',
+      smtp_user: user,
+      smtp_from: from
+    };
+    // Kata sandi: kosong = tetap pakai yang tersimpan; clearPass = hapus
+    if (b.clearPass) values.smtp_pass = '';
+    else if (typeof b.smtp_pass === 'string' && b.smtp_pass !== '') values.smtp_pass = b.smtp_pass.replace(/\s+/g, '');
+    for (const [key, value] of Object.entries(values)) {
+      await query.run(
+        `INSERT INTO settings (settings.key, value) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE value = VALUES(value)`,
+        [key, value]
+      );
+    }
+    await reloadMailConfig();
+    res.json({ message: host ? 'Pengaturan email disimpan.' : 'Pengaturan email disimpan. Email nonaktif karena host kosong.', enabled: mailEnabled() });
+  } catch (err) {
+    console.error('Save SMTP error:', err);
+    res.status(500).json({ error: 'Gagal menyimpan pengaturan email.' });
+  }
+});
+
+// Kirim email uji ke alamat akun Admin yang sedang masuk
+app.post('/api/settings/smtp/test', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    await verifyMail();
+  } catch (err) {
+    return res.status(400).json({ error: `Koneksi SMTP gagal: ${err.message}` });
+  }
+  const me = await query.get('SELECT email FROM users WHERE id = ?', [req.user.id]);
+  await sendMail({
+    to: me?.email,
+    subject: 'Email uji Sistem Keanggotaan IKAPI Jabar',
+    title: 'Email uji berhasil',
+    lines: ['Pengaturan email (SMTP) sudah benar. Notifikasi email akan dikirim lewat akun ini.']
+  });
+  const log = await query.get('SELECT status, error FROM email_logs WHERE to_email = ? ORDER BY id DESC LIMIT 1', [me?.email]);
+  if (log?.status !== 'sent') return res.status(400).json({ error: `Email uji gagal dikirim: ${log?.error || 'tidak diketahui'}` });
+  res.json({ message: `Email uji terkirim ke ${me.email}.` });
 });
 
 // Sesi dari header Authorization atau cookie httpOnly (untuk tautan unduhan biasa); null bila tidak valid
@@ -3578,6 +3693,7 @@ async function startServer() {
   await migrateFlowV2();
   await syncUnpaidBills();
   await activateApprovedSubmissions();
+  await reloadMailConfig();
   await remindExpiringMemberships();
   setInterval(remindExpiringMemberships, 60 * 60 * 1000).unref();
   app.listen(PORT, () => {

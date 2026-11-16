@@ -590,7 +590,7 @@ export default function DocumentVerificationModal({
                     <p className={`text-xs font-semibold flex items-center gap-1.5 ${done ? 'text-emerald-800' : 'text-slate-500'}`}>
                       {done ? <CheckCircle className="w-4 h-4 flex-shrink-0" /> : <Clock className="w-4 h-4 flex-shrink-0" />} {label}
                     </p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">{at || '—'}</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">{at || '-'}</p>
                   </div>
                 ))}
               </div>

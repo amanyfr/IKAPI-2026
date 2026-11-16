@@ -670,9 +670,9 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                 <li key={d.id}>
                   <strong className="text-slate-800">{d.document_title}</strong>
                   {d.revision_notes ? (
-                    <span className="text-amber-800 font-medium"> — Alasan: "{d.revision_notes}"</span>
+                    <span className="text-amber-800 font-medium">: {d.revision_notes}</span>
                   ) : (
-                    <span className="text-amber-700 font-medium"> — Belum sesuai ketentuan</span>
+                    <span className="text-amber-700 font-medium">: belum sesuai ketentuan</span>
                   )}
                   {canMarkFile(d) && (
                     <button type="button" onClick={() => setMarkDoc(d)} className="ml-2 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-semibold transition">
@@ -683,7 +683,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
               ))}
             </ul>
             <p className="text-[11px] text-slate-500 pt-1">
-              💡 Dokumen yang bertanda hijau ("Sesuai") tidak perlu diunggah ulang. Pilih file pengganti, periksa lagi, lalu tekan "Kirim ke Admin". Berkas baru masuk antrean screening ulang setelah dikirim.
+              Dokumen yang bertanda hijau ("Sesuai") tidak perlu diunggah ulang. Pilih file pengganti, periksa lagi, lalu tekan "Kirim ke Admin". Berkas baru masuk antrean screening ulang setelah dikirim.
             </p>
           </div>
         </div>

@@ -333,7 +333,7 @@ export default function MembersManagement({ canEditKta = true, initialStatus = '
                 <div>
                   <div className="text-[10px] font-bold text-[#0884c4] uppercase tracking-wider mb-0.5">Nomor KTA Resmi</div>
                   <div className="font-mono font-extrabold text-lg text-[#0da2e7]">
-                    {selectedMember.kta_number || '— Belum Terbit —'}
+                    {selectedMember.kta_number || 'Belum terbit'}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -411,7 +411,7 @@ function InfoRow({ label, value, icon }) {
   return (
     <p className="flex items-start gap-1.5 text-slate-600">
       {icon && <span className="text-[#0da2e7] mt-0.5 flex-shrink-0">{icon}</span>}
-      <span><strong className="text-slate-700">{label}:</strong> {value || <span className="text-slate-300 italic">—</span>}</span>
+      <span><strong className="text-slate-700">{label}:</strong> {value || <span className="text-slate-300">-</span>}</span>
     </p>
   );
 }

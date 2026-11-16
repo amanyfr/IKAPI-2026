@@ -7,7 +7,7 @@ import {
 import QueueCard, { QueueFooter, QueueFilterBar } from '../components/QueueCard';
 import {
   ArrowUpRight, ArrowRight, PenTool, FileCheck2, Wallet, RefreshCw, ChevronDown, Lightbulb,
-  Award, Activity, Users, Search, Sparkles
+  Award, Activity, Users, Search
 } from 'lucide-react';
 
 /* ── Kelompok status dari sudut pandang Ketua ── */
@@ -244,7 +244,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
         </div>
 
         <div className="card-surface p-4 sm:p-5 lg:col-span-3 flex flex-col">
-          <p className="text-base text-slate-800">Halo, {displayName} 👋</p>
+          <p className="text-base text-slate-800">Halo, {displayName}</p>
           <div className="grid grid-cols-2 gap-2 mt-3">
             {[
               { label: 'Approval',   icon: Award,      tone: 'bg-indigo-100 text-indigo-700',   onClick: () => onOpenApproval() },
@@ -267,7 +267,7 @@ export default function Admin2Dashboard({ onOpenApproval, onOpenMembers }) {
               placeholder="Cari penerbit / no. surat..."
               className="w-full pl-9 pr-10 py-2.5 text-xs rounded-full bg-slate-50 border border-white/90 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-300 outline-none" />
             <button type="submit" aria-label="Cari" className="absolute right-3 bottom-2 p-1 text-indigo-600 hover:text-indigo-800">
-              <Sparkles className="w-4 h-4" />
+              <ArrowRight className="w-4 h-4" />
             </button>
           </form>
         </div>

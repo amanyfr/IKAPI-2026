@@ -78,7 +78,7 @@ function SignatureEditorModal({ title, signature, saving, onSave, onClose }) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="font-medium text-lg text-slate-900">{title}</h3>
-            <p className="text-xs text-slate-500 mt-0.5">Gambar dengan mouse, trackpad, atau jari — atau unggah gambar TTD (PNG transparan paling rapi).</p>
+            <p className="text-xs text-slate-500 mt-0.5">Gambar dengan mouse, trackpad, atau jari, atau unggah gambar TTD (PNG transparan paling rapi).</p>
           </div>
           <button onClick={onClose} aria-label="Tutup" className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">
             <X className="w-5 h-5" />

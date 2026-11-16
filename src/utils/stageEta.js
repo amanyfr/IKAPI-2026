@@ -7,7 +7,7 @@ export const ETA_FIELDS = [
   { key: 'eta_pembayaran', label: 'Verifikasi pembayaran', def: 'Maks. 1×24 jam kerja', step: 'Menunggu Pembayaran' },
   { key: 'eta_ttd_sekretaris', label: 'TTD Sekretaris', def: 'Maks. 2×24 jam kerja', step: 'Menunggu TTD Sekretaris' },
   { key: 'eta_ttd_ketua', label: 'TTD Ketua', def: 'Maks. 2×24 jam kerja', step: 'Menunggu Approval' },
-  { key: 'eta_berkas', label: 'Pengiriman berkas fisik', def: '± 2–5 hari kerja', step: 'Pengiriman Berkas' },
+  { key: 'eta_berkas', label: 'Pengiriman berkas fisik', def: '± 2-5 hari kerja', step: 'Pengiriman Berkas' },
   { key: 'eta_kta', label: 'Cek No. KTA', def: 'Maks. 2×24 jam kerja', step: 'Dikirim ke Pusat' },
 ];
 
@@ -20,7 +20,7 @@ export function shortEta(text) {
   let m = t.match(/(\d+)\s*[×x]\s*24\s*jam/i);
   if (m) return `≤ ${m[1]}×24 jam`;
   m = t.match(/(\d+)\s*[–-]\s*(\d+)\s*(hari|jam|minggu)/i);
-  if (m) return `${m[1]}–${m[2]} ${m[3].toLowerCase()}`;
+  if (m) return `${m[1]}-${m[2]} ${m[3].toLowerCase()}`;
   m = t.match(/(\d+)\s*(hari|jam|minggu)/i);
   if (m) return `≤ ${m[1]} ${m[2].toLowerCase()}`;
   return t;

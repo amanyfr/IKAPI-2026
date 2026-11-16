@@ -120,6 +120,7 @@ export const SCHEMA_SQL = `
     email_verify_token CHAR(64) NULL, -- SHA-256 dari token verifikasi email
     password_reset_token CHAR(64) NULL, -- SHA-256 dari token reset kata sandi
     password_reset_expires DATETIME NULL,
+    password_reset_attempts INT NOT NULL DEFAULT 0, -- jumlah kode reset salah
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -354,6 +355,7 @@ async function upgradeSchema() {
   await addColumnIfMissing('users', 'password_reset_token', 'CHAR(64) NULL AFTER email_verify_token');
   await addColumnIfMissing('users', 'password_reset_expires', 'DATETIME NULL AFTER password_reset_token');
   await addColumnIfMissing('users', 'token_version', 'INT NOT NULL DEFAULT 0 AFTER password_reset_expires');
+  await addColumnIfMissing('users', 'password_reset_attempts', 'INT NOT NULL DEFAULT 0 AFTER password_reset_expires');
   // Verifikasi data KTA lama oleh Admin sebelum anggota lama boleh mengisi formulir & dokumen
   await addColumnIfMissing('users', 'hereg_status', 'VARCHAR(20) NULL AFTER token_version');
   await addColumnIfMissing('users', 'hereg_note', 'TEXT NULL AFTER hereg_status');
