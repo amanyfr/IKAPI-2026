@@ -262,8 +262,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   // Pemohon mengisi No. KTA dari IKAPI Pusat -> diverifikasi Admin sebelum keanggotaan aktif
   const handleKtaSubmit = async (e) => {
     e.preventDefault();
-    if (ktaForm.file && ktaForm.file.size > 10 * 1024 * 1024) {
-      notify('Ukuran file maksimal 10 MB. Kompres atau pilih file lain.', { tone: 'warning', title: 'File terlalu besar' });
+    if (ktaForm.file && ktaForm.file.size > 15 * 1024 * 1024) {
+      notify('Ukuran file maksimal 15 MB. Kompres atau pilih file lain.', { tone: 'warning', title: 'File terlalu besar' });
       return;
     }
     setSendingKta(true);
@@ -290,8 +290,8 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
   // File yang dipilih hanya ditahan di browser (bisa dilihat/diganti/dihapus) sampai pemohon menekan Kirim
   const stageDocFile = (doc, file) => {
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      notify('Ukuran file maksimal 10 MB. Kompres atau pilih file lain.', { tone: 'warning', title: 'File terlalu besar' });
+    if (file.size > 15 * 1024 * 1024) {
+      notify('Ukuran file maksimal 15 MB. Kompres atau pilih file lain.', { tone: 'warning', title: 'File terlalu besar' });
       return;
     }
     setStagedFiles((prev) => ({ ...prev, [doc.id]: file }));
@@ -858,7 +858,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                       <input required type="file" accept=".pdf,.png,.jpg,.jpeg,.webp"
                         onChange={(e) => setKtaForm({ ...ktaForm, file: e.target.files?.[0] || null })}
                         className="block w-full text-xs text-slate-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-full file:border-0 file:bg-sky-50 file:text-[#0884c4] file:font-medium hover:file:bg-sky-100" />
-                      <p className="text-[11px] text-slate-400 mt-1">PDF/JPG/PNG, maks. 10 MB.</p>
+                      <p className="text-[11px] text-slate-400 mt-1">PDF/JPG/PNG, maks. 15 MB.</p>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-slate-700 block mb-1">Catatan</label>
@@ -1034,7 +1034,7 @@ export default function AnggotaDashboard({ onNewSubmission, onEditDraft, onEditP
                 <label className="text-sm font-bold text-slate-800 block mb-1.5">Bukti Transfer (PDF/JPG/PNG) *</label>
                 <input
                   type="file"
-                  accept="image/*,application/pdf"
+                  accept=".pdf,.jpg,.jpeg,.png"
                   required={!payment?.proof_file}
                   onChange={(e) => setPayForm({ ...payForm, proofFile: e.target.files[0] })}
                   className="w-full text-sm text-slate-600 bg-white border border-slate-200/80 rounded-2xl p-2

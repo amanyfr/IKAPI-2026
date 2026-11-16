@@ -233,8 +233,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
 
   const handleFileSelect = (docType, file) => {
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      notify('Ukuran file maksimal 10 MB. Kompres atau pilih file lain.', { tone: 'warning', title: 'File terlalu besar' });
+    if (file.size > 15 * 1024 * 1024) {
+      notify('Ukuran file maksimal 15 MB. Kompres atau pilih file lain.', { tone: 'warning', title: 'File terlalu besar' });
       return;
     }
     setSelectedFiles(prev => ({ ...prev, [docType]: file }));
@@ -1135,7 +1135,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                         ) : flagged ? (
                           <div className="text-xs text-amber-700 font-semibold mt-0.5">Belum diunggah. Wajib sebelum pengajuan dikirim.</div>
                         ) : (
-                          <div className="text-xs text-slate-400 mt-0.5">Format PDF / JPG / PNG · maks. 10 MB</div>
+                          <div className="text-xs text-slate-400 mt-0.5">Format PDF / JPG / PNG · maks. 15 MB</div>
                         )}
 
                         {hasFile && (
