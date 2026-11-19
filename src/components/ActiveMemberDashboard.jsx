@@ -394,12 +394,18 @@ export default function ActiveMemberDashboard({
             <ActionButton primary icon={FileText} title="Bukti KTA"
               subtitle={sub.kta_proof_file ? 'Scan KTA yang dikirim untuk validasi' : 'Belum diunggah · klik untuk melengkapi'}
               onClick={() => (sub.kta_proof_file ? window.open(fileUrl(sub.kta_proof_file), '_blank', 'noopener') : onEditProfile?.())} />
-          ) : migrated ? (
-            sub.kta_proof_file && (
-              <ActionButton primary icon={FileText} title="Bukti KTA" subtitle="Scan KTA yang divalidasi Admin" onClick={() => window.open(fileUrl(sub.kta_proof_file), '_blank', 'noopener')} />
-            )
           ) : (
-            <ActionButton primary icon={FileText} title="Dokumen resmi" subtitle="Surat pengantar, SK & berita acara" onClick={onOpenPacket} />
+            <>
+              {/* Foto KTA (anggota lama: scan yang divalidasi; anggota baru: diinput Admin dari IKAPI Pusat) */}
+              {sub.kta_proof_file && (
+                <ActionButton primary icon={BadgeCheck} title="Foto KTA"
+                  subtitle={migrated ? 'Scan KTA yang divalidasi Admin' : (sub.kta_proof_name || 'KTA dari IKAPI Pusat')}
+                  onClick={() => window.open(fileUrl(sub.kta_proof_file), '_blank', 'noopener')} />
+              )}
+              {!migrated && (
+                <ActionButton primary={!sub.kta_proof_file} icon={FileText} title="Dokumen resmi" subtitle="Surat pengantar, SK & berita acara" onClick={onOpenPacket} />
+              )}
+            </>
           )}
           {hasInvoice && (
             <ActionButton icon={Receipt} title="Invoice pembayaran" subtitle="Bukti iuran keanggotaan · Lunas" onClick={onOpenInvoice} />
@@ -410,33 +416,6 @@ export default function ActiveMemberDashboard({
           </div>}
         </div>
       </div>
-
-      {/* ══ FOTO KTA (diinput Admin setelah KTA terbit dari IKAPI Pusat) ══ */}
-      {!pending && sub.kta_proof_file && (() => {
-        const isImage = /\.(jpe?g|png)$/i.test(sub.kta_proof_name || sub.kta_proof_file);
-        const url = fileUrl(sub.kta_proof_file);
-        return (
-          <div className="card-surface p-5 sm:p-6">
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <div className="flex items-center gap-2.5">
-                <BadgeCheck className="w-5 h-5 text-[#0884c4]" />
-                <h3 className="text-lg text-slate-800">Foto KTA</h3>
-              </div>
-              <a href={url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-[#0884c4] hover:underline">
-                Buka ukuran penuh
-              </a>
-            </div>
-            {isImage ? (
-              <a href={url} target="_blank" rel="noreferrer" className="block panel-inner p-2 sm:p-3">
-                <img src={url} alt={`KTA ${kta || ''}`.trim()} className="w-full max-h-[480px] object-contain rounded-lg" />
-              </a>
-            ) : (
-              <ActionButton primary icon={FileText} title="KTA (PDF)" subtitle={sub.kta_proof_name || 'Dokumen KTA dari IKAPI Pusat'}
-                onClick={() => window.open(url, '_blank', 'noopener')} />
-            )}
-          </div>
-        );
-      })()}
 
       {/* ══ DATA PENERBIT ══ */}
       <div className="card-surface p-5 sm:p-6">
