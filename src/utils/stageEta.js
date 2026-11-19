@@ -8,7 +8,7 @@ export const ETA_FIELDS = [
   { key: 'eta_ttd_sekretaris', label: 'TTD Sekretaris', def: 'Maks. 2×24 jam kerja', step: 'Menunggu TTD Sekretaris' },
   { key: 'eta_ttd_ketua', label: 'TTD Ketua', def: 'Maks. 2×24 jam kerja', step: 'Menunggu Approval' },
   { key: 'eta_berkas', label: 'Pengiriman berkas fisik', def: '± 2-5 hari kerja', step: 'Pengiriman Berkas' },
-  { key: 'eta_kta', label: 'Cek No. KTA', def: 'Maks. 2×24 jam kerja', step: 'Dikirim ke Pusat' },
+  { key: 'eta_kta', label: 'Proses KTA di IKAPI Pusat', def: 'Mengikuti jadwal IKAPI Pusat', step: 'Dikirim ke Pusat' },
 ];
 
 export const ETA_DEFAULTS = Object.fromEntries(ETA_FIELDS.map((f) => [f.key, f.def]));

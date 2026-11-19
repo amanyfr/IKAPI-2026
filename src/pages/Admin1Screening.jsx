@@ -286,6 +286,9 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
     if (isAdmin && sub.status === 'Menunggu Verifikasi') return Number(sub.revision_round) > 0 ? `Screening revisi ke-${sub.revision_round}` : 'Screening dokumen';
     if (isAdmin && sub.status === 'Perlu Revisi' && Number(sub.fresh_revision_count) > 0) return 'Screening revisi';
     if (isAdmin && sub.status === 'Menunggu Pembayaran' && sub.payment_status === 'Menunggu' && sub.payment_proof) return 'Verifikasi bayar';
+    // Berkas fisik: Admin terima berkas, lalu input Nomor & foto KTA (form ada di tab Berkas Fisik pada pop-up)
+    if (isAdmin && sub.status === 'Berkas Diterima') return 'Terima Berkas';
+    if (isAdmin && sub.status === 'Dikirim ke Pusat' && sub.kta_review_status !== 'Menunggu') return 'Input KTA';
     return null;
   };
 
@@ -308,7 +311,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           </button>
         )}
 
-        {/* Pemohon sudah mengisi data KTA: Admin cek lalu setujui / tolak */}
+        {/* Data lama: pemohon sempat mengisi data KTA, Admin cek lalu setujui / tolak */}
         {isAdmin && sub.status === 'Dikirim ke Pusat' && sub.kta_review_status === 'Menunggu' && (
           <button
             onClick={() => openKtaReview(sub)}
@@ -425,7 +428,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
               className="w-full text-xs py-2 px-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7]"
             >
               <option value="Semua">Semua Status</option>
-              {['Draf', 'Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris', 'Menunggu Approval', 'Pengiriman Berkas', 'Dikirim ke Pusat', 'Aktif', 'Ditolak'].map((st) => (
+              {['Draf', 'Menunggu Verifikasi', 'Perlu Revisi', 'Menunggu Pembayaran', 'Menunggu TTD Sekretaris', 'Menunggu Approval', 'Pengiriman Berkas', 'Berkas Diterima', 'Dikirim ke Pusat', 'Aktif', 'Ditolak'].map((st) => (
                 <option key={st} value={st}>{STATUS_LABEL[st]}</option>
               ))}
             </select>
@@ -493,7 +496,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
                   </div>
                   <span className="flex-shrink-0 flex flex-col items-end gap-1">
                     <span className="flex flex-wrap items-center justify-end gap-1">
-                      <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
+                      <span className={`inline-block whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
                         {STATUS_LABEL[sub.status] || sub.status}
                       </span>
                       {sub.status === 'Menunggu Verifikasi' && Number(sub.revision_round) > 0 && (
@@ -592,7 +595,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
 
                     <td className="py-3.5 px-4">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
+                        <span className={`inline-block whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-bold ${statusChipClass(sub.status)}`}>
                           {STATUS_LABEL[sub.status] || sub.status}
                         </span>
                         {sub.status === 'Menunggu Verifikasi' && Number(sub.revision_round) > 0 && (
@@ -649,6 +652,7 @@ export default function Admin1Screening({ onNavigateToMembers, initialStatus = '
           onAdmin1Action={handleAdmin1Action}
           onSignSecretary={() => startSignScreened(selectedSubDetail.submission, selectedSubDetail.settings, true)}
           onRejectSecretary={isSekretaris ? handleRejectSecretary : undefined}
+          onPhysicalDone={(id) => { fetchSubmissions(); openVerificationModal(id); }}
         />
       )}
 

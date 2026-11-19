@@ -801,7 +801,7 @@ const FORMAT_RULES = {
   phone: [/^[\d+\-\s()/]+$/, 'hanya boleh berisi angka (boleh + - spasi ( ) /)'],
   decimal: [/^\d+([.,]\d+)?%?$/, 'hanya boleh berisi angka'],
   npwp: [/^[\d.\-]+$/, 'hanya boleh berisi angka, titik, dan strip'],
-  isbn: [/^[\dXx-]+$/, 'hanya boleh berisi angka dan strip'],
+  isbn: [/^[\dXx-]+(\s*,\s*[\dXx-]+)*$/, 'hanya boleh berisi angka dan strip'],
 };
 // Catatan revisi / alasan penolakan harus bermakna (bukan "-" atau "." saja).
 // Sama dengan src/utils/noteRules.js di frontend.
@@ -837,7 +837,7 @@ const SUBMISSION_FORMAT = {
   annualBookCount: ['digits', 'Rencana produksi'],
   rataRataDiskon: ['decimal', 'Rata-rata diskon'],
   persentaseRoyalti: ['decimal', 'Persentase royalti'],
-  contohIsbn: ['isbn', 'Contoh ISBN'],
+  contohIsbn: ['isbn', 'Nomor ISBN'],
 };
 const SETTINGS_FORMAT = {
   bank_account: ['digits', 'Nomor rekening'],
@@ -858,6 +858,20 @@ const parseNoticeDays = (v) => {
 async function renewNoticeDays() {
   const row = await query.get("SELECT value FROM settings WHERE settings.key = 'renew_notice_days'");
   return parseNoticeDays(row?.value) || RENEW_NOTICE_DEFAULT;
+}
+// Admin bisa memasang sampai 3 pengingat (H-N1 > H-N2 > H-N3). Pengingat 1 juga membuka tombol Perpanjang.
+const RENEW_NOTICE_KEYS = ['renew_notice_days', 'renew_notice_days_2', 'renew_notice_days_3'];
+async function renewNoticeStages() {
+  const rows = await query.all(
+    `SELECT settings.key, settings.value FROM settings WHERE settings.key IN (${RENEW_NOTICE_KEYS.map(() => '?').join(', ')})`,
+    RENEW_NOTICE_KEYS);
+  const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  const stages = [parseNoticeDays(map.renew_notice_days) || RENEW_NOTICE_DEFAULT];
+  for (const key of RENEW_NOTICE_KEYS.slice(1)) {
+    const n = parseNoticeDays(map[key]);
+    if (n && n < stages[stages.length - 1]) stages.push(n);
+  }
+  return stages;
 }
 
 const FEE_KEYS = ['fee_uang_pangkal', 'fee_iuran_bulanan', 'fee_iuran_durasi_bulan', 'fee_administrasi', 'fee_heregistrasi_iuran'];
@@ -911,11 +925,11 @@ const STATUS_EMAIL_TEXT = {
   'Menunggu Pembayaran': 'Dokumen Anda sudah sesuai. Silakan lakukan pembayaran sesuai tagihan dan unggah bukti transfer di sistem.',
   'Menunggu TTD Sekretaris': 'Pembayaran Anda sudah diverifikasi. Pengajuan sedang menunggu tanda tangan Sekretaris.',
   'Menunggu Approval': 'Pengajuan Anda sedang menunggu persetujuan dan tanda tangan Ketua.',
-  'Pengiriman Berkas': 'Pengajuan Anda disetujui Sekretaris dan Ketua. Silakan cetak surat pengantar dan berkas yang diminta, lalu kirim sendiri ke IKAPI Pusat. Setelah itu klik "Lanjutkan" di sistem.',
-  'Berkas Diterima': 'Berkas fisik Anda sudah diterima sekretariat IKAPI Jawa Barat dan sedang disiapkan untuk dikirim ke IKAPI Pusat.',
+  'Pengiriman Berkas': 'Pengajuan Anda disetujui Sekretaris dan Ketua. Silakan cetak surat pengantar dan berkas yang diminta, lalu kirim ke sekretariat IKAPI Jawa Barat. Setelah itu klik "Lanjutkan" di sistem.',
+  'Berkas Diterima': 'Konfirmasi pengiriman berkas fisik Anda sudah tercatat. Setelah berkas sampai, Admin IKAPI Jawa Barat menerima berkas dan meneruskannya ke IKAPI Pusat. Anda tidak perlu melakukan apa pun.',
   'Disetujui': 'Pengajuan Anda telah disetujui.',
-  'Dikirim ke Pusat': 'Setelah IKAPI Pusat menerbitkan Nomor KTA, masuk ke sistem lalu isi Nomor KTA beserta buktinya. Admin akan memverifikasi data tersebut sebelum keanggotaan Anda aktif.',
-  'Aktif': 'Selamat, Nomor KTA Anda sudah diverifikasi dan keanggotaan Anda di IKAPI Jawa Barat sudah aktif.',
+  'Dikirim ke Pusat': 'Berkas Anda sudah diterima Admin IKAPI Jawa Barat dan diteruskan ke IKAPI Pusat. Setelah IKAPI Pusat menerbitkan KTA, Admin akan menginput Nomor KTA dan foto KTA Anda. Anda tidak perlu melakukan apa pun.',
+  'Aktif': 'Selamat, Nomor KTA Anda sudah terbit dan keanggotaan Anda di IKAPI Jawa Barat sudah aktif. Foto KTA dapat dilihat di dashboard.',
   'Ditolak': 'Mohon maaf, pengajuan Anda ditolak.'
 };
 
@@ -927,7 +941,8 @@ const STATUS_ESTIMATE = {
   'Menunggu TTD Sekretaris': 'Tanda tangan Sekretaris maksimal 2×24 jam kerja.',
   'Menunggu Approval': 'Persetujuan dan tanda tangan Ketua maksimal 2×24 jam kerja.',
   'Pengiriman Berkas': 'Pengiriman berkas fisik melalui ekspedisi sekitar 2-5 hari kerja.',
-  'Dikirim ke Pusat': 'Pengecekan Nomor KTA oleh Admin maksimal 2×24 jam kerja setelah diisi.'
+  'Berkas Diterima': 'Admin menerima & meneruskan berkas ke IKAPI Pusat maksimal 5 hari kerja setelah berkas sampai.',
+  'Dikirim ke Pusat': 'Penerbitan KTA oleh IKAPI Pusat mengikuti jadwal IKAPI Pusat.'
 };
 
 // ── Masa aktif keanggotaan (sama dengan perhitungan dashboard anggota) ──
@@ -965,12 +980,14 @@ async function latestActiveMembership(userId) {
   return { sub, period: await membershipPeriodOf(sub) };
 }
 
-// Pengingat masa aktif: dikirim sekali mulai H-N (diatur Admin), berlaku sampai masa aktif berakhir.
+// Pengingat masa aktif: sampai 3 kali (H-N1, H-N2, H-N3; diatur Admin), berlaku sampai masa aktif berakhir.
 // Pengingat dihapus saat masa aktif sudah lewat atau saat anggota mengajukan perpanjangan.
 const REMIND_SOON = 'Masa aktif keanggotaan segera berakhir';
+const REMIND_TITLES = [REMIND_SOON, `${REMIND_SOON} (pengingat ke-2)`, `${REMIND_SOON} (pengingat ke-3)`];
 const REMIND_EXPIRED = 'Masa aktif keanggotaan telah berakhir'; // judul lama, ikut dibersihkan
 async function clearRenewReminders(userId) {
-  await query.run('DELETE FROM notifications WHERE user_id = ? AND title IN (?, ?)', [userId, REMIND_SOON, REMIND_EXPIRED]);
+  const titles = [...REMIND_TITLES, REMIND_EXPIRED];
+  await query.run(`DELETE FROM notifications WHERE user_id = ? AND title IN (${titles.map(() => '?').join(', ')})`, [userId, ...titles]);
 }
 async function remindExpiringMemberships() {
   try {
@@ -978,18 +995,21 @@ async function remindExpiringMemberships() {
     const subs = await query.all(
       `SELECT s.id, s.user_id, s.kta_issued_at, s.kta_valid_until, s.activated_at FROM submissions s
        WHERE s.status = 'Aktif' AND s.id = (SELECT MAX(s2.id) FROM submissions s2 WHERE s2.user_id = s.user_id)`);
-    const noticeDays = await renewNoticeDays();
+    const stages = await renewNoticeStages();
     for (const sub of subs) {
       const period = await membershipPeriodOf(sub);
-      if (!period || period.left > noticeDays) continue;
+      if (!period || period.left > stages[0]) continue;
       // Batas waktu lewat: pengingat perpanjangan dihapus
       if (period.left <= 0) { await clearRenewReminders(sub.user_id); continue; }
+      // Tahap terakhir yang sudah tercapai; tahap yang terlewat (mis. jadwal diubah) tidak dikirim berurutan
+      let stage = 0;
+      stages.forEach((days, i) => { if (period.left <= days) stage = i; });
       const sent = await query.get('SELECT id FROM notifications WHERE user_id = ? AND submission_id = ? AND title = ? LIMIT 1',
-        [sub.user_id, sub.id, REMIND_SOON]);
+        [sub.user_id, sub.id, REMIND_TITLES[stage]]);
       if (sent) continue;
       const tgl = period.end.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
       const body = `Masa aktif keanggotaan Anda berakhir pada ${tgl} (${period.left} hari lagi). Klik Perpanjang di kartu Masa Aktif Keanggotaan pada dashboard untuk mengajukan perpanjangan.`;
-      await addNotification(sub.user_id, REMIND_SOON, body, sub.id);
+      await addNotification(sub.user_id, REMIND_TITLES[stage], body, sub.id);
     }
   } catch (err) {
     console.error('Pengingat masa aktif gagal:', err.message);
@@ -1125,7 +1145,8 @@ async function notifyStatusChange(submissionId) {
   const staffTask = {
     'Menunggu Verifikasi': ['Admin', sub.last_notified_status === 'Perlu Revisi' ? 'Revisi dokumen masuk' : 'Pengajuan baru masuk', `${label} menunggu screening dokumen.`],
     'Menunggu TTD Sekretaris': ['Sekretaris', 'Menunggu tanda tangan Sekretaris', `${label} sudah lunas dan menunggu TTD Anda.`],
-    'Menunggu Approval': ['Ketua', 'Menunggu persetujuan Ketua', `${label} menunggu persetujuan dan TTD Anda.`]
+    'Menunggu Approval': ['Ketua', 'Menunggu persetujuan Ketua', `${label} menunggu persetujuan dan TTD Anda.`],
+    'Berkas Diterima': ['Admin', 'Berkas fisik dikirim pemohon', `${label} sudah mengirim berkas fisik ke IKAPI Jawa Barat. Klik Terima Berkas setelah berkas sampai, lalu input Nomor & foto KTA saat KTA terbit.`]
   }[sub.status];
   // Email hanya ke pengurus; pemohon cukup menerima notifikasi dalam aplikasi di atas.
   if (staffTask) await addNotification({ role: staffTask[0] }, staffTask[1], staffTask[2], sub.id, { email: true });
@@ -1787,19 +1808,16 @@ app.post('/api/submissions', authenticate, async (req, res) => {
     } else if (category === 'Biasa') {
       requiredDocs.push(
         { type: 'akta_pendirian', title: 'Akta Notaris / Pendirian Perusahaan' },
-        { type: 'nib', title: 'Nomor Induk Berusaha (NIB)' },
-        { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran IKAPI 2026' },
-        { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan Buku atau Editor)' }
+        { type: 'nib', title: 'Nomor Induk Berusaha (NIB)' }
       );
     } else {
       // Luar Biasa (Institusi Pendidikan)
       requiredDocs.push(
         { type: 'sk_pembentukan', title: 'SK Pembentukan Penerbitan Buku' },
-        { type: 'domisili_press', title: 'Surat Keterangan Domisili Press' },
-        { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran IKAPI 2026' },
-        { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan Buku atau Editor)' }
+        { type: 'domisili_press', title: 'Surat Keterangan Domisili Press' }
       );
     }
+    // Sertifikat BNSP opsional: tidak dibuat slotnya di sini, baris dokumen dibuat saat pemohon mengunggahnya
 
     for (const d of requiredDocs) {
       await query.run(
@@ -1861,6 +1879,21 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
       return res.status(400).json({ error: `Isian formulir terkunci karena pengajuan sudah berstatus ${sub.status}.` });
     }
     if (isSubmit && sub.status === 'Draf') {
+      const isbnTotal = String(formData.contohIsbn || '').split(',').map((v) => v.trim()).filter((v) => v && v !== '-').length;
+      if (isbnTotal < MIN_ISBN) {
+        return res.status(400).json({ error: `Isi minimal ${MIN_ISBN} Nomor ISBN yang sudah digunakan.` });
+      }
+      const cabangRow = await query.get("SELECT value FROM settings WHERE settings.key = 'ikapi_cabang_list'");
+      const cabang = String(cabangRow?.value || '').split('\n').map((v) => v.trim()).filter(Boolean);
+      if (cabang.length && !cabang.includes(String(formData.ikapiCabang || '').trim())) {
+        return res.status(400).json({ error: 'Pilih IKAPI Cabang terlebih dahulu.' });
+      }
+      const dropTypes = [...OPTIONAL_DOC_TYPES, ...DROPPED_DOC_TYPES];
+      await query.run(
+        `DELETE FROM documents WHERE submission_id = ? AND document_type IN (${dropTypes.map(() => '?').join(', ')})
+           AND (file_path IS NULL OR file_path = '')`,
+        [subId, ...dropTypes]
+      );
       const missing = await query.all(
         `SELECT document_title FROM documents WHERE submission_id = ? AND (file_path IS NULL OR file_path = '')`,
         [subId]
@@ -1931,6 +1964,13 @@ app.put('/api/submissions/:id', authenticate, async (req, res) => {
 // ==========================================
 // 3. FILE UPLOADS & DOCUMENTS
 // ==========================================
+
+// Dokumen yang boleh tidak diunggah pemohon (anggota baru)
+const OPTIONAL_DOC_TYPES = ['sertifikat_bnsp'];
+// Dokumen yang tidak diminta lagi (formulir pendaftaran kini dibuat sistem dari isian);
+// slot kosong di draf lama dibuang saat dikirim
+const DROPPED_DOC_TYPES = ['formulir_pendaftaran'];
+const MIN_ISBN = 3;
 
 // Upload or replace document file
 app.post('/api/submissions/:id/documents', authenticate, upload.single('file'), async (req, res) => {
@@ -2058,11 +2098,15 @@ app.delete('/api/submissions/:id/documents/:docType', authenticate, async (req, 
     );
     if (!doc) return res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
     if (doc.file_path) await deleteStoredFile(doc.file_path);
-    await query.run(
-      `UPDATE documents SET file_path = '', file_name = 'Belum diunggah', file_size = NULL, mime_type = NULL, updated_at = NOW()
-       WHERE id = ?`,
-      [doc.id]
-    );
+    if (OPTIONAL_DOC_TYPES.includes(req.params.docType)) {
+      await query.run('DELETE FROM documents WHERE id = ?', [doc.id]);
+    } else {
+      await query.run(
+        `UPDATE documents SET file_path = '', file_name = 'Belum diunggah', file_size = NULL, mime_type = NULL, updated_at = NOW()
+         WHERE id = ?`,
+        [doc.id]
+      );
+    }
     res.json({ message: 'File dihapus dari draf.' });
   } catch (err) {
     console.error('Delete document error:', err);
@@ -2541,8 +2585,8 @@ app.post('/api/submissions/:id/admin2-action', authenticate, authorize('Ketua', 
   }
 });
 
-// Pemohon: menyatakan berkas fisik sudah dikirim sendiri ke IKAPI Pusat (klik "Lanjutkan").
-// Tidak ada data pengiriman yang diisi; status menjadi 'Dikirim ke Pusat' = tahap Input KTA.
+// Pemohon: menyatakan berkas fisik sudah dikirim ke sekretariat IKAPI Jawa Barat (klik "Lanjutkan").
+// Status menjadi 'Berkas Diterima' = menunggu Admin meneruskan berkas ke IKAPI Pusat.
 app.post('/api/submissions/:id/physical-sent', authenticate, authorize('Anggota'), async (req, res) => {
   try {
     const subId = req.params.id;
@@ -2552,31 +2596,32 @@ app.post('/api/submissions/:id/physical-sent', authenticate, authorize('Anggota'
       return res.status(400).json({ error: 'Tahap ini tersedia setelah pengajuan disetujui Ketua.' });
     }
     await query.run(
-      `UPDATE submissions SET status = 'Dikirim ke Pusat', sent_to_central_at = NOW(),
+      `UPDATE submissions SET status = 'Berkas Diterima',
          physical_status = 'Dikirim', physical_sent_at = NOW(), updated_at = NOW()
        WHERE id = ?`,
       [subId]
     );
-    await logEvent(subId, req.user, 'Pemohon menyatakan berkas fisik sudah dikirim ke IKAPI Pusat');
-    res.json({ message: 'Tercatat. Isi Nomor KTA setelah Anda menerimanya dari IKAPI Pusat.', status: 'Dikirim ke Pusat' });
+    await logEvent(subId, req.user, 'Pemohon menyatakan berkas fisik sudah dikirim ke IKAPI Jawa Barat');
+    res.json({ message: 'Tercatat. Admin IKAPI Jawa Barat akan meneruskan berkas Anda ke IKAPI Pusat.', status: 'Berkas Diterima' });
   } catch (err) {
     console.error('Physical sent error:', err);
     res.status(500).json({ error: 'Gagal menyimpan konfirmasi pengiriman.' });
   }
 });
 
-// Pemohon: mengisi No. KTA dari IKAPI Pusat + bukti -> menunggu verifikasi Admin
-app.post('/api/submissions/:id/kta-confirm', authenticate, authorize('Anggota'), upload.single('ktaFile'), async (req, res) => {
+// Pemohon tidak lagi mengisi No. KTA: Admin yang menginput setelah KTA terbit dari IKAPI Pusat (/kta-input).
+app.post('/api/submissions/:id/kta-confirm', authenticate, (req, res) => res.status(410).json({
+  error: 'Nomor KTA kini diinput oleh Admin IKAPI Jawa Barat setelah KTA terbit dari IKAPI Pusat. Anda tidak perlu mengisinya.'
+}));
+
+// Admin: KTA sudah terbit dari IKAPI Pusat -> input No. KTA + foto KTA -> pemohon langsung Anggota Aktif
+app.post('/api/submissions/:id/kta-input', authenticate, authorize('Admin'), upload.single('ktaFile'), async (req, res) => {
   try {
     const subId = req.params.id;
     const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
-    if (!sub || sub.user_id !== req.user.id) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
-    // 'Berkas Diterima' = data alur lama; tetap boleh mengisi KTA dan dipindah ke 'Dikirim ke Pusat'
-    if (sub.status !== 'Dikirim ke Pusat' && sub.status !== 'Berkas Diterima') {
-      return res.status(400).json({ error: 'Nomor KTA diisi setelah berkas dikirim ke IKAPI Pusat.' });
-    }
-    if (sub.kta_review_status === 'Menunggu') {
-      return res.status(400).json({ error: 'Data KTA Anda sedang diverifikasi Admin. Tunggu hasilnya.' });
+    if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (sub.status !== 'Dikirim ke Pusat') {
+      return res.status(400).json({ error: 'Nomor KTA diinput setelah berkas dikirim ke IKAPI Pusat.' });
     }
     const kta = String(req.body.ktaNumber || '').trim().toUpperCase();
     if (!kta) return res.status(400).json({ error: 'Nomor KTA wajib diisi.' });
@@ -2590,28 +2635,30 @@ app.post('/api/submissions/:id/kta-confirm', authenticate, authorize('Anggota'),
     if (new Date(issuedAt) > new Date()) {
       return res.status(400).json({ error: 'Tanggal terbit tidak boleh di masa depan.' });
     }
-    if (!req.file) return res.status(400).json({ error: 'Unggah foto/scan KTA atau surat dari IKAPI Pusat.' });
+    if (!req.file) return res.status(400).json({ error: 'Unggah foto KTA dari IKAPI Pusat.' });
     const dup = await query.get('SELECT publisher_name FROM members WHERE kta_number = ? AND id <> ?', [kta, sub.member_id]);
-    if (dup) return res.status(400).json({ error: `Nomor KTA ${kta} sudah terdaftar atas penerbit lain. Periksa kembali nomornya.` });
+    if (dup) return res.status(400).json({ error: `Nomor KTA ${kta} sudah terdaftar atas ${dup.publisher_name}. Periksa kembali nomornya.` });
 
     const filePath = await storeUpload(req.file);
-    const notes = String(req.body.notes || '').trim() || null;
-    const resubmit = sub.kta_review_status === 'Ditolak';
+    const notes = String(req.body.notes || '').trim().slice(0, 1000) || null;
+    await query.run(
+      `UPDATE members SET kta_number = ?, membership_status = 'Aktif', updated_at = NOW() WHERE id = ?`,
+      [kta, sub.member_id]
+    );
     await query.run(
       `UPDATE submissions SET kta_number_submitted = ?, kta_issued_at = ?, kta_proof_file = ?, kta_proof_name = ?,
-         kta_notes = ?, kta_confirmed_at = NOW(), kta_review_status = 'Menunggu', kta_review_note = NULL,
-         kta_reviewed_at = NULL, kta_reviewed_by = NULL, updated_at = NOW(),
-         status = 'Dikirim ke Pusat', sent_to_central_at = COALESCE(sent_to_central_at, NOW())
+         kta_notes = ?, kta_confirmed_at = NOW(), kta_review_status = 'Disetujui', kta_review_note = NULL,
+         kta_reviewed_at = NOW(), kta_reviewed_by = ?, status = 'Aktif', activated_at = NOW(), updated_at = NOW()
        WHERE id = ?`,
-      [kta, issuedAt, filePath, req.file.originalname, notes, subId]
+      [kta, issuedAt, filePath, req.file.originalname, notes, req.user.name, subId]
     );
-    await logEvent(subId, req.user, `Pemohon ${resubmit ? 'mengirim ulang' : 'mengisi'} Nomor KTA ${kta}, menunggu verifikasi Admin`, notes);
-    await addNotification({ role: 'Admin' }, 'Nomor KTA perlu diverifikasi',
-      `Pengajuan #${subId} ${resubmit ? 'mengirim ulang' : 'mengisi'} No. KTA ${kta}. Periksa bukti dari IKAPI Pusat di Monitoring Berkas.`, Number(subId));
-    res.json({ message: 'Data KTA terkirim. Admin akan memeriksa datanya sebelum keanggotaan Anda diaktifkan.', status: 'Dikirim ke Pusat' });
+    await logEvent(subId, req.user, `Admin menginput Nomor KTA ${kta} dari IKAPI Pusat. Keanggotaan aktif`, notes);
+    await addNotification({ role: 'Sekretaris' }, 'Anggota baru aktif',
+      `Pengajuan #${subId} kini aktif dengan No. KTA ${kta}.`, Number(subId));
+    res.json({ message: `Nomor KTA ${kta} tersimpan. Pemohon kini Anggota Aktif.`, status: 'Aktif' });
   } catch (err) {
-    console.error('KTA confirm error:', err);
-    res.status(500).json({ error: 'Gagal menyimpan data KTA.' });
+    console.error('KTA input error:', err);
+    res.status(500).json({ error: 'Gagal menyimpan Nomor KTA.' });
   }
 });
 
@@ -3064,12 +3111,43 @@ app.post('/api/submissions/:id/kta-review', authenticate, authorize('Admin'), as
   }
 });
 
-// Admin: berkas fisik sudah sampai di sekretariat -> pemohon resmi menjadi anggota
-// Alur berkas fisik lama (kirim ke sekretariat + resi -> Admin terima -> Admin kirim ke Pusat) sudah tidak dipakai.
-// Alur berlaku: pemohon kirim langsung ke IKAPI Pusat (/physical-sent), isi No. KTA (/kta-confirm), Admin validasi (/kta-review).
-const LEGACY_PHYSICAL_GONE = { error: 'Alur ini sudah tidak dipakai. Pemohon mengirim berkas langsung ke IKAPI Pusat, mengisi Nomor KTA, lalu Admin memvalidasi.' };
-app.post('/api/submissions/:id/physical-received', authenticate, (req, res) => res.status(410).json(LEGACY_PHYSICAL_GONE));
-app.post('/api/submissions/:id/sent-to-central', authenticate, (req, res) => res.status(410).json(LEGACY_PHYSICAL_GONE));
+// Alur berkas fisik anggota baru:
+// pemohon kirim ke IKAPI Jawa Barat (/physical-sent) -> Admin teruskan ke IKAPI Pusat (/sent-to-central)
+// -> KTA terbit -> Admin input No. KTA + foto KTA (/kta-input) -> Anggota Aktif.
+// /kta-review di atas hanya untuk data lama yang No. KTA-nya masih diisi pemohon.
+app.post('/api/submissions/:id/physical-received', authenticate, (req, res) => res.status(410).json({
+  error: 'Tahap ini sudah tidak dipakai. Gunakan "Kirim ke Pusat" setelah berkas pemohon sampai.'
+}));
+
+// Admin: berkas pemohon sudah sampai di sekretariat dan diteruskan ke IKAPI Pusat
+app.post('/api/submissions/:id/sent-to-central', authenticate, authorize('Admin'), async (req, res) => {
+  try {
+    const subId = req.params.id;
+    const sub = await query.get('SELECT * FROM submissions WHERE id = ?', [subId]);
+    if (!sub) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (sub.status !== 'Berkas Diterima' && sub.status !== 'Pengiriman Berkas') {
+      return res.status(400).json({ error: 'Berkas hanya bisa dikirim ke Pusat setelah disetujui Ketua dan sebelum tercatat dikirim.' });
+    }
+    const courier = String(req.body.courier || '').trim().slice(0, 100) || null;
+    const trackingNo = String(req.body.trackingNo || '').trim().slice(0, 100) || null;
+    const notes = String(req.body.notes || '').trim().slice(0, 1000) || null;
+    await query.run(
+      `UPDATE submissions SET status = 'Dikirim ke Pusat',
+         physical_status = 'Diterima', physical_sent_at = COALESCE(physical_sent_at, NOW()),
+         physical_received_at = COALESCE(physical_received_at, NOW()), physical_received_by = COALESCE(physical_received_by, ?),
+         sent_to_central_at = NOW(), central_courier = ?, central_tracking_no = ?, central_notes = ?, central_sent_by = ?,
+         updated_at = NOW()
+       WHERE id = ?`,
+      [req.user.name, courier, trackingNo, notes, req.user.name, subId]
+    );
+    const detail = [courier && `Ekspedisi: ${courier}`, trackingNo && `Resi: ${trackingNo}`].filter(Boolean).join(' · ');
+    await logEvent(subId, req.user, `Admin menerima berkas fisik & meneruskan ke IKAPI Pusat${detail ? ` (${detail})` : ''}`, notes);
+    res.json({ message: 'Berkas diterima & diteruskan ke IKAPI Pusat. Input Nomor KTA + foto KTA setelah KTA terbit.', status: 'Dikirim ke Pusat' });
+  } catch (err) {
+    console.error('Sent to central error:', err);
+    res.status(500).json({ error: 'Gagal menyimpan pengiriman ke Pusat.' });
+  }
+});
 
 // ==========================================
 // 6. DASHBOARD & STATS (ADMIN 2 MONITORING)
@@ -3332,10 +3410,29 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
     if (settingsFormatErr) return res.status(400).json({ error: settingsFormatErr });
     delete settings.hereg_tracks; // jalur anggota lama tidak lagi dipakai
     for (const key of SMTP_KEYS) delete settings[key]; // diatur lewat /api/settings/smtp
-    if ('renew_notice_days' in settings) {
-      const n = parseNoticeDays(settings.renew_notice_days);
-      if (!n) return res.status(400).json({ error: `Pemberitahuan perpanjangan harus 1 sampai ${RENEW_NOTICE_MAX} hari sebelum masa aktif berakhir.` });
-      settings.renew_notice_days = String(n);
+    if (RENEW_NOTICE_KEYS.some((k) => k in settings)) {
+      const current = Object.fromEntries((await query.all(
+        `SELECT settings.key, settings.value FROM settings WHERE settings.key IN (${RENEW_NOTICE_KEYS.map(() => '?').join(', ')})`,
+        RENEW_NOTICE_KEYS)).map((r) => [r.key, r.value]));
+      const val = (k) => String((k in settings ? settings[k] : current[k]) ?? '').trim();
+      const n1 = parseNoticeDays(val('renew_notice_days'));
+      if (!n1) return res.status(400).json({ error: `Pengingat 1 harus 1 sampai ${RENEW_NOTICE_MAX} hari sebelum masa aktif berakhir.` });
+      let prev = n1;
+      const out = { renew_notice_days: String(n1) };
+      for (const [i, k] of RENEW_NOTICE_KEYS.slice(1).entries()) {
+        if (!val(k)) { out[k] = ''; continue; }
+        const n = parseNoticeDays(val(k));
+        if (!n) return res.status(400).json({ error: `Pengingat ${i + 2} harus 1 sampai ${RENEW_NOTICE_MAX} hari, atau dikosongkan.` });
+        if (n >= prev) return res.status(400).json({ error: `Pengingat ${i + 2} harus lebih sedikit harinya dari pengingat sebelumnya (H-${prev}).` });
+        out[k] = String(n);
+        prev = n;
+      }
+      Object.assign(settings, out);
+    }
+    if ('ikapi_cabang_list' in settings) {
+      const list = [...new Set(String(settings.ikapi_cabang_list || '').split('\n').map((v) => v.trim()).filter(Boolean))];
+      if (list.some((v) => v.length > 100)) return res.status(400).json({ error: 'Nama IKAPI Cabang maksimal 100 karakter.' });
+      settings.ikapi_cabang_list = list.join('\n');
     }
     for (const key of FEE_KEYS) {
       if (key in settings && !(Number.isFinite(Number(settings[key])) && Number(settings[key]) >= 0)) {
@@ -3361,7 +3458,7 @@ app.put('/api/settings', authenticate, authorize('Admin'), async (req, res) => {
     // Harga baru langsung berlaku untuk tagihan yang belum dibayar
     const updatedBills = await syncUnpaidBills();
     // Batas hari pemberitahuan berubah: kirim pemberitahuan yang kini sudah jatuh tempo
-    if ('renew_notice_days' in settings) remindExpiringMemberships();
+    if (RENEW_NOTICE_KEYS.some((k) => k in settings)) remindExpiringMemberships();
 
     res.json({ message: 'Pengaturan sistem berhasil disimpan.', updatedBills });
   } catch (err) {

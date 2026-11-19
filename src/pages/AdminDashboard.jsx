@@ -9,7 +9,7 @@ import {
 import {
   ArrowUpRight, ArrowRight, Users, UserPlus, UserCheck, RefreshCw, Lightbulb, Wallet,
   FileSignature, Search, CheckCircle2, CircleDashed, KeyRound,
-  ShieldCheck, CreditCard, BadgeCheck, Activity
+  ShieldCheck, CreditCard, BadgeCheck, Activity, Send
 } from 'lucide-react';
 
 // Akun peran Anggota yang belum aktif dihitung sebagai Pemohon
@@ -100,14 +100,15 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
     range, TREND_SERIES
   ), [users, submissions, range]);
 
-  // Tugas Admin: screening dokumen (Tahap 1), verifikasi bayar (Tahap 2), dan verifikasi No. KTA
-  // yang diisi pemohon setelah mengirim sendiri berkas fisik ke IKAPI Pusat
+  // Tugas Admin: screening dokumen (Tahap 1), verifikasi bayar (Tahap 2), kirim berkas fisik ke IKAPI Pusat
+  // setelah pemohon mengirimnya ke IKAPI Jawa Barat, lalu input No. KTA + foto KTA setelah terbit
   const TASKS = [
     { key: 'screening', label: 'Screening berkas', action: 'Screening berkas', dot: 'bg-[#0da2e7]', chip: 'bg-sky-100 text-sky-800', icon: ShieldCheck, test: (x) => x.status === 'Menunggu Verifikasi' && !revisionRoundIn(x) },
     // Pemohon sudah mengirim dokumen perbaikan: diperiksa ulang, ditandai "Revisi ke-N"
     { key: 'revisi', label: 'Revisi', action: 'Periksa revisi', dot: 'bg-amber-500', chip: 'bg-amber-100 text-amber-900', icon: RefreshCw, test: (x) => revisionRoundIn(x) > 0 },
     { key: 'bayar', label: 'Verifikasi bayar', action: 'Cek bukti pembayaran', dot: 'bg-amber-400', chip: 'bg-amber-100 text-amber-800', icon: CreditCard, test: (x) => x.status === 'Menunggu Pembayaran' && x.payment_status === 'Menunggu' && Boolean(x.payment_proof) },
-    { key: 'kta', label: 'Verifikasi KTA', action: 'Cek No. KTA dari pemohon', dot: 'bg-violet-500', chip: 'bg-violet-100 text-violet-800', icon: BadgeCheck, test: (x) => x.status === 'Dikirim ke Pusat' && x.kta_review_status === 'Menunggu' },
+    { key: 'pusat', label: 'Terima Berkas', action: 'Terima berkas fisik pemohon', dot: 'bg-indigo-500', chip: 'bg-indigo-100 text-indigo-800', icon: Send, test: (x) => x.status === 'Berkas Diterima' },
+    { key: 'kta', label: 'Input KTA', action: 'Input No. & foto KTA', dot: 'bg-violet-500', chip: 'bg-violet-100 text-violet-800', icon: BadgeCheck, test: (x) => x.status === 'Dikirim ke Pusat' },
   ];
   // Pengajuan berjalan yang sedang menunggu pihak lain (pemohon, Sekretaris, Ketua, Pusat):
   // hanya tampil di filter "Semua" agar Admin melihat posisi semua pengajuan
@@ -116,8 +117,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
     'Menunggu Pembayaran': { label: 'Menunggu pembayaran', dot: 'bg-slate-400', chip: 'bg-slate-100 text-slate-700' },
     'Menunggu TTD Sekretaris': { label: 'Menunggu TTD Sekretaris', dot: 'bg-indigo-400', chip: 'bg-indigo-50 text-indigo-800' },
     'Menunggu Approval': { label: 'Menunggu persetujuan Ketua', dot: 'bg-indigo-400', chip: 'bg-indigo-50 text-indigo-800' },
-    'Pengiriman Berkas': { label: 'Pemohon kirim berkas ke Pusat', dot: 'bg-orange-300', chip: 'bg-orange-50 text-orange-800' },
-    'Dikirim ke Pusat': { label: 'Menunggu No. KTA dari pemohon', dot: 'bg-violet-400', chip: 'bg-violet-50 text-violet-800' },
+    'Pengiriman Berkas': { label: 'Pemohon kirim berkas ke IKAPI Jabar', dot: 'bg-orange-300', chip: 'bg-orange-50 text-orange-800' },
   };
   const taskOf = (x) => TASKS.find((t) => t.test(x));
   const cardOf = (x) => { const t = taskOf(x); return t ? { ...t, label: t.action, isTask: true } : (WAITING[x.status] ? { key: 'tunggu', ...WAITING[x.status] } : null); };
@@ -155,8 +155,10 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
 
   // Satu kartu = satu pengajuan: langsung buka detailnya
   const openTask = (x) => {
-    if (onOpenDetail) return onOpenDetail(x.id);
     const t = taskOf(x)?.key;
+    // Terima Berkas & input KTA dikerjakan di halaman Monitoring
+    if ((t === 'kta' || t === 'pusat') && onOpenMonitoring) return onOpenMonitoring();
+    if (onOpenDetail) return onOpenDetail(x.id);
     if (t === 'kta') onOpenMonitoring?.();
     else onOpenScreening?.(x.status);
   };
@@ -165,7 +167,7 @@ export default function AdminDashboard({ onOpenUsers, onOpenSettings, onOpenScre
     <div className="flex flex-col gap-4 w-full">
 
       {/* ══ Sapaan + angka utama (satu baris) ══ */}
-      <section className="flex-shrink-0 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <section className="flex-shrink-0 flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-3xl font-light tracking-tight text-slate-900 truncate">
             Selamat datang, <span className="text-blue-800">{firstName}</span>

@@ -6,7 +6,7 @@ import {
 import {
   PEMASARAN_DISTRIBUTOR, PEMASARAN_SENDIRI, PENJUALAN_OPTIONS, NASKAH_OPTIONS,
   KEPEMILIKAN_KANTOR_OPTIONS, LOKASI_KANTOR_OPTIONS, CETAK_OPTIONS, DEFAULT_KARYAWAN,
-  asList, karyawanRows
+  asList, karyawanRows, MIN_ISBN, isbnItems, cabangList
 } from '../utils/formulirIkapi';
 import { notify } from '../components/AppDialog';
 import UploadReviewDialog, { formatFileSize } from '../components/UploadReviewDialog';
@@ -61,21 +61,21 @@ function getRequiredDocsList(submissionType, category) {
     return [
       { type: 'akta_pendirian', title: 'Akta Notaris / Pendirian Perusahaan' },
       { type: 'nib', title: 'Nomor Induk Berusaha (NIB)' },
-      { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran IKAPI 2026' },
-      { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan / Editor)' },
+      { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan / Editor)', optional: true },
     ];
   }
   return [
     { type: 'sk_pembentukan', title: 'SK Pembentukan Penerbitan Buku' },
     { type: 'domisili_press', title: 'Surat Keterangan Domisili Press' },
-    { type: 'formulir_pendaftaran', title: 'Formulir Pendaftaran IKAPI 2026' },
-    { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan / Editor)' },
+    { type: 'sertifikat_bnsp', title: 'Sertifikat BNSP (Penerbitan / Editor)', optional: true },
   ];
 }
 
 export default function RegistrationForm({ existingSubmission, onComplete, onCancel, initialSubmissionType, initialCategory, initialOldKtaNumber, lockSubmissionType = false }) {
   const { user } = useAuth();
   const [submitting, setSubmitting] = useState(false);
+  // true selama file dikirim ke server/CDN (bisa lama): tombol & banner menampilkan "Sedang Mengupload"
+  const [uploading, setUploading] = useState(false);
   // Draf bisa disimpan di setiap langkah; id disimpan agar simpan berikutnya memperbarui draf yang sama
   const [draftId, setDraftId] = useState(existingSubmission?.id || null);
   const [draftSavedAt, setDraftSavedAt] = useState(null);
@@ -86,6 +86,14 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
   const [showMissingDocs, setShowMissingDocs] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false); // pop-up ringkasan sebelum dikirim ke Admin
   const [removingDoc, setRemovingDoc] = useState(null);
+  // Pilihan IKAPI Cabang (diatur Admin di Pengaturan Sistem)
+  const [cabangOptions, setCabangOptions] = useState([]);
+  useEffect(() => {
+    fetch('/api/settings', { headers: { Authorization: `Bearer ${localStorage.getItem('ikapi_token')}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setCabangOptions(cabangList(data?.settings?.ikapi_cabang_list)))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const id = existingSubmission?.id;
@@ -158,6 +166,8 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
     // 7. Produksi
     softwareProduksi: '',
     contohIsbn: '',
+    ikapiCabang: '',
+    isbnList: Array(MIN_ISBN).fill(''),
     jenisKertas: '',
     sistemCetak: '',
     pekerjaanOutsource: ''
@@ -178,7 +188,11 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
       setFormData(prev => ({
         ...prev,
         ...parsed,
-        sistemPemasaran: onlyKnown(parsed.sistemPemasaran, [PEMASARAN_DISTRIBUTOR, ...PEMASARAN_SENDIRI]),
+        // Opsi lama "Internet (mail order)" kini bernama "E-commerce"
+        sistemPemasaran: onlyKnown(
+          asList(parsed.sistemPemasaran).map((v) => (v === 'Internet (mail order)' ? 'E-commerce' : v)),
+          [PEMASARAN_DISTRIBUTOR, ...PEMASARAN_SENDIRI]
+        ),
         sistemPenjualan: onlyKnown(parsed.sistemPenjualan, PENJUALAN_OPTIONS),
         sistemPengadaanNaskah: onlyKnown(parsed.sistemPengadaanNaskah, NASKAH_OPTIONS),
         kepemilikanKantor: oneOf(parsed.kepemilikanKantor, KEPEMILIKAN_KANTOR_OPTIONS),
@@ -188,6 +202,10 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
           ? [...rows, ...Array(Math.max(0, 4 - rows.length)).fill({ bagian: '', jumlah: '' })]
           : prev.karyawan,
         kantorCabang1: parsed.kantorCabang1 ?? keepDash(parsed.kantorCabang),
+        isbnList: (() => {
+          const items = isbnItems(keepDash(parsed.contohIsbn || ''));
+          return [...items, ...Array(Math.max(0, MIN_ISBN - items.length)).fill('')];
+        })(),
         liniPenerbitan1: parsed.liniPenerbitan1 ?? keepDash(parsed.liniPenerbitan),
         submissionType: existingSubmission.submission_type || prev.submissionType,
         category: existingSubmission.member_category || existingSubmission.category || prev.category,
@@ -271,8 +289,22 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
   };
 
   const requiredDocs = getRequiredDocsList(formData.submissionType, formData.category);
-  const missingDocs = requiredDocs.filter((d) => !selectedFiles[d.type] && !uploadedDocs[d.type]);
+  const missingDocs = requiredDocs.filter((d) => !d.optional && !selectedFiles[d.type] && !uploadedDocs[d.type]);
+  // Dokumen opsional yang tidak diunggah tidak ikut ditampilkan di ringkasan kirim
+  const reviewDocs = requiredDocs.filter((d) => !d.optional || selectedFiles[d.type] || uploadedDocs[d.type]);
   const isHereg = formData.submissionType === 'Heregistrasi';
+
+  const isbnFilled = (formData.isbnList || []).map((v) => String(v || '').trim()).filter(Boolean);
+  // Data yang dikirim ke server: daftar ISBN digabung ke kolom contohIsbn (dipisah koma)
+  const payload = () => {
+    const { isbnList, persentaseRoyalti, ...rest } = formData;
+    return { ...rest, contohIsbn: isbnFilled.join(', ') };
+  };
+  const setIsbn = (i, value) => setFormData((prev) => {
+    const list = [...(prev.isbnList || [])];
+    list[i] = FILTERS.isbn(value);
+    return { ...prev, isbnList: list };
+  });
 
   const handleSubmit = async (isDraft = false, { stay = false, confirmed = false } = {}) => {
     if (isDraft && !formData.publisherName.trim()) {
@@ -299,6 +331,21 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
       if (formData.submissionType === 'Heregistrasi' && !formData.oldKtaNumber.trim()) {
         notify('Nomor KTA Lama wajib diisi untuk Registrasi.');
         setActiveTab(1);
+        return;
+      }
+      if (cabangOptions.length > 0 && !cabangOptions.includes(formData.ikapiCabang)) {
+        notify('Pilih IKAPI Cabang terlebih dahulu.');
+        setActiveTab(1);
+        return;
+      }
+      if (isbnFilled.length < MIN_ISBN) {
+        notify(`Isi minimal ${MIN_ISBN} Nomor ISBN yang sudah digunakan (baru ${isbnFilled.length}).`);
+        setActiveTab(3);
+        return;
+      }
+      if (new Set(isbnFilled.map((v) => v.replace(/-/g, ''))).size !== isbnFilled.length) {
+        notify('Nomor ISBN tidak boleh sama. Isi dengan ISBN dari buku yang berbeda.');
+        setActiveTab(3);
         return;
       }
     }
@@ -334,7 +381,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ ...formData, isDraft: true, isSubmit: false })
+        body: JSON.stringify({ ...payload(), isDraft: true, isSubmit: false })
       });
 
       const data = await res.json();
@@ -344,6 +391,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
       if (subId) setDraftId(subId);
 
       if (subId && Object.keys(selectedFiles).length > 0) {
+        setUploading(true);
         for (const docItem of requiredDocs) {
           const file = selectedFiles[docItem.type];
           if (file) {
@@ -377,7 +425,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
         const submitRes = await fetch(`/api/submissions/${subId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ ...formData, isSubmit: true })
+          body: JSON.stringify({ ...payload(), isSubmit: true })
         });
         const submitData = await submitRes.json();
         if (!submitRes.ok) {
@@ -403,6 +451,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
       });
     } finally {
       setSubmitting(false);
+      setUploading(false);
     }
   };
 
@@ -498,6 +547,20 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                     {'. '}Dokumen persyaratan di tab terakhir menyesuaikan.
                   </p>
                 </div>
+
+                {cabangOptions.length > 0 && (
+                  <div>
+                    <label className={labelCls}>IKAPI Cabang *</label>
+                    <select name="ikapiCabang" value={formData.ikapiCabang} onChange={handleChange} className={inputCls}>
+                      <option value="">Pilih IKAPI Cabang</option>
+                      {/* Pilihan lama yang sudah tidak ada di daftar tetap ditampilkan agar tidak hilang diam-diam */}
+                      {formData.ikapiCabang && !cabangOptions.includes(formData.ikapiCabang) && (
+                        <option value={formData.ikapiCabang}>{formData.ikapiCabang} (tidak ada di daftar)</option>
+                      )}
+                      {cabangOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 {formData.submissionType === 'Heregistrasi' && (
                   <div>
@@ -700,7 +763,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
 
                 {!isHereg && (
                 <div>
-                  <label className={labelCls}>No. Sertifikat BNSP *</label>
+                  <label className={labelCls}>No. Sertifikat BNSP <span className="font-normal text-slate-400">(opsional)</span></label>
                   <input
                     type="text"
                     name="bnspCertificateNo"
@@ -723,7 +786,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   className="soft-pill whitespace-nowrap"
                 >
                   <Save className="w-4 h-4" />
-                  <span>{submitting ? 'Menyimpan...' : 'Simpan Draf'}</span>
+                  <span>{uploading ? 'Sedang Mengupload (Mohon Tunggu)' : submitting ? 'Menyimpan...' : 'Simpan Draf'}</span>
                 </button>
                 <button
                   type="button"
@@ -745,7 +808,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 {formData.submissionType === 'Baru' && (
                   <>
                     <div>
-                      <label className={labelCls}>Tujuan Menjadi Anggota *</label>
+                      <label className={labelCls}>Tujuan Menjadi Anggota <span className="font-normal text-slate-400">(opsional)</span></label>
                       <input
                         type="text"
                         name="tujuanMenjadiAnggota"
@@ -886,21 +949,6 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                       selected={asList(formData.sistemPengadaanNaskah)}
                       onToggle={(v) => toggleListValue('sistemPengadaanNaskah', v)}
                     />
-                    {asList(formData.sistemPengadaanNaskah).includes('Royalti') && (
-                      <label className="flex items-center gap-2 text-sm text-slate-600">
-                        Royalti =
-                        <input
-                          type="text"
-                          {...DECIMAL}
-                          name="persentaseRoyalti"
-                          value={String(formData.persentaseRoyalti || '').replace('%', '')}
-                          onChange={handleChange}
-                          placeholder="10"
-                          className="soft-input !w-20 py-2"
-                        />
-                        %
-                      </label>
-                    )}
                   </div>
                 </div>
               </div>
@@ -922,7 +970,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   className="soft-pill whitespace-nowrap"
                 >
                   <Save className="w-4 h-4" />
-                  <span>{submitting ? 'Menyimpan...' : 'Simpan Draf'}</span>
+                  <span>{uploading ? 'Sedang Mengupload (Mohon Tunggu)' : submitting ? 'Menyimpan...' : 'Simpan Draf'}</span>
                 </button>
                 <button
                   type="button"
@@ -1028,16 +1076,37 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                 </div>
 
                 <div>
-                  <label className={labelCls}>Nomor ISBN yang Sudah Digunakan</label>
-                  <input
-                    type="text"
-                    maxLength={17}
-                    name="contohIsbn"
-                    value={formData.contohIsbn}
-                    onChange={handleChange}
-                    placeholder="Salah satu buku saja, mis. 978-623-..."
-                    className={inputCls}
-                  />
+                  <label className={labelCls}>Nomor ISBN yang Sudah Digunakan * <span className="font-normal text-slate-400">(minimal {MIN_ISBN})</span></label>
+                  <div className="space-y-2">
+                    {(formData.isbnList || []).map((v, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          maxLength={17}
+                          inputMode="numeric"
+                          value={v}
+                          onChange={(e) => setIsbn(i, e.target.value)}
+                          placeholder={`${i + 1}. mis. 978-623-...`}
+                          aria-label={`Nomor ISBN ${i + 1}`}
+                          className={inputCls}
+                        />
+                        {i >= MIN_ISBN && (
+                          <button type="button" aria-label={`Hapus ISBN ${i + 1}`}
+                            onClick={() => setFormData((prev) => ({ ...prev, isbnList: prev.isbnList.filter((_, j) => j !== i) }))}
+                            className="p-2 rounded-full text-slate-400 hover:text-red-600 hover:bg-red-50">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {(formData.isbnList || []).length < 10 && (
+                      <button type="button"
+                        onClick={() => setFormData((prev) => ({ ...prev, isbnList: [...(prev.isbnList || []), ''] }))}
+                        className="text-xs font-medium text-[#0884c4] hover:underline">
+                        + Tambah ISBN
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div>
@@ -1092,7 +1161,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   className="soft-pill whitespace-nowrap"
                 >
                   <Save className="w-4 h-4" />
-                  <span>{submitting ? 'Menyimpan...' : 'Simpan Draf'}</span>
+                  <span>{uploading ? 'Sedang Mengupload (Mohon Tunggu)' : submitting ? 'Menyimpan...' : 'Simpan Draf'}</span>
                 </button>
                 <button
                   type="button"
@@ -1115,7 +1184,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                   const chosenFile = selectedFiles[docItem.type];
                   const savedName = uploadedDocs[docItem.type];
                   const hasFile = Boolean(chosenFile || savedName);
-                  const flagged = showMissingDocs && !hasFile;
+                  const flagged = showMissingDocs && !hasFile && !docItem.optional;
                   return (
                     <div
                       key={docItem.type}
@@ -1124,7 +1193,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                       }`}
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-bold text-slate-900">{docItem.title} *</div>
+                        <div className="text-sm font-bold text-slate-900">{docItem.title} {docItem.optional ? <span className="font-normal text-slate-400">(opsional)</span> : '*'}</div>
                         {hasFile ? (
                           <div className="text-xs text-emerald-700 font-bold flex items-center gap-1.5 mt-1 min-w-0">
                             <CheckCircle className="w-4 h-4 flex-shrink-0" />
@@ -1205,7 +1274,7 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
                     className="soft-pill-primary whitespace-nowrap w-full sm:w-auto"
                   >
                     <Send className="w-4 h-4" />
-                    <span>{submitting ? 'Memproses...' : 'Submit Pengajuan'}</span>
+                    <span>{uploading ? 'Sedang Mengupload (Mohon Tunggu)' : submitting ? 'Memproses...' : 'Submit Pengajuan'}</span>
                   </button>
                 </div>
               </div>
@@ -1213,10 +1282,11 @@ export default function RegistrationForm({ existingSubmission, onComplete, onCan
               <UploadReviewDialog
                 open={confirmOpen}
                 title="Kirim pengajuan ke Admin?"
-                description={`Periksa lagi ${requiredDocs.length} dokumen di bawah. Setelah dikirim, pengajuan masuk screening Admin dan dokumen tidak bisa diganti kecuali diminta revisi.`}
-                items={requiredDocs.map((d) => ({ key: d.type, title: d.title, file: selectedFiles[d.type], savedName: uploadedDocs[d.type] }))}
+                description={`Periksa lagi ${reviewDocs.length} dokumen di bawah. Setelah dikirim, pengajuan masuk screening Admin dan dokumen tidak bisa diganti kecuali diminta revisi.`}
+                items={reviewDocs.map((d) => ({ key: d.type, title: d.title, file: selectedFiles[d.type], savedName: uploadedDocs[d.type] }))}
                 confirmLabel="Kirim pengajuan"
                 busy={submitting}
+                busyLabel={uploading ? 'Sedang Mengupload (Mohon Tunggu)' : undefined}
                 onConfirm={() => handleSubmit(false, { confirmed: true })}
                 onClose={() => setConfirmOpen(false)}
               />

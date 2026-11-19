@@ -27,25 +27,25 @@ const daysSince = (raw) => {
 
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 
-// Tahap setelah surat ditandatangani: pemohon kirim berkas langsung ke IKAPI Pusat -> pemohon isi No. KTA -> aktif.
-// Tahap 'Berkas Diterima' hanya untuk data lama (alur sebelumnya lewat sekretariat).
+// Tahap setelah surat ditandatangani: pemohon kirim berkas ke IKAPI Jawa Barat -> Admin teruskan ke IKAPI Pusat
+// -> KTA terbit, Admin input No. KTA + foto KTA -> anggota aktif.
 // Kelas warna ditulis lengkap supaya terbaca Tailwind.
 const SECTIONS = [
   {
     key: 'fisik', label: 'Berkas fisik dari pemohon', short: 'Berkas dari pemohon', icon: Truck, statuses: ['Pengiriman Berkas'],
-    hint: 'Pemohon mencetak & mengirim berkas ke IKAPI Pusat',
+    hint: 'Pemohon mencetak & mengirim berkas ke IKAPI Jawa Barat',
     empty: 'Belum ada berkas fisik yang ditunggu dari pemohon.',
     tone: { icon: 'bg-amber-100 text-amber-700', active: 'border-amber-300 bg-amber-50/70 ring-2 ring-amber-200', bar: 'bg-amber-400', text: 'text-amber-700' },
   },
   {
-    key: 'pusat', label: 'Di sekretariat (data lama)', short: 'Data lama', icon: PackageCheck, statuses: ['Berkas Diterima'],
-    hint: 'Berkas sudah di sekretariat, tinggal dikirim',
-    empty: 'Tidak ada berkas yang menunggu dikirim ke IKAPI Pusat.',
+    key: 'pusat', label: 'Berkas dikirim pemohon · perlu diterima', short: 'Terima Berkas', icon: PackageCheck, statuses: ['Berkas Diterima'],
+    hint: 'Terima berkas di IKAPI Jabar & teruskan ke Pusat',
+    empty: 'Tidak ada berkas yang menunggu diterima Admin.',
     tone: { icon: 'bg-indigo-100 text-indigo-700', active: 'border-indigo-300 bg-indigo-50/70 ring-2 ring-indigo-200', bar: 'bg-indigo-400', text: 'text-indigo-700' },
   },
   {
-    key: 'kta', label: 'Input KTA · verifikasi Admin', short: 'Input KTA', icon: HelpCircle, statuses: ['Dikirim ke Pusat'],
-    hint: 'Pemohon isi No. KTA, Admin cek benar / tolak',
+    key: 'kta', label: 'Menunggu KTA Pusat · perlu input KTA', short: 'Input KTA', icon: Send, statuses: ['Dikirim ke Pusat'],
+    hint: 'KTA terbit, Admin input No. & foto KTA',
     empty: 'Tidak ada pengajuan di tahap Input KTA.',
     tone: { icon: 'bg-violet-100 text-violet-700', active: 'border-violet-300 bg-violet-50/70 ring-2 ring-violet-200', bar: 'bg-violet-400', text: 'text-violet-700' },
   },
@@ -60,7 +60,7 @@ const SECTIONS = [
 // Ringkasan tile per status (Berkas Diterima ditampilkan terpisah dari Dikirim ke Pusat)
 const TILES = [
   ...STEPS.slice(0, 6),
-  { key: 'Berkas Diterima', label: 'Berkas diterima', icon: PackageCheck },
+  { key: 'Berkas Diterima', label: 'Perlu diterima', icon: PackageCheck },
   STEPS[6],
   STEPS[7],
 ];
@@ -79,6 +79,12 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
   const [rejectFor, setRejectFor] = useState(null);
   const [rejectNote, setRejectNote] = useState('');
   const [reviewing, setReviewing] = useState(null);
+  // Admin: kirim berkas ke Pusat & input KTA (id pengajuan yang formnya sedang terbuka)
+  const [sendFor, setSendFor] = useState(null);
+  const [sendForm, setSendForm] = useState({ courier: '', trackingNo: '', notes: '' });
+  const [ktaFor, setKtaFor] = useState(null);
+  const [ktaForm, setKtaForm] = useState({ ktaNumber: '', issuedAt: '', notes: '', file: null });
+  const [busy, setBusy] = useState(null);
 
   // Spinner hanya saat pemuatan pertama; muat ulang sesudahnya senyap agar tabel tidak berkedip
   const loadedOnce = useRef(false);
@@ -132,6 +138,59 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
     }
   };
 
+  const handleSendCentral = async (id) => {
+    setBusy(id);
+    try {
+      await postAction(`/api/submissions/${id}/sent-to-central`, sendForm);
+      setSendFor(null);
+      setSendForm({ courier: '', trackingNo: '', notes: '' });
+      load();
+    } catch (err) {
+      notify(err.message || 'Gagal menyimpan pengiriman ke Pusat.', { tone: 'error' });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const KTA_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+  const handleKtaInput = async (id) => {
+    const kta = ktaForm.ktaNumber.trim().toUpperCase();
+    if (!kta) { notify('Isi Nomor KTA dari IKAPI Pusat.', { tone: 'error' }); return; }
+    if (!/^[A-Z0-9./ -]+$/.test(kta)) { notify('Nomor KTA hanya boleh huruf, angka, titik, garis miring, strip, dan spasi.', { tone: 'error' }); return; }
+    if (!ktaForm.issuedAt) { notify('Isi tanggal terbit KTA.', { tone: 'error' }); return; }
+    if (!ktaForm.file) { notify('Unggah foto KTA dari IKAPI Pusat.', { tone: 'error' }); return; }
+    setBusy(id);
+    try {
+      const fd = new FormData();
+      fd.append('ktaNumber', kta);
+      fd.append('issuedAt', ktaForm.issuedAt);
+      fd.append('notes', ktaForm.notes.trim());
+      fd.append('ktaFile', ktaForm.file);
+      const res = await fetch(`/api/submissions/${id}/kta-input`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token()}` }, body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error);
+      notify(data.message || 'KTA tersimpan. Keanggotaan aktif.');
+      setKtaFor(null);
+      setKtaForm({ ktaNumber: '', issuedAt: '', notes: '', file: null });
+      load();
+    } catch (err) {
+      notify(err.message || 'Gagal menyimpan KTA.', { tone: 'error' });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const pickKtaFile = (e) => {
+    const f = e.target.files?.[0] || null;
+    e.target.value = '';
+    if (!f) return;
+    if (!KTA_TYPES.includes(f.type)) { notify('Foto KTA harus PDF, JPG, atau PNG.', { tone: 'error' }); return; }
+    if (f.size > 15 * 1024 * 1024) { notify('Ukuran file maksimal 15 MB.', { tone: 'error' }); return; }
+    setKtaForm((v) => ({ ...v, file: f }));
+  };
+
   const stageCounts = useMemo(() => {
     const map = {};
     submissions.forEach((s) => {
@@ -142,10 +201,8 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
   }, [submissions]);
 
   const sectionCount = (sec) => submissions.filter((s) => sec.statuses.includes(s.status)).length;
-  // Tahap 'Berkas Diterima' (alur lama lewat sekretariat) hanya ditampilkan bila masih ada datanya
-  const hasLegacy = submissions.some((s) => s.status === 'Berkas Diterima');
-  const sections = hasLegacy ? SECTIONS : SECTIONS.filter((sec) => sec.key !== 'pusat');
-  const tiles = hasLegacy ? TILES : TILES.filter((t) => t.key !== 'Berkas Diterima');
+  const sections = SECTIONS;
+  const tiles = TILES;
   const activeSection = sections.find((s) => s.key === section) || sections[0];
   const q = search.trim().toLowerCase();
   const list = submissions
@@ -157,17 +214,18 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
   const overdueKta = waitingKta.filter((s) => (daysSince(s.sent_to_central_at) ?? 0) > 30).length;
   const totalActive = stageCounts.Aktif || 0;
   const ktaToReview = waitingKta.filter((s) => s.kta_review_status === 'Menunggu').length;
-  const needAction = ktaToReview;
+  const toSend = submissions.filter((s) => s.status === 'Berkas Diterima').length;
+  const needAction = toSend + waitingKta.length;
 
   const rowInfo = (s) => {
     if (s.status === 'Pengiriman Berkas') {
-      return { badge: 'Pemohon belum kirim ke Pusat', tone: 'bg-amber-50 text-amber-800 border-amber-200',
+      return { badge: 'Pemohon belum kirim berkas', tone: 'bg-amber-50 text-amber-800 border-amber-200',
         meta: [{ icon: CalendarDays, text: `Disetujui Ketua ${formatDate(s.approved_at)}` }] };
     }
     if (s.status === 'Berkas Diterima') {
-      return { badge: 'Di sekretariat · siap dikirim', tone: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      return { badge: 'Perlu diterima Admin', tone: 'bg-indigo-50 text-indigo-700 border-indigo-200',
         meta: [
-          { icon: CalendarDays, text: `Diterima ${formatDate(s.physical_received_at)}` },
+          { icon: Truck, text: `Dikirim pemohon ${formatDate(s.physical_sent_at || s.physical_received_at)}` },
           s.physical_received_by && { icon: User, text: `oleh ${s.physical_received_by}` },
         ] };
     }
@@ -182,7 +240,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
         return { badge: 'Ditolak · menunggu perbaikan', tone: 'bg-red-50 text-red-700 border-red-200',
           meta: [...meta, s.kta_reviewed_at && { icon: XCircle, text: `Ditolak ${formatDate(s.kta_reviewed_at)}` }] };
       }
-      return { badge: `Menunggu pemohon isi KTA${days !== null ? ` · ${days} hari` : ''}`, overdue: days > 30,
+      return { badge: `Menunggu KTA dari Pusat${days !== null ? ` · ${days} hari` : ''}`, overdue: days > 30,
         tone: days > 30 ? 'bg-red-50 text-red-700 border-red-200' : 'bg-violet-50 text-violet-700 border-violet-200',
         meta };
     }
@@ -208,9 +266,9 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
   const modalRole = user?.role === 'Admin' && ['Pengiriman Berkas', 'Dikirim ke Pusat'].includes(detail?.submission?.status) ? 'Admin' : 'Pengamat';
 
   const kpis = [
-    { label: 'Perlu tindakan Admin', value: needAction, note: `${ktaToReview} verifikasi KTA`, icon: AlertTriangle },
-    { label: 'Tahap Input KTA', value: waitingKta.length, note: overdueKta ? `${overdueKta} lewat 30 hari` : 'Semua dalam batas wajar', icon: HelpCircle },
-    { label: 'Anggota aktif', value: totalActive, note: 'KTA diverifikasi Admin', icon: BadgeCheck },
+    { label: 'Perlu tindakan Admin', value: needAction, note: `${toSend} kirim ke Pusat · ${waitingKta.length} input KTA`, icon: AlertTriangle },
+    { label: 'Di IKAPI Pusat', value: waitingKta.length, note: overdueKta ? `${overdueKta} lewat 30 hari` : 'Semua dalam batas wajar', icon: Send },
+    { label: 'Anggota aktif', value: totalActive, note: 'No. & foto KTA diinput Admin', icon: BadgeCheck },
   ];
 
   return (
@@ -259,7 +317,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
           <h3 className="text-base font-medium text-slate-800">Alur pendaftaran</h3>
         </div>
         <div className="-mx-5 sm:mx-0 px-5 sm:px-0 overflow-x-auto pb-1">
-          <div className={`min-w-[760px] grid ${hasLegacy ? 'grid-cols-9' : 'grid-cols-8'}`}>
+          <div className="min-w-[760px] grid grid-cols-9">
             {tiles.map((step, i) => {
               const n = stageCounts[step.key] || 0;
               const Icon = step.icon;
@@ -290,9 +348,9 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
               );
             })}
           </div>
-          <div className={`min-w-[760px] grid ${hasLegacy ? 'grid-cols-9' : 'grid-cols-8'} mt-2 text-[10px] uppercase tracking-wider font-semibold`}>
+          <div className="min-w-[760px] grid grid-cols-9 mt-2 text-[10px] uppercase tracking-wider font-semibold">
             <span className="col-span-5 text-slate-400 text-center border-t border-dashed border-slate-200 pt-1.5">Verifikasi & tanda tangan</span>
-            <span className={`${hasLegacy ? 'col-span-4' : 'col-span-3'} text-[#0884c4] text-center border-t border-dashed border-sky-300 pt-1.5`}>Berkas fisik & IKAPI Pusat</span>
+            <span className={`col-span-4 text-[#0884c4] text-center border-t border-dashed border-sky-300 pt-1.5`}>Berkas fisik, IKAPI Jabar & Pusat</span>
           </div>
         </div>
       </div>
@@ -304,7 +362,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
             <div>
               <h3 className="text-lg font-medium text-slate-800">Berkas Fisik & Pengiriman ke IKAPI Pusat</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                {notShipped} belum klik Lanjutkan · {ktaToReview} data KTA perlu diverifikasi
+                {notShipped} belum dikirim pemohon · {toSend} perlu diterima Admin · {waitingKta.length} menunggu KTA
               </p>
             </div>
             <div className="relative w-full sm:w-64">
@@ -315,7 +373,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
           </div>
 
           {/* Tahap fisik sebagai kartu pilihan */}
-          <div className={`grid grid-cols-2 ${hasLegacy ? 'lg:grid-cols-4' : 'sm:grid-cols-3'} gap-3`}>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {sections.map((sec, i) => {
               const Icon = sec.icon;
               const active = section === sec.key;
@@ -389,7 +447,7 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
                       {s.kta_proof_file && (
                         <a href={fileUrl(s.kta_proof_file)} target="_blank" rel="noreferrer"
                           className="flex items-center gap-1 text-[#0884c4] hover:underline">
-                          <Eye className="w-3.5 h-3.5" />Bukti KTA dari pemohon
+                          <Eye className="w-3.5 h-3.5" />Foto KTA
                         </a>
                       )}
                     </div>
@@ -435,6 +493,78 @@ export default function PhysicalMonitoring({ onOpenScreening }) {
                           )
                         )}
                       </div>
+                    )}
+
+                    {/* Admin: terima berkas di IKAPI Jabar lalu teruskan ke IKAPI Pusat */}
+                    {user?.role === 'Admin' && s.status === 'Berkas Diterima' && (
+                      sendFor === s.id ? (
+                        <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 text-xs space-y-2">
+                          <p className="font-semibold text-indigo-800">Terima berkas & teruskan ke IKAPI Pusat</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input value={sendForm.courier} maxLength={100} onChange={(e) => setSendForm((v) => ({ ...v, courier: e.target.value }))}
+                              placeholder="Kurir ke Pusat (opsional)" className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-[#0da2e7]" />
+                            <input value={sendForm.trackingNo} maxLength={100} onChange={(e) => setSendForm((v) => ({ ...v, trackingNo: e.target.value }))}
+                              placeholder="No. resi ke Pusat (opsional)" className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-[#0da2e7]" />
+                          </div>
+                          <textarea value={sendForm.notes} rows={2} maxLength={1000} onChange={(e) => setSendForm((v) => ({ ...v, notes: e.target.value }))}
+                            placeholder="Catatan (opsional)" className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-[#0da2e7]" />
+                          <div className="flex gap-2 justify-end">
+                            <button type="button" onClick={() => setSendFor(null)}
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 font-semibold">Batal</button>
+                            <button type="button" disabled={busy === s.id} onClick={() => handleSendCentral(s.id)}
+                              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex items-center gap-1 disabled:opacity-50">
+                              <Send className="w-3.5 h-3.5" /> {busy === s.id ? 'Menyimpan...' : 'Ya, berkas sudah diterima'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => { setSendFor(s.id); setSendForm({ courier: '', trackingNo: '', notes: '' }); }}
+                          className="w-full sm:w-auto sm:self-end px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white">
+                          <PackageCheck className="w-4 h-4" /> Terima Berkas
+                        </button>
+                      )
+                    )}
+
+                    {/* Admin: input No. KTA + foto KTA setelah terbit dari IKAPI Pusat -> anggota aktif */}
+                    {user?.role === 'Admin' && s.status === 'Dikirim ke Pusat' && s.kta_review_status !== 'Menunggu' && (
+                      ktaFor === s.id ? (
+                        <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 text-xs space-y-2">
+                          <p className="font-semibold text-violet-800">Input KTA dari IKAPI Pusat</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <label className="space-y-1">
+                              <span className="text-slate-600">Nomor KTA</span>
+                              <input value={ktaForm.ktaNumber} maxLength={100} onChange={(e) => setKtaForm((v) => ({ ...v, ktaNumber: e.target.value.toUpperCase() }))}
+                                placeholder="mis. 123/JBA/2026" className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-[#0da2e7] font-mono" />
+                            </label>
+                            <label className="space-y-1">
+                              <span className="text-slate-600">Tanggal terbit</span>
+                              <input type="date" value={ktaForm.issuedAt} max={new Date().toISOString().slice(0, 10)}
+                                onChange={(e) => setKtaForm((v) => ({ ...v, issuedAt: e.target.value }))} className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-[#0da2e7]" />
+                            </label>
+                          </div>
+                          <label className="block space-y-1">
+                            <span className="text-slate-600">Foto KTA (PDF/JPG/PNG, maks. 15 MB)</span>
+                            <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={pickKtaFile}
+                              className="block w-full text-xs text-slate-600 file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-violet-100 file:text-violet-700 file:font-semibold" />
+                            {ktaForm.file && <span className="block text-slate-700 truncate">{ktaForm.file.name}</span>}
+                          </label>
+                          <textarea value={ktaForm.notes} rows={2} maxLength={1000} onChange={(e) => setKtaForm((v) => ({ ...v, notes: e.target.value }))}
+                            placeholder="Catatan (opsional)" className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-[#0da2e7]" />
+                          <div className="flex gap-2 justify-end">
+                            <button type="button" onClick={() => setKtaFor(null)}
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 font-semibold">Batal</button>
+                            <button type="button" disabled={busy === s.id} onClick={() => handleKtaInput(s.id)}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-1 disabled:opacity-50">
+                              <CheckCircle className="w-3.5 h-3.5" /> {busy === s.id ? 'Menyimpan...' : 'Simpan & aktifkan'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => { setKtaFor(s.id); setKtaForm({ ktaNumber: '', issuedAt: '', notes: '', file: null }); }}
+                          className="w-full sm:w-auto sm:self-end px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white">
+                          <BadgeCheck className="w-4 h-4" /> Input Nomor KTA
+                        </button>
+                      )
                     )}
 
                     <button onClick={() => openDetail(s.id)}

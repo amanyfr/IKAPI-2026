@@ -10,6 +10,7 @@ import { FILTERS, NUMERIC, PHONE } from '../utils/inputFilters';
 import { feesFromSettings } from '../utils/fees';
 import RenewConfirm from './RenewConfirm';
 import HeregVerificationCard from './HeregVerificationCard';
+import { fileUrl } from '../utils/fileUrl';
 
 /**
  * Jalur anggota lama "masih aktif": KTA masih berlaku tapi dulu didata manual.
@@ -198,6 +199,12 @@ function MigrationForm({ onDone, onCancel, apply = false, onEditProfile }) {
             </span>
             <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           </label>
+          {!file && user?.hereg_mig_proof && (
+            <a href={fileUrl(user.hereg_mig_proof)} target="_blank" rel="noreferrer"
+              className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-[#0884c4] hover:underline">
+              <FileText className="w-3.5 h-3.5" /> Lihat file KTA yang sudah diunggah
+            </a>
+          )}
         </div>
       </div>
 

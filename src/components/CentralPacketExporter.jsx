@@ -9,12 +9,11 @@ import { KopSurat, KopSuratFooter, formatLongDate } from './PengurusSignature';
 import { fileUrl, authUrl } from '../utils/fileUrl';
 import { downloadElementPdf, downloadElementsPdf, printElement, safeFileName } from '../utils/exportDocument';
 import { notify } from './AppDialog';
-import { centralAddressLines } from '../utils/centralAddress';
 
 export const officeAddress = (settings) =>
   settings?.office_address || 'Jl. Ibu Inggit Garnasih No. 148, Ciateul, Kec. Regol, Kota Bandung, Jawa Barat 40252';
 
-// Daftar berkas fisik yang dicetak sendiri oleh pemohon dan dikirim langsung ke IKAPI Pusat
+// Daftar berkas fisik yang dicetak sendiri oleh pemohon dan dikirim ke sekretariat IKAPI Jawa Barat
 export function physicalChecklist(submission, documents = []) {
   const isBaru = submission?.submission_type !== 'Heregistrasi';
   return [
@@ -60,7 +59,7 @@ function PhysicalChecklistSheet({ submission, documents, settings }) {
         <div className="text-xs sm:text-sm font-sans space-y-1 mb-5">
           <p><span className="inline-block w-36">Nama Penerbit</span>: <strong>{submission.publisher_name || '-'}</strong></p>
           <p><span className="inline-block w-36">Nomor Surat Pengantar</span>: <span className="font-mono">{submission.reference_number || '-'}</span></p>
-          <p><span className="inline-block w-36">Dikirim kepada</span>: {centralAddressLines(settings).join(', ')}</p>
+          <p><span className="inline-block w-36">Dikirim kepada</span>: Sekretariat IKAPI Jawa Barat, {officeAddress(settings)}</p>
         </div>
 
         <table className="w-full text-xs sm:text-sm font-sans border border-slate-300">
@@ -89,7 +88,7 @@ function PhysicalChecklistSheet({ submission, documents, settings }) {
           </div>
           <div>
             <p>{formatLongDate()}</p>
-            <p>Diterima oleh IKAPI Pusat,</p>
+            <p>Diterima oleh IKAPI Jawa Barat,</p>
             <p className="mt-12">( ____________________ )</p>
           </div>
         </div>
@@ -153,7 +152,7 @@ export default function CentralPacketExporter({ submission, documents = [], sett
           <div className="flex-1 min-w-[14rem]">
             <h3 className="text-base sm:text-lg font-bold">Dokumen Resmi & Berkas Fisik</h3>
             <p className="text-xs text-[#dff2fd] mt-0.5">
-              Cetak sendiri dokumen di bawah, lalu kirim bersama fotokopi berkas persyaratan langsung ke IKAPI Pusat.
+              Cetak sendiri dokumen di bawah, lalu kirim bersama fotokopi berkas persyaratan ke sekretariat IKAPI Jawa Barat. Admin meneruskannya ke IKAPI Pusat.
               Hasil unduhan PDF & cetak sama dengan tampilan di layar.
             </p>
           </div>

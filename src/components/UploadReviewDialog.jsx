@@ -20,7 +20,7 @@ export const isImageUpload = (file) => /^image\//.test(file?.type || '');
  *   savedName = file yang sudah tersimpan sebelumnya (tidak berubah)
  */
 export default function UploadReviewDialog({
-  open, title, description, items = [], note, confirmLabel = 'Kirim ke Admin', busy = false, onConfirm, onClose,
+  open, title, description, items = [], note, confirmLabel = 'Kirim ke Admin', busy = false, busyLabel, onConfirm, onClose,
 }) {
   // URL sementara untuk pratinjau file lokal (satu per file); dibersihkan saat pop-up ditutup
   const urlCache = useRef(new Map());
@@ -108,7 +108,7 @@ export default function UploadReviewDialog({
           <button type="button" onClick={onConfirm} disabled={busy}
             className="flex-1 py-2.5 rounded-2xl bg-[#0da2e7] hover:bg-[#0884c4] text-white text-sm font-semibold flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-70">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            {busy ? 'Mengirim…' : newCount > 0 ? `${confirmLabel} (${newCount})` : confirmLabel}
+            {busy ? (busyLabel || 'Mengirim…') : newCount > 0 ? `${confirmLabel} (${newCount})` : confirmLabel}
           </button>
         </div>
       </div>

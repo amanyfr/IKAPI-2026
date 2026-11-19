@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useStageEta } from '../utils/stageEta';
-import { Clock, XCircle, RefreshCw, Edit3, IdCard, CheckCircle2 } from 'lucide-react';
+import { Clock, XCircle, RefreshCw, Edit3, IdCard, CheckCircle2, FileText } from 'lucide-react';
+import { fileUrl } from '../utils/fileUrl';
 
 /**
  * Anggota lama belum boleh mengisi formulir & dokumen sebelum Admin
@@ -87,6 +88,20 @@ export default function HeregVerificationCard({ onEditProfile, onEdit }) {
               {user?.member_category === 'Luar Biasa' ? 'Anggota Luar Biasa' : 'Anggota Biasa'}
             </span>
           </div>
+
+          {user?.hereg_mig_proof && (
+            <a href={fileUrl(user.hereg_mig_proof)} target="_blank" rel="noreferrer"
+              className="rounded-2xl border border-slate-200 hover:border-[#0da2e7] hover:bg-sky-50/40 p-4 flex items-center gap-3 transition">
+              <span className="w-10 h-10 rounded-xl bg-sky-50 text-[#0884c4] ring-1 ring-sky-100 flex items-center justify-center flex-shrink-0">
+                <FileText className="w-5 h-5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-xs text-slate-500">Foto / scan KTA yang diunggah</span>
+                <span className="block text-sm font-semibold text-slate-900 truncate">{user.hereg_mig_proof_name || 'Lihat file KTA'}</span>
+              </span>
+              <span className="ml-auto text-xs font-semibold text-[#0884c4] whitespace-nowrap">Lihat file</span>
+            </a>
+          )}
 
           {rejected && (
             <div className="rounded-2xl bg-red-50 border border-red-200 p-4">

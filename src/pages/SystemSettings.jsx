@@ -20,6 +20,8 @@ const FIELD_FILTERS = {
   fee_heregistrasi_iuran: FILTERS.digits,
   surat_counter: FILTERS.digits,
   renew_notice_days: FILTERS.digits,
+  renew_notice_days_2: FILTERS.digits,
+  renew_notice_days_3: FILTERS.digits,
   admin_whatsapp: FILTERS.phone,
   office_phone: FILTERS.phone,
 };
@@ -42,6 +44,9 @@ export default function SystemSettings() {
     fee_administrasi: '250000',
     fee_heregistrasi_iuran: '1200000',
     renew_notice_days: '7',
+    renew_notice_days_2: '',
+    renew_notice_days_3: '',
+    ikapi_cabang_list: '',
     ketua_nama: 'Dr. Abdul Raup, M.Pd.',
     ketua_jabatan: 'Ketua Pengurus Daerah IKAPI Jawa Barat',
     sekretaris_nama: 'Taofiq Rahman Ahmad, S.H.',
@@ -334,20 +339,51 @@ export default function SystemSettings() {
 
           <div className="pt-3 border-t border-slate-100">
             <label className="text-xs font-semibold text-slate-700 block mb-1">
-              Pemberitahuan perpanjangan (hari sebelum masa aktif berakhir)
+              Pengingat perpanjangan (hari sebelum masa aktif berakhir)
             </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                {...NUMERIC}
-                name="renew_notice_days"
-                value={settings.renew_notice_days}
-                onChange={handleChange}
-                className="w-24 text-xs px-2.5 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
-              />
-              <span className="text-xs text-slate-500">hari</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                ['renew_notice_days', 'Pengingat 1 *'],
+                ['renew_notice_days_2', 'Pengingat 2'],
+                ['renew_notice_days_3', 'Pengingat 3'],
+              ].map(([key, label]) => (
+                <div key={key}>
+                  <span className="text-[11px] text-slate-600 block mb-1">{label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">H-</span>
+                    <input
+                      type="text"
+                      {...NUMERIC}
+                      name={key}
+                      value={settings[key] ?? ''}
+                      onChange={handleChange}
+                      placeholder={key === 'renew_notice_days' ? '30' : 'Kosongkan = tidak dipakai'}
+                      aria-label={`${label.replace(' *', '')} (hari)`}
+                      className="w-full text-xs px-2.5 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
+                    />
+                    <span className="text-xs text-slate-500">hari</span>
+                  </div>
+                </div>
+              ))}
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">Anggota menerima pemberitahuan H-{Number(settings.renew_notice_days) || 7}. Tombol Perpanjang di kartu Masa Aktif Keanggotaan baru bisa diklik setelah pemberitahuan ini. Rentang 1 sampai 365.</p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Anggota menerima notifikasi pada H-{[settings.renew_notice_days, settings.renew_notice_days_2, settings.renew_notice_days_3].map(Number).filter((n) => n > 0).join(', H-') || 7}.
+              Pengingat 2 & 3 opsional dan harus lebih dekat ke tanggal berakhir dari pengingat sebelumnya (mis. 30, 14, 3).
+              Tombol Perpanjang di kartu Masa Aktif Keanggotaan bisa diklik mulai pengingat 1. Rentang 1 sampai 365.
+            </p>
+          </div>
+
+          <div className="pt-3 border-t border-slate-100">
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Daftar IKAPI Cabang</label>
+            <textarea
+              name="ikapi_cabang_list"
+              rows={5}
+              value={settings.ikapi_cabang_list ?? ''}
+              onChange={handleChange}
+              placeholder={'Satu nama cabang per baris, mis.\nIKAPI Cabang Bandung\nIKAPI Cabang Bogor'}
+              className="w-full text-xs px-2.5 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0da2e7] outline-none"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">Pemohon wajib memilih salah satu cabang ini di formulir pendaftaran. Kosongkan bila pilihan cabang belum dipakai.</p>
           </div>
         </div>
 

@@ -37,7 +37,7 @@ const initials = (name = '') =>
 const avatarTone = (name = '') =>
   AVATAR_TONES[[...name].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % AVATAR_TONES.length];
 
-// 'Menunggu KTA' = berkas sudah dikirim ke IKAPI Pusat, No. KTA belum diisi pemohon / belum divalidasi Admin
+// 'Menunggu KTA' = berkas sudah dikirim ke IKAPI Pusat, No. KTA + foto KTA belum diinput Admin
 const STATUS_TABS = ['Semua', 'Menunggu KTA', 'Aktif', 'Calon', 'Nonaktif'];
 const isWaitingKta = (m) => m.submission_status === 'Dikirim ke Pusat';
 const matchesStatus = (m, st) => st === 'Semua' || (st === 'Menunggu KTA' ? isWaitingKta(m) : m.membership_status === st);

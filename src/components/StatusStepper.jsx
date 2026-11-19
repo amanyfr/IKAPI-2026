@@ -11,12 +11,12 @@ import {
   BadgeCheck,
   PenLine,
   Truck,
-  HelpCircle,
+  Send,
   Clock
 } from 'lucide-react';
 
 // Alur: dokumen dulu (Tahap 1), baru pembayaran (Tahap 2), lalu TTD pengurus, berkas fisik,
-// pemohon mengirim berkas langsung ke IKAPI Pusat, lalu mengisi No. KTA dari Pusat
+// pemohon mengirim berkas ke IKAPI Jawa Barat, Admin meneruskan ke IKAPI Pusat lalu menginput No. KTA + foto KTA
 // Perkiraan lama proses tiap tahap diatur Admin di Pengaturan Sistem (lihat utils/stageEta)
 export const STEPS = [
   { key: 'Draf',                    label: 'Isi Formulir',       hint: 'Formulir & unggah dokumen', icon: FileEdit },
@@ -24,9 +24,9 @@ export const STEPS = [
   { key: 'Menunggu Pembayaran',     label: 'Pembayaran',         hint: 'Tahap 2 · transfer & verifikasi', icon: CreditCard },
   { key: 'Menunggu TTD Sekretaris', label: 'TTD Sekretaris',     hint: 'Ditandatangani Sekretaris', icon: PenLine },
   { key: 'Menunggu Approval',       label: 'TTD Ketua',          hint: 'Persetujuan Ketua', icon: Award },
-  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Kirim berkas ke IKAPI Pusat', icon: Truck },
-  { key: 'Dikirim ke Pusat',        label: 'Input KTA',          hint: 'Isi No. KTA · dicek Admin', icon: HelpCircle },
-  { key: 'Aktif',                   label: 'Anggota Aktif',      hint: 'KTA diverifikasi Admin', icon: BadgeCheck },
+  { key: 'Pengiriman Berkas',       label: 'Berkas Fisik',       hint: 'Kirim berkas ke IKAPI Jawa Barat', icon: Truck },
+  { key: 'Dikirim ke Pusat',        label: 'Proses KTA',         hint: 'Dikirim ke Pusat · KTA diinput Admin', icon: Send },
+  { key: 'Aktif',                   label: 'Anggota Aktif',      hint: 'KTA terbit · tampil di dashboard', icon: BadgeCheck },
 ];
 
 export const STEP_INDEX = {
@@ -38,7 +38,7 @@ export const STEP_INDEX = {
   'Menunggu Approval': 4,
   'Ditolak': 4,
   'Pengiriman Berkas': 5,
-  'Berkas Diterima': 6, // berkas sampai di sekretariat, disiapkan ke Pusat
+  'Berkas Diterima': 6, // pemohon sudah kirim ke IKAPI Jabar, menunggu Admin teruskan ke Pusat
   'Dikirim ke Pusat': 6,
   'Aktif': 7,
 };
@@ -62,9 +62,9 @@ export const STATUS_LABEL = {
   'Menunggu Pembayaran': 'Pembayaran',
   'Menunggu TTD Sekretaris': 'Menunggu TTD Sekretaris',
   'Menunggu Approval': 'Menunggu TTD Ketua',
-  'Pengiriman Berkas': 'Pengiriman Berkas Fisik',
-  'Berkas Diterima': 'Berkas Diterima · Siap ke Pusat',
-  'Dikirim ke Pusat': 'Input & Verifikasi KTA',
+  'Pengiriman Berkas': 'Menunggu Berkas Fisik',
+  'Berkas Diterima': 'Berkas Fisik Dikirim',
+  'Dikirim ke Pusat': 'Menunggu KTA Pusat',
   'Aktif': 'Anggota Aktif',
   'Ditolak': 'Ditolak',
 };
@@ -72,8 +72,8 @@ export const STATUS_LABEL = {
 // Petunjuk tahap saat ini (sub-teks stepper)
 const CURRENT_HINT = {
   'Pengiriman Berkas': 'Kirim berkas, lalu klik Lanjutkan',
-  'Berkas Diterima': 'Berkas diterima, disiapkan ke Pusat',
-  'Dikirim ke Pusat': 'Isi No. KTA, diverifikasi Admin',
+  'Berkas Diterima': 'Menunggu berkas diterima Admin',
+  'Dikirim ke Pusat': 'Menunggu KTA dari Pusat',
 };
 
 // Pemberitahuan tahap yang sedang berjalan (ditampilkan ke pemohon): [kalimat, tahap sumber estimasi]
@@ -84,7 +84,8 @@ export const STAGE_NOTICE = {
   'Menunggu TTD Sekretaris': ['Pengajuan sedang ditandatangani Sekretaris', 'Menunggu TTD Sekretaris'],
   'Menunggu Approval': ['Pengajuan sedang menunggu persetujuan Ketua', 'Menunggu Approval'],
   'Pengiriman Berkas': ['Pengiriman berkas fisik melalui ekspedisi', 'Pengiriman Berkas'],
-  'Dikirim ke Pusat': ['Setelah No. KTA diisi, Admin memeriksanya', 'Dikirim ke Pusat'],
+  'Berkas Diterima': ['Admin IKAPI Jawa Barat menerima berkas & meneruskan ke IKAPI Pusat, lalu KTA diterbitkan Pusat', 'Dikirim ke Pusat'],
+  'Dikirim ke Pusat': ['KTA sedang diterbitkan IKAPI Pusat, lalu diinput Admin', 'Dikirim ke Pusat'],
 };
 
 export default function StatusStepper({ currentStatus, rejectionReason, rejectedAtStatus, paymentRejected = false, hasDocRejection = false, cardClassName = 'card-surface', showEstimateNotice = false }) {
@@ -110,8 +111,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
     if (idx === currentIndex) {
       if (isRejected) return 'rejected';
       if (isNeedRevision) return 'revision';
-      // Tahap Input KTA: kuning, menandakan pemohon perlu mengisi / menunggu verifikasi KTA
-      return currentStatus === 'Dikirim ke Pusat' ? 'waiting' : 'current';
+      return 'current';
     }
     return isRejected ? 'stopped' : 'todo';
   };
@@ -184,7 +184,6 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
             isRejected ? 'bg-red-50 text-red-700 border-red-200' :
             isNeedRevision ? 'bg-amber-50 text-amber-800 border-amber-200' :
             isActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-            currentStatus === 'Dikirim ke Pusat' ? 'bg-amber-50 text-amber-800 border-amber-200 bg-[linear-gradient(110deg,#fffbeb_40%,#fde68a_50%,#fffbeb_60%)] bg-[length:250%_100%] motion-safe:animate-stepper-shine' :
             'bg-[#eaf6fe] text-[#0884c4] border-[#b8e6fc] bg-[linear-gradient(110deg,#eaf6fe_40%,#c9ecfd_50%,#eaf6fe_60%)] bg-[length:250%_100%] motion-safe:animate-stepper-shine'
           }`}>
             {statusText}
@@ -212,7 +211,7 @@ export default function StatusStepper({ currentStatus, rejectionReason, rejected
 
       {showEstimateNotice && !isRejected && !isActive && notice && (
         <div className={`mx-5 sm:mx-7 mt-4 flex items-start gap-2 px-3.5 py-2.5 rounded-xl text-xs font-medium border ${
-          isNeedRevision || currentStatus === 'Dikirim ke Pusat' ? 'bg-amber-50/60 border-amber-200 text-amber-800' : 'bg-[#f2f9fe] border-[#cdeafc] text-[#0b6a9c]'
+          isNeedRevision ? 'bg-amber-50/60 border-amber-200 text-amber-800' : 'bg-[#f2f9fe] border-[#cdeafc] text-[#0b6a9c]'
         }`}>
           <Clock className="w-4 h-4 flex-shrink-0 mt-px" />
           <span><strong className="font-semibold">Perkiraan waktu:</strong> {notice[0]}: {eta[ETA_BY_STEP[notice[1]]]}. Anda akan mendapat notifikasi saat tahap ini selesai.</span>

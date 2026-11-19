@@ -111,6 +111,7 @@ export default function OfficialApplicationFormPdf({ submission, settings, signi
             <FormRow label="No. Anggota IKAPI (KTA Lama)" value={submission.old_kta_number || formData.oldKtaNumber || '-'} />
           )}
           <FormRow label="Nama Penerbit" value={submission.publisher_name || formData.publisherName} bold />
+          <FormRow label="IKAPI Cabang" value={formData.ikapiCabang || '-'} />
           <FormRow label="Bentuk Badan Usaha / Institusi" value={submission.legal_entity || formData.legalEntity || 'PT / CV'} />
           <FormRow label="NIB / NPWP" value={`NIB: ${submission.nib || formData.nib || '-'} | NPWP: ${submission.npwp || formData.npwp || '-'}`} />
           <FormRow label="Nama Pimpinan" value={`${submission.leader_name || formData.leaderName || '-'} (${submission.leader_title || formData.leaderTitle || 'Pimpinan'})`} />

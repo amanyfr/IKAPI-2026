@@ -21,8 +21,8 @@ const STAGE_PROGRESS = {
   'Menunggu TTD Sekretaris': { step: 4, total: 8, label: 'Tahap 4/8 · Menunggu TTD Sekretaris', color: 'bg-indigo-500' },
   'Menunggu Approval':       { step: 5, total: 8, label: 'Tahap 5/8 · Menunggu Approval & TTD Ketua', color: 'bg-indigo-600' },
   'Pengiriman Berkas':       { step: 6, total: 8, label: 'Tahap 6/8 · Pemohon Mengirim Berkas Fisik', color: 'bg-orange-500' },
-  'Berkas Diterima':         { step: 7, total: 8, label: 'Tahap 7/8 · Berkas Diterima, Siap ke Pusat', color: 'bg-violet-500' },
-  'Dikirim ke Pusat':        { step: 7, total: 8, label: 'Tahap 7/8 · Dikirim ke Pusat, Menunggu KTA', color: 'bg-violet-600' },
+  'Berkas Diterima':         { step: 7, total: 8, label: 'Tahap 7/8 · Berkas Fisik Dikirim, Menunggu Diterima Admin', color: 'bg-violet-500' },
+  'Dikirim ke Pusat':        { step: 7, total: 8, label: 'Tahap 7/8 · Diteruskan ke Pusat, Menunggu KTA', color: 'bg-violet-600' },
   'Aktif':                   { step: 8, total: 8, label: 'Tahap 8/8 · KTA Terbit, Anggota Aktif', color: 'bg-emerald-600' },
   'Ditolak':                 { step: 0, total: 8, label: 'Pengajuan Ditolak oleh Pengurus', color: 'bg-red-500' },
 };
@@ -406,7 +406,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                       <h4 className="text-sm font-medium text-slate-900">
                         {sub.publisher_name}
                       </h4>
-                      <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${STATUS_BADGE[sub.status] || ''}`}>
+                      <span className={`text-[10px] whitespace-nowrap px-2.5 py-0.5 rounded-full font-bold border ${STATUS_BADGE[sub.status] || ''}`}>
                         {STATUS_LABEL[sub.status] || sub.status}
                       </span>
                       {sub.status === 'Pengiriman Berkas' && (
@@ -492,8 +492,8 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
               { label: 'Pembayaran', status: 'Menunggu Pembayaran', color: 'text-amber-800 bg-amber-50 border-amber-200' },
               { label: 'TTD Sekretaris', status: 'Menunggu TTD Sekretaris', color: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
               { label: 'TTD Ketua', status: 'Menunggu Approval', color: 'text-indigo-800 bg-indigo-50 border-indigo-200' },
-              { label: 'Berkas Fisik', status: 'Pengiriman Berkas', color: 'text-orange-800 bg-orange-50 border-orange-200' },
-              { label: 'Berkas Diterima', status: 'Berkas Diterima', color: 'text-violet-700 bg-violet-50 border-violet-200' },
+              { label: 'Menunggu Berkas', status: 'Pengiriman Berkas', color: 'text-orange-800 bg-orange-50 border-orange-200' },
+              { label: 'Berkas Dikirim', status: 'Berkas Diterima', color: 'text-violet-700 bg-violet-50 border-violet-200' },
               { label: 'Menunggu KTA Pusat', status: 'Dikirim ke Pusat', color: 'text-violet-800 bg-violet-50 border-violet-200' },
               { label: 'Anggota Aktif', status: 'Aktif', color: 'text-emerald-800 bg-emerald-50 border-emerald-200' },
               { label: 'Ditolak', status: 'Ditolak', color: 'text-red-800 bg-red-50 border-red-200' },
@@ -535,7 +535,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                         {sub.submission_type} · Kategori {sub.member_category || 'Biasa'}
                       </div>
                     </div>
-                    <span className={`flex-shrink-0 inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${STATUS_BADGE[sub.status] || 'bg-slate-100 text-slate-700'}`}>
+                    <span className={`flex-shrink-0 inline-block whitespace-nowrap px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${STATUS_BADGE[sub.status] || 'bg-slate-100 text-slate-700'}`}>
                       {STATUS_LABEL[sub.status] || sub.status}
                     </span>
                   </div>
@@ -630,7 +630,7 @@ export default function Admin2Approval({ initialStatus = 'Semua', initialSearch 
                         </td>
 
                         <td className="py-3.5 px-4">
-                          <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${STATUS_BADGE[sub.status] || 'bg-slate-100 text-slate-700'}`}>
+                          <span className={`inline-block whitespace-nowrap px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${STATUS_BADGE[sub.status] || 'bg-slate-100 text-slate-700'}`}>
                             {STATUS_LABEL[sub.status] || sub.status}
                           </span>
                           {sub.rejection_reason && (

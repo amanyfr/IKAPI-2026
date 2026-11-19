@@ -1,7 +1,7 @@
 // Pilihan isian sesuai Formulir Heregistrasi / Menjadi Anggota IKAPI 2026
 
 export const PEMASARAN_DISTRIBUTOR = 'Lewat distributor';
-export const PEMASARAN_SENDIRI = ['Toko Buku', 'Direct Selling', 'Proyek', 'Internet (mail order)'];
+export const PEMASARAN_SENDIRI = ['Toko Buku', 'Direct Selling', 'Proyek', 'E-commerce'];
 export const PENJUALAN_OPTIONS = ['Kredit', 'Tunai', 'Konsinyasi'];
 export const NASKAH_OPTIONS = ['Beli Naskah', 'Ditulis sendiri', 'Royalti'];
 export const KEPEMILIKAN_KANTOR_OPTIONS = ['Sewa', 'Milik Sendiri'];
@@ -20,6 +20,13 @@ export const asList = (value) =>
   Array.isArray(value) ? value : value ? String(value).split(',').map((s) => s.trim()).filter(Boolean) : [];
 
 export const listText = (value) => asList(value).join(', ');
+
+// Daftar IKAPI Cabang diatur Admin (Pengaturan Sistem), satu nama per baris
+export const cabangList = (value) => String(value || '').split('\n').map((v) => v.trim()).filter(Boolean);
+
+// Nomor ISBN yang sudah digunakan: minimal 3, disimpan sebagai teks dipisah koma
+export const MIN_ISBN = 3;
+export const isbnItems = (value) => asList(value);
 
 // Rincian karyawan per bagian (fallback ke kolom lama per bagian)
 export function karyawanRows(formData = {}) {
@@ -56,9 +63,7 @@ export function pemasaranText(formData = {}) {
 export function naskahText(formData = {}) {
   const list = asList(formData.sistemPengadaanNaskah);
   if (!list.length) return '-';
-  return list
-    .map((v) => (v === 'Royalti' && formData.persentaseRoyalti ? `Royalti = ${String(formData.persentaseRoyalti).replace('%', '')}%` : v))
-    .join(', ');
+  return list.join(', ');
 }
 
 const pairText = (a, b) => [a, b].map((v) => (v || '').trim()).filter(Boolean).map((v, i) => `${i + 1}. ${v}`).join('  ') || '-';
@@ -71,6 +76,7 @@ export function heregistrasiRows(submission = {}, formData = {}) {
     .filter((v) => v && v !== '-').join(', ');
   return [
     ['Nama Penerbit', submission.publisher_name || formData.publisherName],
+    ['IKAPI Cabang', formData.ikapiCabang],
     ['Nama Pimpinan', submission.leader_name || formData.leaderName],
     ['Alamat', alamat],
     ['Telepon', submission.publisher_phone || formData.phone],

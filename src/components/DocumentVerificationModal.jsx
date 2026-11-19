@@ -7,6 +7,7 @@ import {
 import SubmissionTimeline, { formatTime } from './SubmissionTimeline';
 import { STATUS_LABEL, POST_APPROVAL_STATUSES } from './StatusStepper';
 import { notify } from './AppDialog';
+import PhysicalAdminActions from './PhysicalAdminActions';
 import { fileUrl } from '../utils/fileUrl';
 import DocumentMarker, { canMarkFile, parseMarks } from './DocumentMarker';
 import { loadViewed, addViewed, docViewKey, paymentViewKey } from '../utils/viewedDocs';
@@ -85,10 +86,11 @@ export default function DocumentVerificationModal({
   onAdmin1Action,
   onSignSecretary,
   onRejectSecretary,
+  onPhysicalDone,
 }) {
   const status = submission?.status;
   const initialTab = status === 'Menunggu Pembayaran' ? 'payment'
-    : ['Pengiriman Berkas', 'Dikirim ke Pusat'].includes(status) ? 'physical' : 'documents';
+    : ['Pengiriman Berkas', 'Berkas Diterima', 'Dikirim ke Pusat'].includes(status) ? 'physical' : 'documents';
   const [activeTab, setActiveTab] = useState(initialTab);
   const [activeDocId, setActiveDocId] = useState(documents[0]?.id || null);
   // Dokumen yang sudah dibuka (pratinjau); disimpan per pengguna & pengajuan agar tidak perlu dibuka ulang
@@ -268,6 +270,12 @@ export default function DocumentVerificationModal({
 
         {/* Log waktu persetujuan */}
         <div className="px-3 sm:px-6 py-2 border-b border-slate-200 bg-white flex flex-wrap items-center gap-1.5 text-[11px]">
+          {submission.kta_proof_file && (
+            <a href={fileUrl(submission.kta_proof_file)} target="_blank" rel="noreferrer"
+              className="order-last ml-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-sky-50 text-[#0884c4] border border-sky-200 font-semibold hover:bg-sky-100">
+              <FileText className="w-3 h-3" /> Foto KTA{submission.kta_proof_name ? ` · ${submission.kta_proof_name}` : ''}
+            </a>
+          )}
           <span className="font-semibold text-slate-500 mr-1">Log persetujuan:</span>
           {approvalLog.filter((a) => a.at).length === 0 && <span className="text-slate-400">belum ada persetujuan</span>}
           {approvalLog.filter((a) => a.at).map((a) => (
@@ -576,15 +584,15 @@ export default function DocumentVerificationModal({
           )}
 
           {/* ── BERKAS FISIK & KTA ── */}
-          {/* Alur: pemohon mengirim sendiri berkas fisik ke IKAPI Pusat, lalu mengisi No. KTA dari Pusat; Admin memverifikasi No. KTA. */}
+          {/* Alur: pemohon kirim berkas fisik ke IKAPI Jawa Barat, Admin teruskan ke IKAPI Pusat, lalu Admin input No. KTA + foto KTA. */}
           {activeTab === 'physical' && (
             <div className="p-5 sm:p-6 space-y-4 text-sm">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
                   ['Disetujui Ketua', submission.approved_at, true],
-                  ['Berkas dikirim pemohon ke Pusat', submission.physical_sent_at, Boolean(submission.physical_sent_at)],
-                  ['No. KTA diisi pemohon', submission.kta_confirmed_at, Boolean(submission.kta_number_submitted || submission.member_kta)],
-                  ['Diverifikasi Admin · aktif', submission.activated_at, status === 'Aktif'],
+                  ['Berkas dikirim pemohon ke IKAPI Jabar', submission.physical_sent_at, Boolean(submission.physical_sent_at)],
+                  ['Admin terima berkas & teruskan ke Pusat', submission.sent_to_central_at, Boolean(submission.sent_to_central_at)],
+                  ['KTA diinput Admin · aktif', submission.activated_at, status === 'Aktif'],
                 ].map(([label, at, done]) => (
                   <div key={label} className={`rounded-xl border p-3 ${done ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
                     <p className={`text-xs font-semibold flex items-center gap-1.5 ${done ? 'text-emerald-800' : 'text-slate-500'}`}>
@@ -595,15 +603,37 @@ export default function DocumentVerificationModal({
                 ))}
               </div>
               <div className="rounded-xl border border-slate-200 p-4 space-y-1 text-xs">
-                <p><span className="text-slate-500">No. KTA:</span> <span className="font-mono">{submission.member_kta || submission.kta_number_submitted || 'Belum diisi pemohon'}</span></p>
+                <p><span className="text-slate-500">No. KTA:</span> <span className="font-mono">{submission.member_kta || submission.kta_number_submitted || 'Belum diinput Admin'}</span></p>
+                {submission.kta_proof_file && (
+                  <p><span className="text-slate-500">Foto KTA:</span>{' '}
+                    <a href={fileUrl(submission.kta_proof_file)} target="_blank" rel="noreferrer" className="text-[#0884c4] hover:underline">Lihat</a>
+                  </p>
+                )}
+                {submission.central_courier && <p><span className="text-slate-500">Dikirim ke Pusat lewat:</span> {submission.central_courier}</p>}
+                {submission.central_tracking_no && <p><span className="text-slate-500">No. resi ke Pusat:</span> <span className="font-mono">{submission.central_tracking_no}</span></p>}
                 {submission.physical_courier && <p><span className="text-slate-500">Dikirim lewat:</span> {submission.physical_courier}</p>}
                 {submission.physical_tracking_no && <p><span className="text-slate-500">No. resi:</span> <span className="font-mono">{submission.physical_tracking_no}</span></p>}
                 {submission.physical_notes && <p><span className="text-slate-500">Catatan pemohon:</span> {submission.physical_notes}</p>}
               </div>
               {isAdmin && status === 'Pengiriman Berkas' && (
                 <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 flex-shrink-0" /> Menunggu pemohon mengirim berkas fisik ke IKAPI Pusat. Admin tidak perlu mengonfirmasi penerimaan.
+                  <Clock className="w-3.5 h-3.5 flex-shrink-0" /> Pemohon belum menandai berkas terkirim. Klik Terima Berkas jika berkas fisik sudah sampai di IKAPI Jawa Barat.
                 </p>
+              )}
+              {isAdmin && status === 'Berkas Diterima' && (
+                <p className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-800 flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 flex-shrink-0" /> Pemohon sudah mengirim berkas fisik. Setelah berkas sampai, klik Terima Berkas.
+                </p>
+              )}
+              {isAdmin && status === 'Dikirim ke Pusat' && submission.kta_review_status !== 'Menunggu' && (
+                <p className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-violet-800 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 flex-shrink-0" /> Berkas di IKAPI Pusat. Setelah KTA terbit, input Nomor KTA dan bukti foto KTA.
+                </p>
+              )}
+              {isAdmin && (
+                <div className="flex flex-col">
+                  <PhysicalAdminActions key={`${submission.id}-${status}`} submission={submission} onDone={() => onPhysicalDone?.(submission.id)} />
+                </div>
               )}
             </div>
           )}
